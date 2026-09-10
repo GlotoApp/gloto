@@ -68,7 +68,9 @@ export default function InventarioMovimientos() {
       const matchesSearch =
         !normalizedSearch ||
         name.toLowerCase().includes(normalizedSearch) ||
-        String(movement.reason || "").toLowerCase().includes(normalizedSearch);
+        String(movement.reason || "")
+          .toLowerCase()
+          .includes(normalizedSearch);
       const matchesType =
         movementType === "all" ||
         (movementType === "entry" && delta > 0) ||
@@ -93,7 +95,7 @@ export default function InventarioMovimientos() {
   return (
     <div className="min-h-screen bg-background p-4 font-sans text-white">
       <div className="mx-auto max-w-7xl space-y-6 pb-20">
-        <header className="flex items-center justify-between gap-3">
+        <header className="mb-10 flex items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-black tracking-tighter">
               Historial de Inventario
@@ -112,7 +114,7 @@ export default function InventarioMovimientos() {
           </button>
         </header>
         <div className="overflow-hidden rounded-2xl border border-white/5 bg-neutral-900/40">
-          <div className="grid gap-3 border-b border-white/5 p-4 md:grid-cols-[minmax(0,1fr)_180px_180px]">
+          <div className="grid gap-3 border-b border-white/5 bg-neutral-900/30 p-4 md:grid-cols-[minmax(0,1fr)_180px_180px]">
             <input
               type="search"
               value={search}
@@ -172,14 +174,14 @@ export default function InventarioMovimientos() {
               No hay movimientos que coincidan con los filtros.
             </p>
           ) : (
-            <div className="divide-y divide-white/5">
+            <div className="space-y-3 p-3 sm:p-4">
               {filteredMovements.map((movement) => {
                 const delta = Number(movement.quantity_delta || 0);
                 const isEntry = delta > 0;
                 return (
                   <div
                     key={movement.id}
-                    className="flex items-center gap-3 p-4"
+                    className="flex items-center gap-3 rounded-2xl border border-white/5 bg-neutral-900/40 p-4 transition-all hover:border-white/10 hover:bg-neutral-900/70"
                   >
                     <span
                       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${isEntry ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}
@@ -208,7 +210,8 @@ export default function InventarioMovimientos() {
                       className={`shrink-0 text-sm font-black ${isEntry ? "text-emerald-400" : "text-red-400"}`}
                     >
                       {isEntry ? "+" : ""}
-                      {formatNumber(delta)} {movement.inventory_items?.unit || ""}
+                      {formatNumber(delta)}{" "}
+                      {movement.inventory_items?.unit || ""}
                     </span>
                   </div>
                 );

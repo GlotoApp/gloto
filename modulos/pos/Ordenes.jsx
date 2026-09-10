@@ -843,6 +843,7 @@ const Ordenes = () => {
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
+  const [ordersError, setOrdersError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [canDelete, setCanDelete] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -863,6 +864,7 @@ const Ordenes = () => {
   const loadBusinessOrders = async () => {
     if (!user?.id) {
       setOrders([]);
+      setOrdersError("");
       setLoadingOrders(false);
       return;
     }
@@ -871,6 +873,7 @@ const Ordenes = () => {
 
     setRefreshing(true);
     setLoadingOrders(true);
+    setOrdersError("");
 
     try {
       const { data: profile, error: profileError } = await supabase
@@ -882,6 +885,10 @@ const Ordenes = () => {
       if (profileError || !profile?.business_id) {
         setOrders([]);
         setCanDelete(false);
+        setOrdersError(
+          profileError?.message ||
+            "No se pudo identificar el negocio para cargar las órdenes.",
+        );
         setLoadingOrders(false);
         return;
       }
@@ -906,6 +913,7 @@ const Ordenes = () => {
       if (error) {
         console.error("Error cargando órdenes por negocio:", error);
         setOrders([]);
+        setOrdersError(error.message || "No se pudieron cargar las órdenes.");
         return;
       }
 
@@ -916,6 +924,10 @@ const Ordenes = () => {
     } catch (error) {
       console.error("Error al cargar órdenes:", error);
       setOrders([]);
+      setOrdersError(
+        error?.message ||
+          "No se pudo conectar con Supabase. Revisa tu conexión a internet.",
+      );
     } finally {
       setLoadingOrders(false);
       setRefreshing(false);
@@ -1386,6 +1398,23 @@ const Ordenes = () => {
             <p className="text-neutral-500 text-lg font-bold">
               Cargando ordenes…
             </p>
+          </div>
+        ) : ordersError ? (
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-6 py-12 text-center">
+            <p className="text-sm font-black uppercase tracking-widest text-amber-300">
+              No se pudieron cargar las órdenes
+            </p>
+            <p className="mx-auto mt-2 max-w-xl text-xs text-neutral-400">
+              {ordersError}
+            </p>
+            <button
+              type="button"
+              onClick={loadBusinessOrders}
+              disabled={refreshing}
+              className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-amber-200 hover:bg-amber-500/20 disabled:cursor-wait disabled:opacity-50"
+            >
+              {refreshing ? "Reintentando..." : "Reintentar"}
+            </button>
           </div>
         ) : filteredOrdenes.length === 0 ? (
           <div className="text-center py-20">

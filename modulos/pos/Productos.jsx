@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
+  ArrowDownRight,
+  ArrowUpRight,
   Plus,
   Search,
   Edit3,
@@ -18,6 +20,7 @@ import {
   Tag,
   AlertTriangle,
   Archive,
+  ChevronDown,
   ChevronRight,
   LoaderCircle,
 } from "lucide-react";
@@ -175,6 +178,10 @@ const Productos = ({ section = "productos" }) => {
   const [optionGroups, setOptionGroups] = useState([]);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [expandedOptionGroups, setExpandedOptionGroups] = useState(new Set());
+  const [availableIngredients, setAvailableIngredients] = useState([]);
+  const [selectedIngredients, setSelectedIngredients] = useState([]);
+  const [expandedIngredientCategories, setExpandedIngredientCategories] =
+    useState(new Set());
 
   // Estado inicial del catálogo
   const [products, setProducts] = useState([]);
@@ -213,21 +220,39 @@ const Productos = ({ section = "productos" }) => {
       }
       setBusinessId(profile.business_id);
 
-      const [{ data: categoriesData }, { data: productsData, error }] =
-        await Promise.all([
-          supabase
-            .from("categories")
-            .select("id, business_id, name")
-            .eq("business_id", profile.business_id),
-          supabase
-            .from("products")
-            .select("*")
-            .eq("business_id", profile.business_id)
-            .order("order_index", { ascending: true }),
-        ]);
+      const [
+        { data: categoriesData },
+        { data: productsData, error },
+        { data: ingredientsData, error: ingredientsError },
+        { data: ingredientCategoriesData, error: ingredientCategoriesError },
+      ] = await Promise.all([
+        supabase
+          .from("categories")
+          .select("id, business_id, name")
+          .eq("business_id", profile.business_id),
+        supabase
+          .from("products")
+          .select("*")
+          .eq("business_id", profile.business_id)
+          .order("order_index", { ascending: true }),
+        supabase
+          .from("inventory_items")
+          .select("id, name, unit, stock, category_id")
+          .eq("business_id", profile.business_id)
+          .eq("is_active", true)
+          .order("name", { ascending: true }),
+        supabase
+          .from("inventory_categories")
+          .select("id, name")
+          .eq("business_id", profile.business_id)
+          .order("name", { ascending: true }),
+      ]);
 
-      if (error) {
-        console.error("Error cargando productos:", error);
+      if (error || ingredientsError || ingredientCategoriesError) {
+        console.error(
+          "Error cargando productos o insumos:",
+          error || ingredientsError || ingredientCategoriesError,
+        );
         setProducts([]);
       } else {
         const records = categoriesData || [];
@@ -241,6 +266,19 @@ const Productos = ({ section = "productos" }) => {
             mapProduct(product, categoryMap),
           ),
         );
+        const ingredientCategoryMap = Object.fromEntries(
+          (ingredientCategoriesData || []).map((category) => [
+            category.id,
+            category.name,
+          ]),
+        );
+        setAvailableIngredients(
+          (ingredientsData || []).map((ingredient) => ({
+            ...ingredient,
+            categoryName:
+              ingredientCategoryMap[ingredient.category_id] || "Sin categoría",
+          })),
+        );
       }
 
       setLoadingProducts(false);
@@ -248,6 +286,15 @@ const Productos = ({ section = "productos" }) => {
 
     loadProducts();
   }, [user]);
+
+  const groupedIngredients = useMemo(() => {
+    return availableIngredients.reduce((groups, ingredient) => {
+      const categoryName = ingredient.categoryName || "Sin categoría";
+      groups[categoryName] = groups[categoryName] || [];
+      groups[categoryName].push(ingredient);
+      return groups;
+    }, {});
+  }, [availableIngredients]);
 
   // ========== FUNCIONES PARA PRODUCTOS ==========
 
@@ -326,6 +373,7 @@ const Productos = ({ section = "productos" }) => {
       image: "",
     });
     setOptionGroups([]);
+    setSelectedIngredients([]);
     setOptionsLoading(false);
     setIsModalOpen(true);
   };
@@ -397,6 +445,7 @@ const Productos = ({ section = "productos" }) => {
     });
     setOptionGroups([]);
     setExpandedOptionGroups(new Set());
+    loadProductIngredients(product.id);
     loadProductOptions(product.id);
     setIsModalOpen(true);
   };
@@ -418,6 +467,73 @@ const Productos = ({ section = "productos" }) => {
 
   const createOptionId = () =>
     `option-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  const loadProductIngredients = async (productId) => {
+    const { data, error } = await supabase
+      .from("product_ingredients")
+      .select("inventory_item_id, quantity")
+      .eq("product_id", productId);
+
+    if (error) {
+      console.error("Error cargando insumos del producto:", error);
+      setSelectedIngredients([]);
+      return;
+    }
+
+    setSelectedIngredients(
+      (data || []).map((ingredient) => ({
+        inventoryItemId: ingredient.inventory_item_id,
+        quantity: Number(ingredient.quantity || 1),
+      })),
+    );
+  };
+
+  const toggleProductIngredient = (inventoryItemId) => {
+    setSelectedIngredients((current) => {
+      const exists = current.some(
+        (ingredient) => ingredient.inventoryItemId === inventoryItemId,
+      );
+      return exists
+        ? current.filter(
+            (ingredient) => ingredient.inventoryItemId !== inventoryItemId,
+          )
+        : [...current, { inventoryItemId, quantity: 1 }];
+    });
+  };
+
+  const updateProductIngredientQuantity = (inventoryItemId, quantity) => {
+    setSelectedIngredients((current) =>
+      current.map((ingredient) =>
+        ingredient.inventoryItemId === inventoryItemId
+          ? {
+              ...ingredient,
+              quantity: Math.max(0.001, Number(quantity) || 0.001),
+            }
+          : ingredient,
+      ),
+    );
+  };
+
+  const saveProductIngredients = async (productId) => {
+    const { error: deleteError } = await supabase
+      .from("product_ingredients")
+      .delete()
+      .eq("product_id", productId);
+    if (deleteError) throw deleteError;
+
+    if (selectedIngredients.length === 0) return;
+
+    const { error: insertError } = await supabase
+      .from("product_ingredients")
+      .insert(
+        selectedIngredients.map((ingredient) => ({
+          product_id: productId,
+          inventory_item_id: ingredient.inventoryItemId,
+          quantity: ingredient.quantity,
+        })),
+      );
+    if (insertError) throw insertError;
+  };
 
   const addOptionGroup = () => {
     const newGroup = {
@@ -629,10 +745,11 @@ const Productos = ({ section = "productos" }) => {
     } else {
       try {
         await saveProductOptions(data.id);
+        await saveProductIngredients(data.id);
       } catch (optionsError) {
-        console.error("Error guardando opciones del producto:", optionsError);
+        console.error("Error guardando relaciones del producto:", optionsError);
         alert(
-          "El producto se guardó, pero no se pudieron guardar sus opciones.",
+          "El producto se guardó, pero no se pudieron guardar sus opciones o insumos.",
         );
         setSavingProduct(false);
         return;
@@ -1329,9 +1446,9 @@ const Productos = ({ section = "productos" }) => {
             <div className="min-h-screen w-full bg-neutral-900 overflow-hidden flex flex-col">
               {/* Header Premium - Responsive */}
               <div className="relative overflow-hidden flex-shrink-0">
-                <div className="relative px-4 sm:px-8 md:px-12 py-4 sm:py-6 flex justify-between items-start gap-3 sm:gap-4 border-b border-white/10">
+                <div className="relative mx-auto flex w-full max-w-7xl items-start justify-between gap-3 border-b border-white/10 px-4 py-5 sm:px-8 sm:py-3 md:px-12">
                   <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0">
-                    <div className="p-1 sm:p-1  rounded-xl sm:rounded-2xl flex-shrink-0">
+                    <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-500/10">
                       {editingId ? (
                         <Edit3
                           size={20}
@@ -1345,7 +1462,7 @@ const Productos = ({ section = "productos" }) => {
                       )}
                     </div>
                     <div className="min-w-0">
-                      <h2 className="text-xl sm:text-3xl font-black uppercase tracking-tight text-white leading-tight">
+                      <h2 className="text-xl font-black uppercase leading-tight tracking-tight text-white sm:text-3xl">
                         {editingId ? "Editar" : "Crear"} Producto
                       </h2>
                     </div>
@@ -1360,9 +1477,17 @@ const Productos = ({ section = "productos" }) => {
               </div>
 
               {/* Contenido Principal - Responsive */}
-              <div className="flex flex-col md:flex-row gap-6 md:gap-10 p-4 sm:p-8 md:p-12 overflow-y-auto flex-1">
+              <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 overflow-y-auto p-4 sm:p-8 md:flex-row md:gap-10 md:p-12">
                 {/* Panel Izquierdo: Imagen y Estado */}
-                <div className="w-full md:w-2/6 flex flex-col gap-4 sm:gap-6 flex-shrink-0">
+                <div className="flex w-full flex-shrink-0 flex-col gap-4 rounded-3xl border border-white/10 bg-black/20 p-4 sm:gap-6 sm:p-6 md:w-[31%]">
+                  <div className="border-b border-white/10 pb-4">
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-500">
+                      Presentación
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-400">
+                      Imagen, disponibilidad y visibilidad del catálogo.
+                    </p>
+                  </div>
                   {/* Imagen - Premium */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
@@ -1553,10 +1678,65 @@ const Productos = ({ section = "productos" }) => {
                       </div>
                     </div>
                   )}
+
+                  <div className="space-y-2 border-t border-white/10 pt-4">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-emerald-300">
+                      Stock del producto
+                    </label>
+                    <div className="flex items-center justify-center gap-4 rounded-xl bg-neutral-800/40 p-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            stock: Math.max(0, Number(formData.stock || 0) - 1),
+                          })
+                        }
+                        aria-label="Disminuir stock del producto"
+                        className="rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-red-400"
+                      >
+                        <ArrowDownRight size={18} />
+                      </button>
+                      <input
+                        type="number"
+                        min="0"
+                        value={formData.stock}
+                        onChange={(e) =>
+                          setFormData({ ...formData, stock: e.target.value })
+                        }
+                        className="w-28 rounded-lg border border-white/10 bg-neutral-700 px-3 py-2 text-center text-xl font-black outline-none focus:border-emerald-500/50"
+                        aria-label="Stock del producto"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            stock: Number(formData.stock || 0) + 1,
+                          })
+                        }
+                        aria-label="Aumentar stock del producto"
+                        className="rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-emerald-400"
+                      >
+                        <ArrowUpRight size={18} />
+                      </button>
+                    </div>
+                    <p className="text-[9px] text-neutral-500">
+                      Unidades disponibles para vender.
+                    </p>
+                  </div>
                 </div>
 
                 {/* Panel Derecho: Formulario */}
-                <div className="flex-1 flex flex-col gap-4 sm:gap-6 min-w-0">
+                <div className="flex min-w-0 flex-1 flex-col gap-5 sm:gap-7">
+                  <div className="border-b border-white/10 pb-4">
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-300">
+                      01 · Información principal
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-500">
+                      Nombre, categoría y precio que verá el cliente.
+                    </p>
+                  </div>
                   {/* Nombre - Premium */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
@@ -1639,54 +1819,180 @@ const Productos = ({ section = "productos" }) => {
 
                   <div className="space-y-2 min-w-0">
                     <div className="flex items-center gap-2">
-                      <label className="text-[9px] sm:text-[10px] font-black uppercase text-violet-400 tracking-widest">
-                        Stock
-                      </label>
-                    </div>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.stock}
-                      onChange={(e) =>
-                        setFormData({ ...formData, stock: e.target.value })
-                      }
-                      className="w-full bg-gradient-to-r from-neutral-700/30 to-neutral-800/30 border border-neutral-600/50 rounded-lg sm:rounded-2xl py-3 sm:py-4 px-4 sm:px-5 text-xs sm:text-sm font-bold focus:outline-none focus:border-violet-500/50 transition-all"
-                    />
-                  </div>
-
-                  {/* Descripción */}
-                  <div className="space-y-2 flex-1 flex flex-col min-w-0">
-                    <div className="flex items-center gap-2">
-                      <label className="text-[9px] sm:text-[10px] font-black uppercase text-violet-400 tracking-widest">
+                      <label className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-violet-400">
                         Descripción
                       </label>
                     </div>
-                    <div className="relative group flex-1 flex flex-col min-w-0">
-                      <textarea
-                        value={formData.description}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            description: formatSentenceInput(e.target.value),
-                          })
-                        }
-                        className="flex-1 min-h-24 sm:min-h-32 bg-gradient-to-r from-neutral-700/30 to-neutral-800/30 border border-neutral-600/50 group-focus-within:border-violet-500/50 rounded-lg sm:rounded-2xl py-3 sm:py-4 px-4 sm:px-5 text-xs sm:text-sm font-bold tracking-wide focus:outline-none transition-all placeholder:text-neutral-600 resize-vertical"
-                        placeholder="Descripcíon del producto..."
-                      />
+                    <textarea
+                      value={formData.description}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          description: formatSentenceInput(e.target.value),
+                        })
+                      }
+                      className="min-h-24 w-full resize-y rounded-lg border border-neutral-600/50 bg-gradient-to-r from-neutral-700/30 to-neutral-800/30 px-4 py-3 text-xs font-bold tracking-wide outline-none transition-all placeholder:text-neutral-600 focus:border-violet-500/50 sm:rounded-2xl sm:px-5 sm:py-4 sm:text-sm"
+                      placeholder="Descripción del producto..."
+                    />
+                  </div>
+
+                  <div className="order-3 space-y-5 border-t border-white/10 pt-5">
+                    <div className="border-b border-white/10 pb-4 pt-2">
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-300">
+                        03 · Inventario
+                      </p>
+                      <p className="mt-1 text-xs text-neutral-500">
+                        Stock del producto e insumos que consume.
+                      </p>
+                    </div>
+
+                    <div className="space-y-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.05] p-4 shadow-[0_12px_40px_rgba(16,185,129,0.05)] sm:p-5">
+                      <div>
+                        <label className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-emerald-400">
+                          Insumos descontados por unidad
+                        </label>
+                        <p className="mt-1 text-[10px] text-neutral-500">
+                          Selecciona los insumos que consume cada unidad
+                          vendida.
+                        </p>
+                      </div>
+
+                      {availableIngredients.length === 0 ? (
+                        <p className="rounded-xl border border-dashed border-white/10 px-4 py-4 text-center text-[10px] text-neutral-500">
+                          Primero crea insumos en Inventario.
+                        </p>
+                      ) : (
+                        <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                          {Object.entries(groupedIngredients).map(
+                            ([categoryName, ingredients]) => {
+                              const expanded =
+                                expandedIngredientCategories.has(categoryName);
+                              const selectedCount = ingredients.filter(
+                                (ingredient) =>
+                                  selectedIngredients.some(
+                                    (item) =>
+                                      item.inventoryItemId === ingredient.id,
+                                  ),
+                              ).length;
+                              return (
+                                <div
+                                  key={categoryName}
+                                  className="overflow-hidden rounded-xl border border-white/10 bg-neutral-950/50"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedIngredientCategories(
+                                        (current) => {
+                                          const next = new Set(current);
+                                          if (next.has(categoryName))
+                                            next.delete(categoryName);
+                                          else next.add(categoryName);
+                                          return next;
+                                        },
+                                      )
+                                    }
+                                    className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-white/[0.04]"
+                                    aria-expanded={expanded}
+                                  >
+                                    <span className="flex min-w-0 items-center gap-2">
+                                      <ChevronDown
+                                        size={15}
+                                        className={`shrink-0 text-emerald-300 transition-transform ${expanded ? "rotate-180" : ""}`}
+                                      />
+                                      <span className="truncate text-xs font-black uppercase tracking-wide text-white">
+                                        {categoryName}
+                                      </span>
+                                    </span>
+                                    <span className="shrink-0 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+                                      {selectedCount > 0
+                                        ? `${selectedCount} seleccionado${selectedCount === 1 ? "" : "s"}`
+                                        : `${ingredients.length} insumo${ingredients.length === 1 ? "" : "s"}`}
+                                    </span>
+                                  </button>
+                                  {expanded && (
+                                    <div className="space-y-2 border-t border-white/5 p-2">
+                                      {ingredients.map((ingredient) => {
+                                        const selected =
+                                          selectedIngredients.find(
+                                            (item) =>
+                                              item.inventoryItemId ===
+                                              ingredient.id,
+                                          );
+                                        return (
+                                          <div
+                                            key={ingredient.id}
+                                            className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 ${
+                                              selected
+                                                ? "border-emerald-500/30 bg-emerald-500/10"
+                                                : "border-white/10 bg-neutral-900/60"
+                                            }`}
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={Boolean(selected)}
+                                              onChange={() =>
+                                                toggleProductIngredient(
+                                                  ingredient.id,
+                                                )
+                                              }
+                                              className="h-4 w-4 shrink-0 accent-emerald-500"
+                                              aria-label={`Descontar insumo ${ingredient.name}`}
+                                            />
+                                            <div className="min-w-0 flex-1">
+                                              <p className="truncate text-xs font-bold text-white">
+                                                {ingredient.name}
+                                              </p>
+                                              <p className="text-[9px] uppercase tracking-wide text-neutral-500">
+                                                Stock actual: {ingredient.stock}{" "}
+                                                {ingredient.unit}
+                                              </p>
+                                            </div>
+                                            {selected && (
+                                              <label className="flex shrink-0 items-center gap-1.5 text-[9px] font-black uppercase text-neutral-500">
+                                                Cant.
+                                                <input
+                                                  type="number"
+                                                  min="0.001"
+                                                  step="0.001"
+                                                  value={selected.quantity}
+                                                  onChange={(event) =>
+                                                    updateProductIngredientQuantity(
+                                                      ingredient.id,
+                                                      event.target.value,
+                                                    )
+                                                  }
+                                                  className="w-20 rounded-lg border border-white/10 bg-neutral-900 px-2 py-1.5 text-center text-xs font-bold text-white outline-none focus:border-emerald-500/50"
+                                                  aria-label={`Consumo de ${ingredient.name} por unidad`}
+                                                />
+                                              </label>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            },
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   {/* Opciones y variaciones del producto */}
-                  <div className="space-y-4 rounded-2xl border border-violet-500/15 bg-violet-500/[0.03] p-4 sm:p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="order-2 space-y-5 border-t border-white/10 pt-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10  pb-4 pt-2">
                       <div>
                         <div className="flex items-center gap-2">
-                          <label className="text-[9px] font-black uppercase tracking-widest text-violet-400 sm:text-[10px]">
-                            Opciones y variaciones
+                          <label className="text-[9px] font-black uppercase tracking-widest text-neutral-300 sm:text-[10px]">
+                            02 · Variables del producto
                           </label>
                         </div>
                         <p className="mt-1 text-[10px] text-neutral-500">
-                          Personaliza las opciones
+                          Estás en la sección de variables. Crea opciones que el
+                          cliente podrá elegir, como tamaño, sabor o tipo.
                         </p>
                       </div>
                       <button
@@ -1695,7 +2001,7 @@ const Productos = ({ section = "productos" }) => {
                         className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-[9px] font-black uppercase tracking-wide text-violet-300 transition-all hover:bg-violet-500/20 active:scale-95"
                       >
                         <Plus size={13} />
-                        Agregar grupo
+                        Agregar variable
                       </button>
                     </div>
 
