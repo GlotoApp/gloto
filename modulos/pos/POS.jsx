@@ -768,6 +768,8 @@ const POS = () => {
     setEditingOrder(editMesa);
     setEditingSnapshot({
       cart: (editMesa.comanda || []).map((item) => ({
+        orderItemId: item.orderItemId || item.id,
+        orderBatchId: item.orderBatchId || null,
         productId: item.productId || item.id,
         qty: Number(item.qty || 1),
         price: Number(item.price || item.precio || 0),
@@ -825,9 +827,12 @@ const POS = () => {
       setCart(
         editMesa.comanda.map((item, index) => ({
           cartId: item.cartId || item.id || `${item.name || "item"}-${index}`,
+          orderItemId: item.orderItemId || item.id || null,
+          orderBatchId: item.orderBatchId || null,
           productId: item.productId || item.id || index,
           id: item.productId || item.id || index,
           qty: Number(item.qty || 1),
+          pendingQty: 0,
           name: item.name || item.item || "Producto",
           price: Number(item.price || item.precio || 0),
           note: item.note || item.notes || "",
@@ -1170,7 +1175,13 @@ const POS = () => {
 
         return prevCart.map((item) =>
           item.cartId === existingItem.cartId
-            ? { ...item, qty: item.qty + 1 }
+            ? {
+                ...item,
+                qty: item.qty + 1,
+                pendingQty: item.orderItemId
+                  ? (item.pendingQty || 0) + 1
+                  : item.pendingQty || 0,
+              }
             : item,
         );
       }
@@ -1198,6 +1209,7 @@ const POS = () => {
           productId: product.id,
           cartId,
           qty: 1,
+          pendingQty: 0,
           note: "",
           image_url:
             product.image_url || product.image || product.imageUrl || "",
@@ -1286,7 +1298,8 @@ const POS = () => {
       const existingItem = prevCart.find(
         (item) =>
           item.productId === newItem.productId &&
-          item.optionIdsKey === newItem.optionIdsKey &&
+          JSON.stringify(item.optionNames || item.options || []) ===
+            JSON.stringify(newItem.optionNames || []) &&
           item.note === newItem.note,
       );
 
@@ -1307,7 +1320,13 @@ const POS = () => {
 
         return prevCart.map((item) =>
           item.cartId === existingItem.cartId
-            ? { ...item, qty: item.qty + optionQuantity }
+            ? {
+                ...item,
+                qty: item.qty + optionQuantity,
+                pendingQty: item.orderItemId
+                  ? (item.pendingQty || 0) + optionQuantity
+                  : item.pendingQty || 0,
+              }
             : item,
         );
       }
@@ -1378,7 +1397,21 @@ const POS = () => {
         setTimeout(() => setHighlightItem(null), 500);
       }
       setCart(
-        cart.map((item) => (item.cartId === cartId ? { ...item, qty } : item)),
+        cart.map((item) => {
+          if (item.cartId !== cartId) return item;
+          if (isEditingTableOrder && item.orderItemId) {
+            const historicalQuantity = Math.max(
+              0,
+              Number(item.qty || 0) - Number(item.pendingQty || 0),
+            );
+            return {
+              ...item,
+              qty,
+              pendingQty: Math.max(0, qty - historicalQuantity),
+            };
+          }
+          return { ...item, qty };
+        }),
       );
     }
   };
@@ -1386,6 +1419,20 @@ const POS = () => {
   const incrementCartItem = (cartItem) => {
     const product = products.find((item) => item.id === cartItem.productId);
     if (!product) {
+      if (isEditingTableOrder && cartItem.orderItemId) {
+        setCart((prevCart) =>
+          prevCart.map((item) =>
+            item.cartId === cartItem.cartId
+              ? {
+                  ...item,
+                  qty: item.qty + 1,
+                  pendingQty: (item.pendingQty || 0) + 1,
+                }
+              : item,
+          ),
+        );
+        return;
+      }
       updateQty(cartItem.cartId, cartItem.qty + 1);
       return;
     }
@@ -1449,6 +1496,23 @@ const POS = () => {
       return;
     }
 
+    // En una edicion, un renglón histórico no debe absorber unidades nuevas:
+    // el incremento debe crear otro order_item con kitchen_dispatched=false.
+    if (isEditingTableOrder && cartItem.orderItemId) {
+      setCart((prevCart) =>
+        prevCart.map((item) =>
+          item.cartId === cartItem.cartId
+            ? {
+                ...item,
+                qty: item.qty + 1,
+                pendingQty: (item.pendingQty || 0) + 1,
+              }
+            : item,
+        ),
+      );
+      return;
+    }
+
     updateQty(cartItem.cartId, cartItem.qty + 1);
   };
 
@@ -1486,6 +1550,25 @@ const POS = () => {
         setShowOutOfStockWarning(true);
         return;
       }
+    }
+
+    if (isEditingTableOrder && currentItem?.orderItemId) {
+      const historicalQuantity = Math.max(
+        0,
+        Number(currentItem.qty || 0) - Number(currentItem.pendingQty || 0),
+      );
+      setCart((prevCart) =>
+        prevCart.map((item) =>
+          item.cartId === cartId
+            ? {
+                ...item,
+                qty,
+                pendingQty: Math.max(0, qty - historicalQuantity),
+              }
+            : item,
+        ),
+      );
+      return;
     }
 
     updateQty(cartId, Math.max(1, qty));
@@ -1910,18 +1993,55 @@ const POS = () => {
     }
     if (!businessId || cart.length === 0) return;
 
-    const items = cart.map((item) => ({
-      id: item.cartId,
-      productId: item.productId || item.id,
-      nombre: item.name || "Producto",
-      cantidad: Number(item.qty || 1),
-      precio: Number(item.price || 0),
-      notas: item.note || "",
-      varianteNombre: item.optionNames?.length
-        ? item.optionNames.join(" · ")
-        : null,
-      opciones: Array.isArray(item.optionNames) ? item.optionNames : [],
-    }));
+    const items = cart.flatMap((item) => {
+      const baseItem = {
+        id: item.cartId,
+        productId: item.productId || item.id,
+        nombre: item.name || "Producto",
+        precio: Number(item.price || 0),
+        notas: item.note || "",
+        varianteNombre: item.optionNames?.length
+          ? item.optionNames.join(" · ")
+          : null,
+        opciones: Array.isArray(item.selectedOptions)
+          ? item.selectedOptions.map((option) => ({
+              nombre: option.nombre || option.name || option.label || "Opción",
+              precio_extra: Number(option.precio_extra || 0),
+            }))
+          : Array.isArray(item.optionNames)
+            ? item.optionNames.map((nombre) => ({ nombre, precio_extra: 0 }))
+            : [],
+      };
+      const pendingQty = Number(item.pendingQty || 0);
+      const historicalQty = Math.max(0, Number(item.qty || 1) - pendingQty);
+
+      if (item.orderItemId && pendingQty > 0 && historicalQty > 0) {
+        return [
+          {
+            ...baseItem,
+            orderItemId: item.orderItemId,
+            orderBatchId: item.orderBatchId || null,
+            cantidad: historicalQty,
+          },
+          {
+            ...baseItem,
+            id: `${item.cartId}-pending`,
+            orderItemId: null,
+            orderBatchId: null,
+            cantidad: pendingQty,
+          },
+        ];
+      }
+
+      return [
+        {
+          ...baseItem,
+          orderItemId: item.orderItemId || null,
+          orderBatchId: item.orderBatchId || null,
+          cantidad: Number(item.qty || 1),
+        },
+      ];
+    });
 
     const orderNumber = generarNumeroPedido(customerNumber);
     const trackingToken = generarUuid();
@@ -2052,12 +2172,24 @@ const POS = () => {
 
     if (isEditingTableOrder && editingOrder?.orderId) {
       orderPayload.order_number = editingOrder.orderNumber || orderNumber;
-      orderPayload.status = editingOrder.orderStatus || orderStatus;
+      const wasDispatched = ["dispatched", "despachado"].includes(
+        String(editingOrder.orderStatus || "").toLowerCase(),
+      );
+      orderPayload.status =
+        deliveryMethod === "table" && wasDispatched
+          ? "pending"
+          : editingOrder.orderStatus || orderStatus;
       orderPayload.table_status = deliveryMethod === "table" ? "ocupada" : null;
       orderPayload.is_reservation = false;
     }
 
     const orderItemsPayload = items.map((item) => ({
+      order_item_id:
+        item.orderItemId && /^[0-9a-f-]{36}$/i.test(item.orderItemId)
+          ? item.orderItemId
+          : null,
+      kitchen_dispatched: false,
+      order_batch_id: item.orderBatchId || null,
       product_id: item.productId,
       quantity: item.cantidad,
       unit_price: item.precio,

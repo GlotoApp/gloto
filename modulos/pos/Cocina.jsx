@@ -59,7 +59,7 @@ const getOptionLabel = (option) => {
   );
 };
 
-const mapOrderToKitchen = (order) => ({
+const mapOrderToKitchen = (order, optionPricesByProduct = {}) => ({
   id: order.order_number || order.id,
   databaseId: order.id,
   cliente: order.customer_name || "Consumidor Final",
@@ -75,14 +75,32 @@ const mapOrderToKitchen = (order) => ({
   prioridad: "normal",
   notasGenerales: order.notes || "",
   items: (order.order_items || []).map((item) => ({
+    databaseId: item.id,
+    batchId: item.order_batch_id || "legacy",
+    batchSequence: Number(item.order_batches?.sequence_number || 0),
     qty: Number(item.quantity) || 0,
+    delivered: Boolean(item.kitchen_dispatched),
     name: item.product_name || item.name || "Producto",
     cat: item.category || "",
     nota: item.notes || "",
     opciones: Array.isArray(item.options)
       ? item.options.map(getOptionLabel)
       : [],
-    price: Number(item.unit_price) || 0,
+    price: (() => {
+      const basePrice = Number(item.unit_price || item.price || 0);
+      const options = Array.isArray(item.options) ? item.options : [];
+      const extraPrice = options.reduce((sum, option) => {
+        if (typeof option !== "string") return sum;
+        return (
+          sum +
+          Number(
+            optionPricesByProduct[item.product_id]?.[option.trim().toLowerCase()] ||
+              0,
+          )
+        );
+      }, 0);
+      return basePrice + extraPrice;
+    })(),
   })),
 });
 
@@ -238,13 +256,51 @@ export default function KitchenPanel() {
 
       const { data, error } = await supabase
         .from("orders")
-        .select("*, order_items(*)")
+        .select(
+          "*, order_items(*, order_batches(id, sequence_number, created_at))",
+        )
         .eq("business_id", profile.business_id)
         .eq("is_reservation", false)
         .in("status", ["pending", "confirmed", "preparing", "complete"])
         .order("created_at", { ascending: true });
 
       if (error) throw error;
+      const productIds = [
+        ...new Set(
+          (data || []).flatMap((order) =>
+            (order.order_items || []).map((item) => item.product_id).filter(Boolean),
+          ),
+        ),
+      ];
+      const optionPricesByProduct = {};
+      if (productIds.length > 0) {
+        const { data: optionItems, error: optionItemsError } = await supabase
+          .from("products_items")
+          .select("*")
+          .in("product_id", productIds);
+
+        if (optionItemsError) {
+          console.error("Error cargando precios de variables:", optionItemsError);
+        }
+
+        (optionItems || []).forEach((option) => {
+          const productId = option.product_id;
+          const name = String(
+            option.name || option.nombre || option.option_name || "",
+          )
+            .trim()
+            .toLowerCase();
+          if (!productId || !name) return;
+          optionPricesByProduct[productId] ||= {};
+          optionPricesByProduct[productId][name] = Number(
+            option.precio_extra ??
+              option.price_extra ??
+              option.extra_price ??
+              option.price ??
+              0,
+          );
+        });
+      }
       const nuevosPedidos = (data || []).filter((order) => {
         const status = String(order.status || "").toLowerCase();
         return (
@@ -264,7 +320,7 @@ export default function KitchenPanel() {
       initializedOrdersRef.current = true;
       setOrdenes(
         (data || [])
-          .map(mapOrderToKitchen)
+          .map((order) => mapOrderToKitchen(order, optionPricesByProduct))
           .filter(
             (order) =>
               order.estado && !despachandoIds.current.has(order.databaseId),
@@ -393,6 +449,9 @@ export default function KitchenPanel() {
     if (!order?.databaseId || despachandoIds.current.has(order.databaseId))
       return;
 
+    const pendingItems = order.items.filter((item) => !item.delivered);
+    if (pendingItems.length === 0) return;
+
     despachandoIds.current.add(order.databaseId);
     setOrdenes((prev) => prev.filter((item) => item.id !== id));
     setDireccionesAnimacion((prev) => ({
@@ -400,13 +459,61 @@ export default function KitchenPanel() {
       [id]: "derecha",
     }));
 
-    const { error } = await supabase
+    const { data: updatedItems, error: itemError } = await supabase
+      .from("order_items")
+      .update({ kitchen_dispatched: true })
+      .eq("order_id", order.databaseId)
+      .eq("kitchen_dispatched", false)
+      .select("id, kitchen_dispatched");
+
+    if (
+      itemError ||
+      !updatedItems ||
+      updatedItems.length !== pendingItems.length ||
+      updatedItems.some((item) => item.kitchen_dispatched !== true)
+    ) {
+      console.error(
+        "Error verificando despacho de items de cocina:",
+        itemError || updatedItems,
+      );
+      despachandoIds.current.delete(order.databaseId);
+      await cargarOrdenes();
+      return;
+    }
+
+    const batchIds = [
+      ...new Set(
+        pendingItems
+          .map((item) => item.batchId)
+          .filter((batchId) => batchId && batchId !== "legacy"),
+      ),
+    ];
+    let batchError = null;
+    if (batchIds.length > 0) {
+      const result = await supabase
+        .from("order_batches")
+        .update({ dispatched_at: new Date().toISOString() })
+        .in("id", batchIds);
+      batchError = result.error;
+    }
+
+    if (batchError) {
+      console.error("Error cerrando comandas de cocina:", batchError);
+      despachandoIds.current.delete(order.databaseId);
+      await cargarOrdenes();
+      return;
+    }
+
+    const { error: orderError } = await supabase
       .from("orders")
-      .update({ status: "dispatched", updated_at: new Date().toISOString() })
+      .update({
+        status: "dispatched",
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", order?.databaseId);
 
-    if (error) {
-      console.error("Error despachando orden de cocina:", error);
+    if (orderError) {
+      console.error("Error despachando orden de cocina:", orderError);
       despachandoIds.current.delete(order.databaseId);
       await cargarOrdenes();
     } else {
@@ -645,7 +752,9 @@ export default function KitchenPanel() {
                                 ? "listo"
                                 : null;
                           if (nextState) moverEstado(o.id, nextState);
-                          else despacharOrden(o.id);
+                          else {
+                            despacharOrden(o.id);
+                          }
                         }}
                         onPrev={() => {
                           const prevState =
@@ -879,37 +988,64 @@ const TicketCard = ({
 
         {/* Listado de Productos */}
         <div className="space-y-2.5 mb-5 border-t border-b border-white/5 py-3">
-          {orden.items.map((item, i) => {
-            return (
-              <div key={i} className="flex items-start gap-3">
+          {(() => {
+            const renderItem = (item, quantity, key, delivered = false) => (
+              <div
+                key={key}
+                className={`w-full text-left flex items-start gap-3 rounded-xl px-2.5 py-2 ${
+                  delivered
+                    ? "bg-white/[0.03] opacity-60"
+                    : "bg-sky-500/[0.08] border border-sky-400/20"
+                }`}
+              >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-3xl font-black font-mono text-white">
-                        {item.qty}
+                      <span
+                        className={`text-3xl font-black font-mono ${
+                          delivered
+                            ? "text-white/55 line-through"
+                            : "text-white"
+                        }`}
+                      >
+                        {quantity}
                       </span>
-                      <p className="text-sm font-bold uppercase truncate text-white">
+                      <p
+                        className={`text-sm font-bold uppercase truncate ${
+                          delivered
+                            ? "text-white/55 line-through decoration-white/80 decoration-2"
+                            : "text-white"
+                        }`}
+                      >
                         {item.name}
                       </p>
                     </div>
 
-                    {/* Precio del producto alineado a la derecha */}
                     {item.price !== undefined && (
-                      <span className="text-base font-black font-mono tracking-tight text-white px-1.5 py-0.5 flex-shrink-0">
+                      <span
+                        className={`text-base font-black font-mono tracking-tight px-1.5 py-0.5 flex-shrink-0 ${
+                          delivered
+                            ? "text-white/45 line-through"
+                            : "text-sky-200"
+                        }`}
+                      >
                         {new Intl.NumberFormat("es-CO", {
                           maximumFractionDigits: 0,
-                        }).format(item.price * item.qty)}
+                        }).format(item.price * quantity)}
                       </span>
                     )}
                   </div>
 
-                  {/* NOTA ESPECÍFICA DEL PRODUCTO */}
                   {item.opciones?.length > 0 && (
                     <div className="mt-1 pl-5 space-y-0.5">
                       {item.opciones.map((opcion, optionIndex) => (
                         <p
-                          key={`${i}-opcion-${optionIndex}`}
-                          className="text-[16px] font-mono text-sky-300/90"
+                          key={`${key}-opcion-${optionIndex}`}
+                          className={`text-[16px] font-mono ${
+                            delivered
+                              ? "text-sky-300/45 line-through"
+                              : "text-sky-300/90"
+                          }`}
                         >
                           • {opcion}
                         </p>
@@ -918,14 +1054,69 @@ const TicketCard = ({
                   )}
 
                   {item.nota && (
-                    <p className="text-[16px] font-mono mt-0.5 pl-5 text-yellow-300/90">
+                    <p
+                      className={`text-[16px] font-mono mt-0.5 pl-5 ${
+                        delivered
+                          ? "text-yellow-300/45 line-through"
+                          : "text-yellow-300/90"
+                      }`}
+                    >
                       *{item.nota}*
                     </p>
                   )}
                 </div>
               </div>
             );
-          })}
+
+            const batches = Object.values(
+              orden.items.reduce((groups, item) => {
+                const key = item.batchId || "legacy";
+                if (!groups[key]) {
+                  groups[key] = {
+                    sequence: item.batchSequence || Number.MAX_SAFE_INTEGER,
+                    items: [],
+                  };
+                }
+                groups[key].items.push(item);
+                return groups;
+              }, {}),
+            ).sort((a, b) => b.sequence - a.sequence);
+
+            return (
+              <>
+                {batches.map((batch, batchIndex) => {
+                  const deliveredItems = batch.items.filter(
+                    (item) => item.delivered,
+                  );
+                  const pendingItems = batch.items.filter(
+                    (item) => !item.delivered,
+                  );
+                  return (
+                    <div
+                      key={`batch-${batchIndex}`}
+                      className={`space-y-2 ${batchIndex > 0 ? "border-t border-sky-400/25 pt-3 mt-4" : ""}`}
+                    >
+                      {pendingItems.map((item, index) =>
+                        renderItem(
+                          item,
+                          item.qty,
+                          `pending-${batchIndex}-${index}`,
+                        ),
+                      )}
+                      {deliveredItems.map((item, index) =>
+                        renderItem(
+                          item,
+                          item.qty,
+                          `delivered-${batchIndex}-${index}`,
+                          true,
+                        ),
+                      )}
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()}
         </div>
 
         {/* Acciones de Flujo */}

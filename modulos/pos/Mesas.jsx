@@ -58,7 +58,15 @@ const ESTADO = {
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 const fmt = (n) => `$${Number(n).toLocaleString("es-CO")}`;
-const calc = (c) => c.reduce((s, i) => s + i.precio * i.qty, 0);
+const calc = (c) =>
+  c.reduce(
+    (s, i) =>
+      s +
+      (Number.isFinite(Number(i.subtotal)) && Number(i.subtotal) > 0
+        ? Number(i.subtotal)
+        : Number(i.precio || 0) * Number(i.qty || 0)),
+    0,
+  );
 
 // El estado de la mesa depende únicamente de table_status, no del estado de la orden.
 const mapTableStatusToTableState = (tableStatus) =>
@@ -463,6 +471,8 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
       horaReserva: mesa.reserva?.hora || "",
       comanda: (mesa.comanda || []).map((item) => ({
         id: item.id,
+        orderItemId: item.id,
+        orderBatchId: item.orderBatchId || null,
         cartId: item.id,
         productId: item.productId || item.id,
         qty: Number(item.qty || 1),
@@ -579,7 +589,11 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
                     </span>
                   </div>
                   <span className="text-sm font-black text-white w-20 text-right">
-                    {fmt(item.precio * item.qty)}
+                    {fmt(
+                      Number(item.subtotal) > 0
+                        ? item.subtotal
+                        : item.precio * item.qty,
+                    )}
                   </span>
                 </div>
               ))
@@ -1147,7 +1161,7 @@ export default function MesasPOS() {
           delivery_instructions,
           punto,
           metadata,
-          order_items(id, product_id, product_name, quantity, unit_price, subtotal, options, notes)`,
+          order_items(id, order_batch_id, product_id, product_name, quantity, unit_price, subtotal, options, notes)`,
         )
         .eq("business_id", profile.business_id)
         .eq("order_type", "table")
@@ -1205,6 +1219,7 @@ export default function MesasPOS() {
           total: parseFloat(orden.total) || 0,
           comanda: (orden.order_items || []).map((item) => ({
             id: item.id,
+            orderBatchId: item.order_batch_id || null,
             productId: item.product_id,
             item: item.product_name || "Producto",
             precio: parseFloat(item.unit_price) || 0,
