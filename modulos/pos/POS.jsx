@@ -176,6 +176,17 @@ const getOptionNames = (selectedOptions) =>
 const getOptionExtraPrice = (selectedOptions) =>
   selectedOptions.reduce((sum, opt) => sum + (opt.precio_extra || 0), 0);
 
+const getInitialCartPrice = (item) => {
+  const storedInitialPrice = Number(item?.initPrice || 0);
+  if (storedInitialPrice > 0) return storedInitialPrice;
+
+  const finalPrice = Number(item?.price || 0);
+  const extraPrice = getOptionExtraPrice(
+    Array.isArray(item?.selectedOptions) ? item.selectedOptions : [],
+  );
+  return Math.max(0, finalPrice - extraPrice);
+};
+
 const createCartItemFromSelection = (
   product,
   selectedOptions,
@@ -197,6 +208,7 @@ const createCartItemFromSelection = (
     optionIdsKey,
     optionNames,
     selectedOptions,
+    initPrice: Number(product.price || 0),
     price: Number(product.price || 0) + extraPrice,
     name: product.name,
     image_url: product.image_url || product.image || product.imageUrl || "",
@@ -474,6 +486,32 @@ const POS = () => {
     }
   };
 
+  const getProductCacheKey = (businessIdKey) =>
+    `pos-products-cache-${businessIdKey}`;
+
+  const readProductCache = (businessIdKey) => {
+    try {
+      const cached = localStorage.getItem(getProductCacheKey(businessIdKey));
+      if (!cached) return [];
+      const parsed = JSON.parse(cached);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      console.warn("No se pudo leer el caché de productos:", error);
+      return [];
+    }
+  };
+
+  const writeProductCache = (businessIdKey, nextProducts) => {
+    try {
+      localStorage.setItem(
+        getProductCacheKey(businessIdKey),
+        JSON.stringify(nextProducts),
+      );
+    } catch (error) {
+      console.warn("No se pudo guardar el caché de productos:", error);
+    }
+  };
+
   const fetchProductsForBusiness = async (businessId, categoryMap = {}) => {
     if (!businessId) {
       setProducts([]);
@@ -481,8 +519,15 @@ const POS = () => {
       return;
     }
 
-    setIsLoadingProducts(true);
-    setProducts([]);
+    const cachedProducts = readProductCache(businessId);
+    if (cachedProducts.length > 0) {
+      setProducts(cachedProducts);
+      setIsLoadingProducts(false);
+    } else {
+      setProducts([]);
+      setIsLoadingProducts(true);
+    }
+
     try {
       const { data, error } = await supabase
         .from("products")
@@ -496,7 +541,11 @@ const POS = () => {
 
       if (error) {
         console.error("Error cargando productos:", error);
-        setProducts([]);
+        if (cachedProducts.length > 0) {
+          setProducts(cachedProducts);
+        } else {
+          setProducts([]);
+        }
         return;
       }
 
@@ -543,31 +592,36 @@ const POS = () => {
         optionGroupsByProduct = groupsByProduct;
       }
 
-      setProducts(
-        (data || []).map((item) => {
-          const groups = optionGroupsByProduct[item.id] || [];
-          const productDescription = item.description || item.desc || "";
-          return {
-            id: item.id,
-            productId: item.id,
-            name: item.name,
-            category: item.category_id || "otros",
-            categoryName: categoryMap[item.category_id] || "Otros",
-            price: Number(item.price || 0),
-            description: productDescription,
-            desc: productDescription,
-            image_url: item.image_url || item.image || item.imageUrl || "",
-            optionGroups: groups,
-            hasOptionGroups: groups.length > 0,
-            stock: Number(item.stock || 0),
-            soldOut: item.is_sold_out || item.is_soldout || false,
-            orderIndex: Number(item.order_index || 0),
-          };
-        }),
-      );
+      const normalizedProducts = (data || []).map((item) => {
+        const groups = optionGroupsByProduct[item.id] || [];
+        const productDescription = item.description || item.desc || "";
+        return {
+          id: item.id,
+          productId: item.id,
+          name: item.name,
+          category: item.category_id || "otros",
+          categoryName: categoryMap[item.category_id] || "Otros",
+          price: Number(item.price || 0),
+          description: productDescription,
+          desc: productDescription,
+          image_url: item.image_url || item.image || item.imageUrl || "",
+          optionGroups: groups,
+          hasOptionGroups: groups.length > 0,
+          stock: Number(item.stock || 0),
+          soldOut: item.is_sold_out || item.is_soldout || false,
+          orderIndex: Number(item.order_index || 0),
+        };
+      });
+
+      setProducts(normalizedProducts);
+      writeProductCache(businessId, normalizedProducts);
     } catch (error) {
       console.error("Error cargando productos:", error);
-      setProducts([]);
+      if (cachedProducts.length > 0) {
+        setProducts(cachedProducts);
+      } else {
+        setProducts([]);
+      }
     } finally {
       setIsLoadingProducts(false);
     }
@@ -773,6 +827,7 @@ const POS = () => {
         productId: item.productId || item.id,
         qty: Number(item.qty || 1),
         price: Number(item.price || item.precio || 0),
+        initPrice: Number(item.initPrice || item.precioInicial || 0),
         name: item.name || item.item || "Producto",
         note: item.note || item.notes || "",
         options: item.optionNames || item.options || [],
@@ -835,6 +890,7 @@ const POS = () => {
           pendingQty: 0,
           name: item.name || item.item || "Producto",
           price: Number(item.price || item.precio || 0),
+          initPrice: Number(item.initPrice || item.precioInicial || 0),
           note: item.note || item.notes || "",
           notas: item.note || item.notes || "",
           optionNames: item.optionNames || item.options || [],
@@ -863,6 +919,29 @@ const POS = () => {
           product?.image_url || product?.image || product?.imageUrl || "";
 
         return imageUrl ? { ...item, image_url: imageUrl } : item;
+      }),
+    );
+  }, [location.state, products]);
+
+  useEffect(() => {
+    if (!location.state?.mesaEdit || products.length === 0) return;
+
+    setCart((currentCart) =>
+      currentCart.map((item) => {
+        const product = products.find(
+          (catalogProduct) => catalogProduct.id === item.productId,
+        );
+        const basePrice = Number(product?.price || 0);
+        const storedPrice = Number(item.price || 0);
+        const extraPrice = getOptionExtraPrice(
+          Array.isArray(item.selectedOptions) ? item.selectedOptions : [],
+        );
+
+        if (basePrice > 0 && storedPrice === basePrice && extraPrice > 0) {
+          return { ...item, price: storedPrice + extraPrice };
+        }
+
+        return item;
       }),
     );
   }, [location.state, products]);
@@ -1211,6 +1290,7 @@ const POS = () => {
           qty: 1,
           pendingQty: 0,
           note: "",
+          initPrice: Number(product.price || 0),
           image_url:
             product.image_url || product.image || product.imageUrl || "",
         },
@@ -1999,6 +2079,7 @@ const POS = () => {
         productId: item.productId || item.id,
         nombre: item.name || "Producto",
         precio: Number(item.price || 0),
+        initPrice: Number(item.initPrice || 0),
         notas: item.note || "",
         varianteNombre: item.optionNames?.length
           ? item.optionNames.join(" · ")
@@ -2193,6 +2274,7 @@ const POS = () => {
       product_id: item.productId,
       quantity: item.cantidad,
       unit_price: item.precio,
+      init_price: item.initPrice || null,
       subtotal: item.precio * item.cantidad,
       product_name: item.nombre,
       product_sku: item.product_sku || null,
@@ -2728,34 +2810,27 @@ const POS = () => {
               )}
             </div>
             <div className="flex gap-2 p-2 sticky top-0 bg-background/90 backdrop-blur-md z-10 overflow-x-auto overflow-y-hidden whitespace-nowrap scrollbar-hide no-scrollbar mt-2">
-              {isLoadingProducts
-                ? [...Array(8)].map((_, idx) => (
-                    <div
-                      key={idx}
-                      className="flex-shrink-0 h-10 w-24 rounded-xl bg-surface-hover/50 animate-pulse"
-                    />
-                  ))
-                : categories.map((cat) => (
-                    <button
-                      key={cat.id}
-                      onClick={() => {
-                        setSelectedCategory(cat.id);
-                        setSearchTerm("");
-                      }}
-                      className={`flex-shrink-0 py-2 px-6 rounded-xl font-bold text-xs uppercase tracking-wider transition-all duration-300 ${
-                        selectedCategory === cat.id
-                          ? "bg-primary-container text-on-surface shadow-lg shadow-primary-container/20"
-                          : "bg-surface text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
-                      }`}
-                    >
-                      {cat.name}
-                    </button>
-                  ))}
+              {categories.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => {
+                    setSelectedCategory(cat.id);
+                    setSearchTerm("");
+                  }}
+                  className={`flex-shrink-0 py-2 px-6 rounded-xl font-bold text-xs uppercase tracking-wider transition-all duration-300 ${
+                    selectedCategory === cat.id
+                      ? "bg-primary-container text-on-surface shadow-lg shadow-primary-container/20"
+                      : "bg-surface text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
+                  }`}
+                >
+                  {cat.name}
+                </button>
+              ))}
             </div>
           </div>
 
           <div className="flex-1 flex flex-col p-4">
-            {isLoadingProducts ? (
+            {isLoadingProducts && filteredProducts.length === 0 ? (
               <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
                 {[...Array(8)].map((_, idx) => (
                   <div
@@ -3283,7 +3358,7 @@ const POS = () => {
                           {item.name}
                         </p>
                         <p className="font-black text-[12px] text-white">
-                          $ {formatPrice(item.price)}
+                          $ {formatPrice(getInitialCartPrice(item))}
                         </p>
                       </div>
 
@@ -3540,7 +3615,7 @@ const POS = () => {
                             {item.name}
                           </p>
                           <p className="font-black text-[12px] text-white">
-                            $ {formatPrice(item.price)}
+                            $ {formatPrice(getInitialCartPrice(item))}
                           </p>
                         </div>
 

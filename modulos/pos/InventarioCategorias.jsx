@@ -156,9 +156,15 @@ export default function InventarioCategorias() {
           </button>
         </form>
         {loading ? (
-          <p className="py-12 text-center text-sm text-neutral-500">
-            Cargando categorías...
-          </p>
+          <div className="flex items-center justify-center gap-2 py-12">
+            {[0, 1, 2].map((dot) => (
+              <span
+                key={dot}
+                className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
+                style={{ animationDelay: `${dot * 150}ms` }}
+              />
+            ))}
+          </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {categories.map((category) => (

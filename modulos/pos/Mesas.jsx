@@ -18,7 +18,6 @@ import {
   Phone,
   Mail,
   Clock,
-  Loader,
 } from "lucide-react";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -141,6 +140,30 @@ const normalizeDeliveryMethod = (value) => {
   return "table";
 };
 
+const getProductsCacheKey = (businessId) => `pos-products-cache-${businessId}`;
+
+const readProductsCache = (businessId) => {
+  try {
+    const cached = localStorage.getItem(getProductsCacheKey(businessId));
+    const parsed = cached ? JSON.parse(cached) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.warn("No se pudo leer el caché de productos de mesas:", error);
+    return [];
+  }
+};
+
+const writeProductsCache = (businessId, products) => {
+  try {
+    localStorage.setItem(
+      getProductsCacheKey(businessId),
+      JSON.stringify(products),
+    );
+  } catch (error) {
+    console.warn("No se pudo guardar el caché de productos de mesas:", error);
+  }
+};
+
 // Normalizar grupos de opciones (igual que en POS.jsx)
 const normalizeOptionGroup = (group, items = []) => {
   const isRequired =
@@ -221,6 +244,35 @@ const getSelectedOptions = (product, selections) =>
 
 const getOptionsExtraPrice = (options) =>
   options.reduce((sum, option) => sum + Number(option.precio_extra || 0), 0);
+
+const getStoredOptionLabel = (option) => {
+  if (typeof option === "string") return option;
+  if (!option || typeof option !== "object") return "Opción";
+  return (
+    option.nombre ||
+    option.name ||
+    option.label ||
+    option.option_name ||
+    option.title ||
+    option.text ||
+    option.value ||
+    "Opción"
+  );
+};
+
+const formatStoredOption = (option) => {
+  const label = getStoredOptionLabel(option);
+  const extraPrice =
+    typeof option === "object" ? Number(option.precio_extra || 0) : 0;
+  return extraPrice > 0 ? `${label} (+$${fmt(extraPrice).slice(1)})` : label;
+};
+
+const normalizeStoredOption = (option, itemId, index) => ({
+  id: option?.id || `${itemId}-${index}`,
+  nombre: getStoredOptionLabel(option),
+  precio_extra:
+    typeof option === "object" ? Number(option.precio_extra || 0) : 0,
+});
 
 function useTimer(startTime) {
   const [t, setT] = useState(0);
@@ -483,11 +535,9 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
         optionNames: Array.isArray(item.options) ? item.options : [],
         options: Array.isArray(item.options) ? item.options : [],
         selectedOptions: Array.isArray(item.options)
-          ? item.options.map((opt, index) => ({
-              id: `${item.id}-${index}`,
-              nombre: String(opt),
-              precio_extra: 0,
-            }))
+          ? item.options.map((option, index) =>
+              normalizeStoredOption(option, item.id, index),
+            )
           : [],
       })),
     };
@@ -568,27 +618,27 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
               mesa.comanda.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center gap-3 py-3 border-b border-white/5"
+                  className="grid grid-cols-[minmax(0,1fr)_2rem_5rem] items-center gap-3 py-3 border-b border-white/5"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-200 truncate">
-                      {item.item}
-                    </p>
+                    <div className="flex items-center justify-start gap-3">
+                      <p className="text-sm font-semibold text-slate-200 truncate">
+                        {item.item}
+                      </p>
+                      <p className="text-[10px] text-slate-600 flex-shrink-0">
+                        {fmt(item.precioInicial || item.precio)}
+                      </p>
+                    </div>
                     {item.options?.length > 0 && (
                       <p className="text-[10px] text-blue-400">
-                        {item.options.join(" · ")}
+                        {item.options.map(formatStoredOption).join(" · ")}
                       </p>
                     )}
-                    <p className="text-[10px] text-slate-600">
-                      {fmt(item.precio)} c/u
-                    </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-6 text-center text-sm font-black text-white">
-                      {item.qty}
-                    </span>
-                  </div>
-                  <span className="text-sm font-black text-white w-20 text-right">
+                  <span className="text-center text-sm font-black text-white">
+                    {item.qty}
+                  </span>
+                  <span className="text-right text-sm font-black text-white">
                     {fmt(
                       Number(item.subtotal) > 0
                         ? item.subtotal
@@ -1011,6 +1061,11 @@ export default function MesasPOS() {
   const loadProductsFromDB = useCallback(async (businessIdParam) => {
     if (!businessIdParam) return;
 
+    const cachedProducts = readProductsCache(businessIdParam);
+    if (cachedProducts.length > 0) {
+      setProducts(cachedProducts);
+    }
+
     try {
       const { data, error } = await supabase
         .from("products")
@@ -1085,25 +1140,28 @@ export default function MesasPOS() {
         optionGroupsByProduct = groupsByProduct;
       }
 
-      setProducts(
-        (data || []).map((item) => ({
-          id: item.id,
-          productId: item.id,
-          nombre: item.name,
-          name: item.name,
-          category: item.category_id || "otros",
-          categoryName: categoryNamesById[item.category_id] || "Otros",
-          precio: Number(item.price || 0),
-          price: Number(item.price || 0),
-          description: item.description || "",
-          image_url: item.image_url || "",
-          optionGroups: optionGroupsByProduct[item.id] || [],
-          stock: Number(item.stock || 0),
-        })),
-      );
+      const normalizedProducts = (data || []).map((item) => ({
+        id: item.id,
+        productId: item.id,
+        nombre: item.name,
+        name: item.name,
+        category: item.category_id || "otros",
+        categoryName: categoryNamesById[item.category_id] || "Otros",
+        precio: Number(item.price || 0),
+        price: Number(item.price || 0),
+        description: item.description || "",
+        image_url: item.image_url || "",
+        optionGroups: optionGroupsByProduct[item.id] || [],
+        stock: Number(item.stock || 0),
+      }));
+
+      setProducts(normalizedProducts);
+      writeProductsCache(businessIdParam, normalizedProducts);
     } catch (err) {
       console.error("Error en loadProductsFromDB:", err);
-      setProducts([]);
+      if (cachedProducts.length === 0) {
+        setProducts([]);
+      }
     }
   }, []);
 
@@ -1132,8 +1190,8 @@ export default function MesasPOS() {
 
       setBusinessId(profile.business_id);
 
-      // Cargar productos del negocio
-      await loadProductsFromDB(profile.business_id);
+      // Los productos se necesitan al editar; no deben bloquear la carga de mesas.
+      loadProductsFromDB(profile.business_id);
 
       // Cargar órdenes de tipo "mesa". Las órdenes antiguas pueden tener
       // table_status NULL, así que su estado activo se deriva de status.
@@ -1161,7 +1219,7 @@ export default function MesasPOS() {
           delivery_instructions,
           punto,
           metadata,
-          order_items(id, order_batch_id, product_id, product_name, quantity, unit_price, subtotal, options, notes)`,
+          order_items(id, order_batch_id, product_id, product_name, quantity, init_price, unit_price, subtotal, options, notes)`,
         )
         .eq("business_id", profile.business_id)
         .eq("order_type", "table")
@@ -1223,6 +1281,7 @@ export default function MesasPOS() {
             productId: item.product_id,
             item: item.product_name || "Producto",
             precio: parseFloat(item.unit_price) || 0,
+            precioInicial: parseFloat(item.init_price) || 0,
             qty: parseInt(item.quantity) || 1,
             subtotal: parseFloat(item.subtotal) || 0,
             options: item.options || [],
@@ -1452,15 +1511,20 @@ export default function MesasPOS() {
       {/* ── Grid ── */}
       <div className="flex-1 p-4 overflow-y-auto">
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-24 text-slate-700">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-              className="mb-4"
-            >
-              <ChefHat size={32} className="opacity-50" />
-            </motion.div>
-            <p className="font-bold text-sm">Cargando mesas...</p>
+          <div className="flex items-center justify-center gap-2 py-24">
+            {[0, 1, 2].map((dot) => (
+              <motion.span
+                key={dot}
+                className="h-2 w-2 rounded-full bg-blue-400"
+                animate={{ opacity: [0.25, 1, 0.25], scale: [0.8, 1, 0.8] }}
+                transition={{
+                  duration: 0.9,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: dot * 0.15,
+                }}
+              />
+            ))}
           </div>
         ) : visible.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-slate-700">

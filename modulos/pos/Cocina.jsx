@@ -59,6 +59,17 @@ const getOptionLabel = (option) => {
   );
 };
 
+const formatOption = (option) => {
+  const label = getOptionLabel(option);
+  const extraPrice =
+    typeof option === "object" ? Number(option.precio_extra || 0) : 0;
+  return extraPrice > 0
+    ? `${label} (+$${new Intl.NumberFormat("es-CO", {
+        maximumFractionDigits: 0,
+      }).format(extraPrice)})`
+    : label;
+};
+
 const mapOrderToKitchen = (order, optionPricesByProduct = {}) => ({
   id: order.order_number || order.id,
   databaseId: order.id,
@@ -83,24 +94,9 @@ const mapOrderToKitchen = (order, optionPricesByProduct = {}) => ({
     name: item.product_name || item.name || "Producto",
     cat: item.category || "",
     nota: item.notes || "",
-    opciones: Array.isArray(item.options)
-      ? item.options.map(getOptionLabel)
-      : [],
-    price: (() => {
-      const basePrice = Number(item.unit_price || item.price || 0);
-      const options = Array.isArray(item.options) ? item.options : [];
-      const extraPrice = options.reduce((sum, option) => {
-        if (typeof option !== "string") return sum;
-        return (
-          sum +
-          Number(
-            optionPricesByProduct[item.product_id]?.[option.trim().toLowerCase()] ||
-              0,
-          )
-        );
-      }, 0);
-      return basePrice + extraPrice;
-    })(),
+    opciones: Array.isArray(item.options) ? item.options : [],
+    initPrice: Number(item.init_price ?? item.price ?? item.unit_price ?? 0),
+    price: Number(item.unit_price ?? item.price ?? item.init_price ?? 0),
   })),
 });
 
@@ -167,7 +163,7 @@ export default function KitchenPanel() {
   });
 
   const [ordenes, setOrdenes] = useState([]);
-  const [direccionesAnimacion, setDireccionesAnimacion] = useState({});
+  const [pendingActionByOrder, setPendingActionByOrder] = useState({});
 
   const reproducirAlerta = () => {
     if (typeof window === "undefined") return;
@@ -268,7 +264,9 @@ export default function KitchenPanel() {
       const productIds = [
         ...new Set(
           (data || []).flatMap((order) =>
-            (order.order_items || []).map((item) => item.product_id).filter(Boolean),
+            (order.order_items || [])
+              .map((item) => item.product_id)
+              .filter(Boolean),
           ),
         ),
       ];
@@ -280,7 +278,10 @@ export default function KitchenPanel() {
           .in("product_id", productIds);
 
         if (optionItemsError) {
-          console.error("Error cargando precios de variables:", optionItemsError);
+          console.error(
+            "Error cargando precios de variables:",
+            optionItemsError,
+          );
         }
 
         (optionItems || []).forEach((option) => {
@@ -409,29 +410,26 @@ export default function KitchenPanel() {
 
   const moverEstado = async (id, nuevoEstado) => {
     const order = ordenes.find((item) => item.id === id);
+    if (!order || pendingActionByOrder[id]) return;
+
     const databaseStatusByKitchenStatus = {
       nuevos: "pending",
       preparando: "preparing",
       listo: "complete",
     };
     const databaseStatus = databaseStatusByKitchenStatus[nuevoEstado];
+    const ordenEstados = ["nuevos", "preparando", "listo"];
+    const direction =
+      ordenEstados.indexOf(nuevoEstado) > ordenEstados.indexOf(order?.estado)
+        ? "forward"
+        : "backward";
 
     if (!databaseStatus) return;
 
-    const estadoActual = order?.estado;
-    const ordenEstados = ["nuevos", "preparando", "listo"];
-    const avanza =
-      ordenEstados.indexOf(nuevoEstado) > ordenEstados.indexOf(estadoActual);
-    setDireccionesAnimacion((prev) => ({
+    setPendingActionByOrder((prev) => ({
       ...prev,
-      [id]: avanza ? "derecha" : "izquierda",
+      [id]: direction,
     }));
-
-    setOrdenes((prev) =>
-      prev.map((order) =>
-        order.id === id ? { ...order, estado: nuevoEstado } : order,
-      ),
-    );
 
     const { error } = await supabase
       .from("orders")
@@ -440,8 +438,22 @@ export default function KitchenPanel() {
 
     if (error) {
       console.error("Error actualizando estado de cocina:", error);
+      setPendingActionByOrder((prev) => {
+        const siguiente = { ...prev };
+        delete siguiente[id];
+        return siguiente;
+      });
       await cargarOrdenes();
+      return;
     }
+
+    setPendingActionByOrder((prev) => {
+      const siguiente = { ...prev };
+      delete siguiente[id];
+      return siguiente;
+    });
+
+    await cargarOrdenes();
   };
 
   const despacharOrden = async (id) => {
@@ -454,10 +466,6 @@ export default function KitchenPanel() {
 
     despachandoIds.current.add(order.databaseId);
     setOrdenes((prev) => prev.filter((item) => item.id !== id));
-    setDireccionesAnimacion((prev) => ({
-      ...prev,
-      [id]: "derecha",
-    }));
 
     const { data: updatedItems, error: itemError } = await supabase
       .from("order_items")
@@ -699,7 +707,18 @@ export default function KitchenPanel() {
         </div>
       )}
 
-      <main className="flex-1 overflow-hidden">
+      <main className="relative flex-1 overflow-hidden">
+        {loadingOrders && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background">
+            {[0, 1, 2].map((dot) => (
+              <span
+                key={dot}
+                className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
+                style={{ animationDelay: `${dot * 150}ms` }}
+              />
+            ))}
+          </div>
+        )}
         <div
           className={`flex h-full transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] md:grid md:grid-cols-3 md:gap-px md:bg-white/5 ${
             activeTab === 0
@@ -731,7 +750,7 @@ export default function KitchenPanel() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-32 md:pb-8 cocina-scrollbar">
-                <AnimatePresence mode="popLayout">
+                <AnimatePresence initial={false} mode="sync">
                   {ordenesFiltradasPorTipo
                     .filter((o) => o.estado === col.id)
                     .sort((a, b) => b.minutos - a.minutos)
@@ -739,11 +758,11 @@ export default function KitchenPanel() {
                       <TicketCard
                         key={o.id}
                         orden={o}
-                        direccionAnimacion={direccionesAnimacion[o.id]}
                         labelData={deliveryLabels[o.tipoEntrega]}
                         colorData={
                           colorMap[deliveryLabels[o.tipoEntrega]?.color]
                         }
+                        pendingDirection={pendingActionByOrder[o.id] || null}
                         onNext={() => {
                           const nextState =
                             col.id === "nuevos"
@@ -751,19 +770,30 @@ export default function KitchenPanel() {
                               : col.id === "preparando"
                                 ? "listo"
                                 : null;
-                          if (nextState) moverEstado(o.id, nextState);
-                          else {
+                          if (nextState && !pendingActionByOrder[o.id]) {
+                            moverEstado(o.id, nextState);
+                          } else if (
+                            !nextState &&
+                            !pendingActionByOrder[o.id]
+                          ) {
                             despacharOrden(o.id);
                           }
                         }}
                         onPrev={() => {
                           const prevState =
                             col.id === "preparando" ? "nuevos" : "preparando";
-                          moverEstado(o.id, prevState);
+                          if (!pendingActionByOrder[o.id]) {
+                            moverEstado(o.id, prevState);
+                          }
                         }}
                         type={col.id}
                       />
                     ))}
+                  {cantidadPorEstado(col.id) === 0 && (
+                    <p className="pt-16 text-center text-xl font-semibold text-white/15 upercase tracking-wide">
+                      vacío
+                    </p>
+                  )}
                 </AnimatePresence>
               </div>
             </section>
@@ -806,15 +836,15 @@ export default function KitchenPanel() {
 
 const TicketCard = ({
   orden,
-  direccionAnimacion,
   labelData,
   colorData,
   onNext,
   onPrev,
   type,
+  pendingDirection = null,
 }) => {
-  const distanciaAnimacion = direccionAnimacion === "izquierda" ? -120 : 120;
-  const entradaAnimacion = -distanciaAnimacion;
+  const isForwardLoading = pendingDirection === "forward";
+  const isBackwardLoading = pendingDirection === "backward";
   const handlePrint = () => {
     const escaparHtml = (value) =>
       String(value ?? "")
@@ -837,7 +867,10 @@ const TicketCard = ({
     const itemsHtml = orden.items
       .map((item) => {
         const opciones = (item.opciones || [])
-          .map((opcion) => `<div class="option">+ ${escaparHtml(opcion)}</div>`)
+          .map(
+            (opcion) =>
+              `<div class="option">+ ${escaparHtml(formatOption(opcion))}</div>`,
+          )
           .join("");
         const instrucciones = item.nota
           ? `<div class="instruction">Instrucción: ${escaparHtml(item.nota)}</div>`
@@ -925,12 +958,11 @@ const TicketCard = ({
 
   return (
     <motion.div
-      initial={{ x: entradaAnimacion, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      exit={{ x: distanciaAnimacion, opacity: 0 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       transition={{
-        x: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },
-        opacity: { duration: 0.2 },
+        opacity: { duration: 0.12 },
       }}
       className={`bg-[#0F0F0F] rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 border border-white/10`}
     >
@@ -989,84 +1021,89 @@ const TicketCard = ({
         {/* Listado de Productos */}
         <div className="space-y-2.5 mb-5 border-t border-b border-white/5 py-3">
           {(() => {
-            const renderItem = (item, quantity, key, delivered = false) => (
-              <div
-                key={key}
-                className={`w-full text-left flex items-start gap-3 rounded-xl px-2.5 py-2 ${
-                  delivered
-                    ? "bg-white/[0.03] opacity-60"
-                    : "bg-sky-500/[0.08] border border-sky-400/20"
-                }`}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className={`text-3xl font-black font-mono ${
-                          delivered
-                            ? "text-white/55 line-through"
-                            : "text-white"
-                        }`}
-                      >
-                        {quantity}
-                      </span>
-                      <p
-                        className={`text-sm font-bold uppercase truncate ${
-                          delivered
-                            ? "text-white/55 line-through decoration-white/80 decoration-2"
-                            : "text-white"
-                        }`}
-                      >
-                        {item.name}
-                      </p>
-                    </div>
+            const renderItem = (item, quantity, key, delivered = false) => {
+              const initialPrice = Number(item.initPrice ?? item.price ?? 0);
+              const displayAmount = initialPrice * Number(quantity || 0);
 
-                    {item.price !== undefined && (
-                      <span
-                        className={`text-base font-black font-mono tracking-tight px-1.5 py-0.5 flex-shrink-0 ${
-                          delivered
-                            ? "text-white/45 line-through"
-                            : "text-sky-200"
-                        }`}
-                      >
-                        {new Intl.NumberFormat("es-CO", {
-                          maximumFractionDigits: 0,
-                        }).format(item.price * quantity)}
-                      </span>
-                    )}
-                  </div>
-
-                  {item.opciones?.length > 0 && (
-                    <div className="mt-1 pl-5 space-y-0.5">
-                      {item.opciones.map((opcion, optionIndex) => (
-                        <p
-                          key={`${key}-opcion-${optionIndex}`}
-                          className={`text-[16px] font-mono ${
+              return (
+                <div
+                  key={key}
+                  className={`w-full text-left flex items-start gap-3 rounded-xl px-2.5 py-2 ${
+                    delivered
+                      ? "bg-white/[0.03] opacity-60"
+                      : "bg-sky-500/[0.08] border border-sky-400/20"
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`text-3xl font-black font-mono ${
                             delivered
-                              ? "text-sky-300/45 line-through"
-                              : "text-sky-300/90"
+                              ? "text-white/55 line-through"
+                              : "text-white"
                           }`}
                         >
-                          • {opcion}
+                          {quantity}
+                        </span>
+                        <p
+                          className={`text-sm font-bold uppercase truncate ${
+                            delivered
+                              ? "text-white/55 line-through decoration-white/80 decoration-2"
+                              : "text-white"
+                          }`}
+                        >
+                          {item.name}
                         </p>
-                      ))}
-                    </div>
-                  )}
+                      </div>
 
-                  {item.nota && (
-                    <p
-                      className={`text-[16px] font-mono mt-0.5 pl-5 ${
-                        delivered
-                          ? "text-yellow-300/45 line-through"
-                          : "text-yellow-300/90"
-                      }`}
-                    >
-                      *{item.nota}*
-                    </p>
-                  )}
+                      {initialPrice !== undefined && (
+                        <span
+                          className={`text-base font-black font-mono tracking-tight px-1.5 py-0.5 flex-shrink-0 ${
+                            delivered
+                              ? "text-white/45 line-through"
+                              : "text-sky-200"
+                          }`}
+                        >
+                          {new Intl.NumberFormat("es-CO", {
+                            maximumFractionDigits: 0,
+                          }).format(displayAmount)}
+                        </span>
+                      )}
+                    </div>
+
+                    {item.opciones?.length > 0 && (
+                      <div className="mt-1 pl-5 space-y-0.5">
+                        {item.opciones.map((opcion, optionIndex) => (
+                          <p
+                            key={`${key}-opcion-${optionIndex}`}
+                            className={`text-[16px] font-mono ${
+                              delivered
+                                ? "text-sky-300/45 line-through"
+                                : "text-sky-300/90"
+                            }`}
+                          >
+                            • {formatOption(opcion)}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+
+                    {item.nota && (
+                      <p
+                        className={`text-[16px] font-mono mt-0.5 pl-5 ${
+                          delivered
+                            ? "text-yellow-300/45 line-through"
+                            : "text-yellow-300/90"
+                        }`}
+                      >
+                        *{item.nota}*
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
+              );
+            };
 
             const batches = Object.values(
               orden.items.reduce((groups, item) => {
@@ -1124,29 +1161,51 @@ const TicketCard = ({
           {type !== "nuevos" && (
             <button
               onClick={onPrev}
-              className="p-3 bg-white/5 hover:bg-white/10 rounded-xl text-slate-500 transition-colors border border-white/5"
+              disabled={isBackwardLoading}
+              className={`p-3 rounded-xl border transition-colors ${
+                isBackwardLoading
+                  ? "bg-white/[0.08] border-white/10 text-slate-500 cursor-not-allowed"
+                  : "bg-white/5 hover:bg-white/10 text-slate-500 border-white/5"
+              }`}
             >
-              <RotateCcw size={16} />
+              <span
+                className={`inline-flex ${
+                  isBackwardLoading
+                    ? "animate-[spin_0.8s_linear_infinite_reverse]"
+                    : ""
+                }`}
+              >
+                <RotateCcw size={16} />
+              </span>
             </button>
           )}
           <button
             onClick={onNext}
+            disabled={isForwardLoading}
             className={`flex-1 py-3.5 rounded-xl font-black uppercase text-[10px] tracking-[0.1em] flex items-center justify-center gap-2 transition-all ${
-              type === "nuevos"
-                ? "bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-500/10"
-                : type === "preparando"
-                  ? "bg-orange-600 hover:bg-orange-500"
-                  : "bg-emerald-600 hover:bg-emerald-500"
+              isForwardLoading
+                ? "bg-white/[0.08] text-white/45 cursor-not-allowed"
+                : type === "nuevos"
+                  ? "bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-500/10"
+                  : type === "preparando"
+                    ? "bg-orange-600 hover:bg-orange-500"
+                    : "bg-emerald-600 hover:bg-emerald-500"
             }`}
           >
-            <span>
-              {type === "nuevos"
-                ? "INICIAR"
-                : type === "preparando"
-                  ? "LISTO"
-                  : "DESPACHAR"}
-            </span>
-            <ChevronRight size={14} strokeWidth={3} />
+            {isForwardLoading ? (
+              <span className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+            ) : (
+              <>
+                <span>
+                  {type === "nuevos"
+                    ? "INICIAR"
+                    : type === "preparando"
+                      ? "LISTO"
+                      : "DESPACHAR"}
+                </span>
+                <ChevronRight size={14} strokeWidth={3} />
+              </>
+            )}
           </button>
         </div>
       </div>

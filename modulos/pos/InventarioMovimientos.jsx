@@ -166,9 +166,15 @@ export default function InventarioMovimientos() {
             </div>
           )}
           {loading ? (
-            <p className="py-12 text-center text-sm text-neutral-500">
-              Cargando movimientos...
-            </p>
+            <div className="flex items-center justify-center gap-2 py-12">
+              {[0, 1, 2].map((dot) => (
+                <span
+                  key={dot}
+                  className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
+                  style={{ animationDelay: `${dot * 150}ms` }}
+                />
+              ))}
+            </div>
           ) : filteredMovements.length === 0 ? (
             <p className="py-12 text-center text-sm text-neutral-500">
               No hay movimientos que coincidan con los filtros.

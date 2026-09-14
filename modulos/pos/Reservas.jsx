@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Loader,
   MessageCircle,
   Phone,
   Trash2,
@@ -563,8 +562,14 @@ const Reservas = () => {
               </div>
 
               {loading ? (
-                <div className="flex items-center justify-center py-12 text-on-surface-variant">
-                  <Loader className="mr-2 animate-spin" size={18} /> Cargando
+                <div className="flex items-center justify-center gap-2 py-12">
+                  {[0, 1, 2].map((dot) => (
+                    <span
+                      key={dot}
+                      className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
+                      style={{ animationDelay: `${dot * 150}ms` }}
+                    />
+                  ))}
                 </div>
               ) : selectedReservations.length === 0 ? (
                 <div className="py-12 text-center text-sm text-on-surface-variant">

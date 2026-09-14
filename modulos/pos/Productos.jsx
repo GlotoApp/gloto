@@ -61,6 +61,32 @@ const formatSentenceInput = (value) => {
   return formatSentenceText(value);
 };
 
+const getCatalogCacheKey = (businessId) =>
+  `productos-catalog-cache-${businessId}`;
+
+const readCatalogCache = (businessId) => {
+  try {
+    const cached = localStorage.getItem(getCatalogCacheKey(businessId));
+    if (!cached) return null;
+    const parsed = JSON.parse(cached);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (error) {
+    console.warn("No se pudo leer el caché del catálogo:", error);
+    return null;
+  }
+};
+
+const writeCatalogCache = (businessId, catalog) => {
+  try {
+    localStorage.setItem(
+      getCatalogCacheKey(businessId),
+      JSON.stringify(catalog),
+    );
+  } catch (error) {
+    console.warn("No se pudo guardar el caché del catálogo:", error);
+  }
+};
+
 const handleImageError = (e) => {
   e.target.onerror = null; // Previene bucles infinitos si la imagen por defecto también falla
   e.target.src = defaultImg;
@@ -220,6 +246,18 @@ const Productos = ({ section = "productos" }) => {
       }
       setBusinessId(profile.business_id);
 
+      const cachedCatalog = readCatalogCache(profile.business_id);
+      if (
+        Array.isArray(cachedCatalog?.categories) &&
+        Array.isArray(cachedCatalog?.products)
+      ) {
+        setCategoryRecords(cachedCatalog.categoryRecords || []);
+        setCategories(cachedCatalog.categories);
+        setProducts(cachedCatalog.products);
+        setAvailableIngredients(cachedCatalog.ingredients || []);
+        setLoadingProducts(false);
+      }
+
       const [
         { data: categoriesData },
         { data: productsData, error },
@@ -253,7 +291,9 @@ const Productos = ({ section = "productos" }) => {
           "Error cargando productos o insumos:",
           error || ingredientsError || ingredientCategoriesError,
         );
-        setProducts([]);
+        if (!Array.isArray(cachedCatalog?.products)) {
+          setProducts([]);
+        }
       } else {
         const records = categoriesData || [];
         const categoryMap = Object.fromEntries(
@@ -261,24 +301,30 @@ const Productos = ({ section = "productos" }) => {
         );
         setCategoryRecords(records);
         setCategories(records.map((category) => category.name));
-        setProducts(
-          (productsData || []).map((product) =>
-            mapProduct(product, categoryMap),
-          ),
+        const normalizedProducts = (productsData || []).map((product) =>
+          mapProduct(product, categoryMap),
         );
+        setProducts(normalizedProducts);
         const ingredientCategoryMap = Object.fromEntries(
           (ingredientCategoriesData || []).map((category) => [
             category.id,
             category.name,
           ]),
         );
-        setAvailableIngredients(
-          (ingredientsData || []).map((ingredient) => ({
+        const normalizedIngredients = (ingredientsData || []).map(
+          (ingredient) => ({
             ...ingredient,
             categoryName:
               ingredientCategoryMap[ingredient.category_id] || "Sin categoría",
-          })),
+          }),
         );
+        setAvailableIngredients(normalizedIngredients);
+        writeCatalogCache(profile.business_id, {
+          categories: records.map((category) => category.name),
+          categoryRecords: records,
+          products: normalizedProducts,
+          ingredients: normalizedIngredients,
+        });
       }
 
       setLoadingProducts(false);
@@ -965,6 +1011,7 @@ const Productos = ({ section = "productos" }) => {
         categoryRecords={categoryRecords}
         businessId={businessId}
         products={products} // Envía el array de productos original
+        loading={loadingProducts}
         onUpdateCategories={handleUpdateCategories}
         onDeleteCategoryCascade={handleDeleteCategoryCascade} // <--- NUEVO CALLBACK VINCULADO
       />
@@ -1273,10 +1320,14 @@ const Productos = ({ section = "productos" }) => {
         {/* CONTENIDO PRINCIPAL */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
           {loadingProducts ? (
-            <div className="col-span-full py-20 text-center">
-              <p className="text-sm font-bold uppercase text-neutral-500 tracking-widest">
-                Cargando productos...
-              </p>
+            <div className="col-span-full flex items-center justify-center gap-2 py-20">
+              {[0, 1, 2].map((dot) => (
+                <span
+                  key={dot}
+                  className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
+                  style={{ animationDelay: `${dot * 150}ms` }}
+                />
+              ))}
             </div>
           ) : filteredProducts.length === 0 ? (
             <div className="col-span-full py-20 text-center">
@@ -2006,9 +2057,15 @@ const Productos = ({ section = "productos" }) => {
                     </div>
 
                     {optionsLoading ? (
-                      <p className="rounded-xl border border-white/5 bg-black/10 px-3 py-5 text-center text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-                        Cargando opciones...
-                      </p>
+                      <div className="flex items-center justify-center gap-2 rounded-xl border border-white/5 bg-black/10 px-3 py-5">
+                        {[0, 1, 2].map((dot) => (
+                          <span
+                            key={dot}
+                            className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
+                            style={{ animationDelay: `${dot * 150}ms` }}
+                          />
+                        ))}
+                      </div>
                     ) : optionGroups.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-white/10 px-4 py-5 text-center">
                         <p className="text-[11px] font-bold text-neutral-400">

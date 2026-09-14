@@ -30,6 +30,7 @@ const CategoriasAdmin = ({
   categoryRecords = [],
   products = [],
   businessId,
+  loading = false,
   onUpdateCategories,
   onDeleteCategoryCascade,
 }) => {
@@ -253,139 +254,155 @@ const CategoriasAdmin = ({
           </select>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 select-none">
-          {visibleCategories.map((category) => {
-            const associatedProducts = products.filter(
-              (p) => p.categoryId === category.id,
-            );
-            const isExpanded = expandedCategories.has(category.id);
-            return (
-              <div
-                key={category.id}
-                className={`flex flex-col rounded-2xl border overflow-hidden transition-all duration-150 ${"bg-neutral-900/40 border-white/5"}`}
-              >
-                <div className="flex flex-col w-full">
-                  {/* FILA PRINCIPAL */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-4">
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full border border-white/20 flex-shrink-0 ${
-                          colorClasses[category.color].split(" ")[0]
-                        } ${colorClasses[category.color].split(" ").slice(3).join(" ")}`}
-                      />
+        {loading && visibleCategories.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 py-20">
+            {[0, 1, 2].map((dot) => (
+              <span
+                key={dot}
+                className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
+                style={{ animationDelay: `${dot * 150}ms` }}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 select-none">
+            {visibleCategories.map((category) => {
+              const associatedProducts = products.filter(
+                (p) => p.categoryId === category.id,
+              );
+              const isExpanded = expandedCategories.has(category.id);
+              return (
+                <div
+                  key={category.id}
+                  className={`flex flex-col rounded-2xl border overflow-hidden transition-all duration-150 ${"bg-neutral-900/40 border-white/5"}`}
+                >
+                  <div className="flex flex-col w-full">
+                    {/* FILA PRINCIPAL */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-4">
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div
+                          className={`w-3.5 h-3.5 rounded-full border border-white/20 flex-shrink-0 ${
+                            colorClasses[category.color].split(" ")[0]
+                          } ${colorClasses[category.color].split(" ").slice(3).join(" ")}`}
+                        />
 
-                      <div className="min-w-0">
-                        <h3 className="font-black text-sm tracking-wide text-neutral-100 truncate">
-                          {category.name}
-                        </h3>
-                        <span className="text-[9px] font-bold  tracking-widest text-neutral-500 block mt-0.5">
-                          {associatedProducts.length}{" "}
-                          {associatedProducts.length === 1
-                            ? "Producto"
-                            : "Productos"}
-                        </span>
+                        <div className="min-w-0">
+                          <h3 className="font-black text-sm tracking-wide text-neutral-100 truncate">
+                            {category.name}
+                          </h3>
+                          <span className="text-[9px] font-bold  tracking-widest text-neutral-500 block mt-0.5">
+                            {associatedProducts.length}{" "}
+                            {associatedProducts.length === 1
+                              ? "Producto"
+                              : "Productos"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex w-full sm:w-auto justify-center sm:justify-end items-center gap-2.5 border-t sm:border-t-0 border-white/5 pt-3 sm:pt-0 flex-shrink-0">
+                        <button
+                          onClick={() => toggleExpand(category.id)}
+                          className="px-3 py-1.5 rounded-lg border border-white/5 bg-neutral-950/40 text-[9px] font-black  tracking-wider text-neutral-400 hover:text-white transition-all flex items-center gap-1.5"
+                        >
+                          <span>
+                            {isExpanded ? "Ocultar" : "Ver productos"}
+                          </span>
+                          {isExpanded ? (
+                            <ChevronUp size={12} />
+                          ) : (
+                            <ChevronDown size={12} />
+                          )}
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            handleEditCategory(categoriesList.indexOf(category))
+                          }
+                          className="p-2 bg-neutral-800 text-neutral-400 rounded-lg hover:bg-neutral-700 hover:text-violet-400 active:scale-95 transition-all border border-white/5"
+                          title="Editar Configuración"
+                        >
+                          <Edit3 size={14} />
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex w-full sm:w-auto justify-center sm:justify-end items-center gap-2.5 border-t sm:border-t-0 border-white/5 pt-3 sm:pt-0 flex-shrink-0">
-                      <button
-                        onClick={() => toggleExpand(category.id)}
-                        className="px-3 py-1.5 rounded-lg border border-white/5 bg-neutral-950/40 text-[9px] font-black  tracking-wider text-neutral-400 hover:text-white transition-all flex items-center gap-1.5"
-                      >
-                        <span>{isExpanded ? "Ocultar" : "Ver productos"}</span>
-                        {isExpanded ? (
-                          <ChevronUp size={12} />
+                    {/* SUBPANEL DESPLEGABLE DE PRODUCTOS */}
+                    {isExpanded && (
+                      <div className="px-4 pb-4 bg-black/30 border-t border-white/5 space-y-2 animate-fadeIn">
+                        {associatedProducts.length === 0 ? (
+                          <p className="text-[10px] text-neutral-600 uppercase font-bold tracking-wider py-2 italic text-center">
+                            No hay productos en esta categoría.
+                          </p>
                         ) : (
-                          <ChevronDown size={12} />
-                        )}
-                      </button>
-
-                      <button
-                        onClick={() =>
-                          handleEditCategory(categoriesList.indexOf(category))
-                        }
-                        className="p-2 bg-neutral-800 text-neutral-400 rounded-lg hover:bg-neutral-700 hover:text-violet-400 active:scale-95 transition-all border border-white/5"
-                        title="Editar Configuración"
-                      >
-                        <Edit3 size={14} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* SUBPANEL DESPLEGABLE DE PRODUCTOS */}
-                  {isExpanded && (
-                    <div className="px-4 pb-4 bg-black/30 border-t border-white/5 space-y-2 animate-fadeIn">
-                      {associatedProducts.length === 0 ? (
-                        <p className="text-[10px] text-neutral-600 uppercase font-bold tracking-wider py-2 italic text-center">
-                          No hay productos en esta categoría.
-                        </p>
-                      ) : (
-                        <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1 mt-2">
-                          {associatedProducts.map((prod) => (
-                            <button
-                              key={prod.id}
-                              type="button"
-                              onClick={() =>
-                                navigate("/pos/productos", {
-                                  state: { productId: prod.id },
-                                })
-                              }
-                              aria-label={`Editar ${prod.name} en productos`}
-                              className="group flex w-full items-center justify-between gap-4 rounded-xl border border-white/[0.05] bg-neutral-900/50 px-4 py-3 text-left transition-all hover:border-violet-500/30 hover:bg-neutral-800/70"
-                            >
-                              <div className="flex min-w-0 flex-1 items-center gap-3">
-                                <div
-                                  className={`h-2 w-2 shrink-0 rounded-full ${
-                                    prod.isActive && !prod.isSoldOut
-                                      ? "bg-emerald-400 shadow-[0_0_8px_#10b981]"
-                                      : "bg-neutral-600"
-                                  }`}
-                                />
-                                <span className="truncate text-[10px] font-black  tracking-wide text-neutral-300 group-hover:text-white">
-                                  {prod.name}
-                                </span>
-                              </div>
-                              <div className="flex shrink-0 items-center gap-3">
-                                <div className="flex items-center gap-1.5">
-                                  <span
-                                    className={`rounded border px-1.5 py-0.5 text-[8px] font-black uppercase ${
-                                      prod.isActive
-                                        ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
-                                        : "border-slate-500/20 bg-slate-500/10 text-slate-400"
+                          <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1 mt-2">
+                            {associatedProducts.map((prod) => (
+                              <button
+                                key={prod.id}
+                                type="button"
+                                onClick={() =>
+                                  navigate("/pos/productos", {
+                                    state: { productId: prod.id },
+                                  })
+                                }
+                                aria-label={`Editar ${prod.name} en productos`}
+                                className="group flex w-full items-center justify-between gap-4 rounded-xl border border-white/[0.05] bg-neutral-900/50 px-4 py-3 text-left transition-all hover:border-violet-500/30 hover:bg-neutral-800/70"
+                              >
+                                <div className="flex min-w-0 flex-1 items-center gap-3">
+                                  <div
+                                    className={`h-2 w-2 shrink-0 rounded-full ${
+                                      prod.isActive && !prod.isSoldOut
+                                        ? "bg-emerald-400 shadow-[0_0_8px_#10b981]"
+                                        : "bg-neutral-600"
                                     }`}
-                                  >
-                                    {prod.isActive ? "Activo" : "Archivado"}
-                                  </span>
-                                  <span
-                                    className={`rounded border px-1.5 py-0.5 text-[8px] font-black uppercase ${
-                                      prod.isSoldOut
-                                        ? "border-red-500/20 bg-red-500/10 text-red-400"
-                                        : "border-sky-500/20 bg-sky-500/10 text-sky-400"
-                                    }`}
-                                  >
-                                    {prod.isSoldOut ? "Agotado" : "Disponible"}
+                                  />
+                                  <span className="truncate text-[10px] font-black  tracking-wide text-neutral-300 group-hover:text-white">
+                                    {prod.name}
                                   </span>
                                 </div>
-                                <span className="text-[10px] font-mono font-black text-white bg-black/40 px-2.5 py-0.5 rounded border border-white/5">
-                                  ${prod.price?.toLocaleString("es-CO")}
-                                </span>
-                                <ArrowRight
-                                  size={14}
-                                  className="text-neutral-600 transition-transform group-hover:translate-x-0.5 group-hover:text-violet-400"
-                                  aria-hidden="true"
-                                />
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                                <div className="flex shrink-0 items-center gap-3">
+                                  <div className="flex items-center gap-1.5">
+                                    <span
+                                      className={`rounded border px-1.5 py-0.5 text-[8px] font-black uppercase ${
+                                        prod.isActive
+                                          ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+                                          : "border-slate-500/20 bg-slate-500/10 text-slate-400"
+                                      }`}
+                                    >
+                                      {prod.isActive ? "Activo" : "Archivado"}
+                                    </span>
+                                    <span
+                                      className={`rounded border px-1.5 py-0.5 text-[8px] font-black uppercase ${
+                                        prod.isSoldOut
+                                          ? "border-red-500/20 bg-red-500/10 text-red-400"
+                                          : "border-sky-500/20 bg-sky-500/10 text-sky-400"
+                                      }`}
+                                    >
+                                      {prod.isSoldOut
+                                        ? "Agotado"
+                                        : "Disponible"}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] font-mono font-black text-white bg-black/40 px-2.5 py-0.5 rounded border border-white/5">
+                                    ${prod.price?.toLocaleString("es-CO")}
+                                  </span>
+                                  <ArrowRight
+                                    size={14}
+                                    className="text-neutral-600 transition-transform group-hover:translate-x-0.5 group-hover:text-violet-400"
+                                    aria-hidden="true"
+                                  />
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* MODAL AJUSTES GIGANTE */}
         {isModalOpen && (

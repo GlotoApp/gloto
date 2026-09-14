@@ -399,7 +399,8 @@ const OrderCard = memo(
                           </div>
                           {item.options?.length > 0 && (
                             <div className=" text-[10px] text-neutral-400">
-                              Opciones: {item.options.join(", ")}
+                              Opciones:{" "}
+                              {item.options.map(getOptionLabel).join(", ")}
                             </div>
                           )}
                           {item.notes && (
@@ -554,7 +555,7 @@ const InvoicePreview = ({ order, onClose, onPrint }) => {
                     <div className="font-bold">{item.product_name}</div>
                     {item.options?.length > 0 && (
                       <div className="text-[10px]">
-                        {item.options.join(" · ")}
+                        {item.options.map(getOptionLabel).join(" · ")}
                       </div>
                     )}
                     {item.notes && (
@@ -827,11 +828,10 @@ const mapDatabaseOrderToUi = (order) => {
       product_id: item.product_id,
       product_name: item.product_name || "Producto",
       quantity: Number(item.quantity || 0),
+      init_price: Number(item.init_price ?? item.unit_price ?? 0),
       unit_price: Number(item.unit_price || 0),
       subtotal: Number(item.subtotal || 0),
-      options: Array.isArray(item.options)
-        ? item.options.map(getOptionLabel)
-        : [],
+      options: Array.isArray(item.options) ? item.options : [],
       notes: item.notes || "",
     })),
   };
@@ -1203,8 +1203,10 @@ const Ordenes = () => {
             name: item.product_name,
             qty: item.quantity,
             price: item.unit_price,
+            initPrice: item.init_price,
             notes: item.notes,
             options: item.options,
+            selectedOptions: item.options,
           })),
         },
       },
@@ -1394,10 +1396,20 @@ const Ordenes = () => {
       {/* Listado de Órdenes organizado por año y mes */}
       <main className="max-w-7xl mx-auto space-y-4 pb-20">
         {loadingOrders ? (
-          <div className="text-center py-20">
-            <p className="text-neutral-500 text-lg font-bold">
-              Cargando ordenes…
-            </p>
+          <div className="flex items-center justify-center gap-2 py-20">
+            {[0, 1, 2].map((dot) => (
+              <motion.span
+                key={dot}
+                className="h-2 w-2 rounded-full bg-blue-400"
+                animate={{ opacity: [0.25, 1, 0.25], scale: [0.8, 1, 0.8] }}
+                transition={{
+                  duration: 0.9,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: dot * 0.15,
+                }}
+              />
+            ))}
           </div>
         ) : ordersError ? (
           <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-6 py-12 text-center">
@@ -1504,9 +1516,14 @@ const Ordenes = () => {
               className="flex min-h-16 items-center justify-center border-t border-white/5 pt-4"
             >
               {loadingMoreOrders ? (
-                <span className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                  <LoaderCircle size={14} className="animate-spin" /> Cargando
-                  más órdenes
+                <span className="flex items-center justify-center gap-1.5 py-1">
+                  {[0, 1, 2].map((dot) => (
+                    <span
+                      key={dot}
+                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400"
+                      style={{ animationDelay: `${dot * 150}ms` }}
+                    />
+                  ))}
                 </span>
               ) : hasMoreOrders ? (
                 <span className="text-[9px] font-mono uppercase tracking-widest text-neutral-700">

@@ -392,9 +392,7 @@ export default function Inventario() {
         <div>
           <h1 className="text-2xl font-black tracking-tighter">Insumos</h1>
           <p className="mt-1 text-[10px] font-mono uppercase tracking-widest text-neutral-500">
-            {loading
-              ? "Cargando inventario..."
-              : "Control de existencias y stock de insumos"}
+            Control de existencias y stock de insumos
           </p>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -425,6 +423,17 @@ export default function Inventario() {
         </div>
       </header>
       <main className="mx-auto max-w-7xl space-y-5 pb-20">
+        {loading && (
+          <div className="flex items-center justify-center gap-2 py-10">
+            {[0, 1, 2].map((dot) => (
+              <span
+                key={dot}
+                className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
+                style={{ animationDelay: `${dot * 150}ms` }}
+              />
+            ))}
+          </div>
+        )}
         <div className="flex flex-col gap-3 rounded-2xl border border-white/5 bg-neutral-900/30 p-4 lg:flex-row">
           <div className="relative flex-1">
             <Search
