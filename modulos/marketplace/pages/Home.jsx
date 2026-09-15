@@ -789,7 +789,7 @@ const Home = () => {
                 <Link
                   key={t.slug}
                   to={`/marketplace/tienda/${t.slug}`}
-                  className="group relative flex flex-col rounded-3xl bg-surface  p-3 transition-all duration-300 hover:shadow-lg hover:shadow-primary-container/10"
+                  className="group relative flex flex-col rounded-3xl bg-surface  p-3 transition-all duration-300 hover:shadow-lg hover:translate-y-0.5 "
                 >
                   {/* Contenedor de portada con logo superpuesto */}
                   <div className="relative flex items-center justify-center h-20 sm:h-24 rounded-2xl bg-background border border-outline/10 mb-3 overflow-hidden">
