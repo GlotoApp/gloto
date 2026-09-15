@@ -296,17 +296,44 @@ const Carrito = ({ onIrAPagar }) => {
                   </div>
 
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <h4
+                    <div
                       style={{
-                        fontSize: "15px",
-                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "baseline",
+                        justifyContent: "space-between",
+                        gap: "8px",
                         marginBottom: "6px",
+                        width: "100%",
                       }}
                     >
-                      {p.varianteNombre
-                        ? p.nombre.replace(` · ${p.varianteNombre}`, "")
-                        : p.nombre}
-                    </h4>
+                      <h4
+                        style={{
+                          fontSize: "15px",
+                          fontWeight: 700,
+                          margin: 0,
+                          display: "flex",
+                          alignItems: "baseline",
+                          gap: "6px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span>
+                          {p.varianteNombre
+                            ? p.nombre.replace(` · ${p.varianteNombre}`, "")
+                            : p.nombre}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "14px",
+                            fontWeight: 800,
+                            color: "#fff",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          - {fmt((p.precioBase ?? p.precio) * qty)}
+                        </span>
+                      </h4>
+                    </div>
                     {p.varianteNombre && (
                       <div
                         style={{
@@ -316,9 +343,18 @@ const Carrito = ({ onIrAPagar }) => {
                           marginBottom: "10px",
                         }}
                       >
-                        {p.varianteNombre.split(" · ").map((opt) => (
+                        {(Array.isArray(p.opciones) && p.opciones.length > 0
+                          ? p.opciones
+                          : p.varianteNombre.split(" · ").map((opt, index) => ({
+                              nombre: opt,
+                              precioExtra:
+                                index === 0 && Number(p.precioExtraTotal) > 0
+                                  ? Number(p.precioExtraTotal)
+                                  : 0,
+                            }))
+                        ).map((opt, index) => (
                           <span
-                            key={opt}
+                            key={`${opt.nombre}-${index}`}
                             style={{
                               fontSize: "12px",
                               fontWeight: 700,
@@ -329,22 +365,14 @@ const Carrito = ({ onIrAPagar }) => {
                               lineHeight: 1.4,
                             }}
                           >
-                            {opt}
+                            {opt.nombre}
+                            {Number(opt.precioExtra) > 0
+                              ? ` +${fmt(Number(opt.precioExtra))}`
+                              : ""}
                           </span>
                         ))}
                       </div>
                     )}
-                    <span
-                      style={{
-                        fontSize: "14px",
-                        fontWeight: 800,
-                        color: "#fff",
-                        display: "block",
-                        marginBottom: p.notas ? "6px" : "0",
-                      }}
-                    >
-                      {fmt(p.precio * qty)}
-                    </span>
                     {p.notas && (
                       <p
                         style={{
@@ -388,61 +416,87 @@ const Carrito = ({ onIrAPagar }) => {
                   <div
                     style={{
                       display: "flex",
+                      flexDirection: "column",
                       alignItems: "center",
-                      gap: "10px",
-                      background: "#131313",
-                      borderRadius: "100px",
-                      padding: "6px 12px",
+                      justifyContent: "space-between",
+                      gap: "15px",
                     }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => quitar(p.id)}
+                    <div
                       style={{
-                        color: "#fff",
-                        background: "none",
-                        border: "none",
-                        fontSize: "16px",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        lineHeight: 1,
-                        padding: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        background: "#131313",
+                        borderRadius: "100px",
+                        padding: "6px 12px",
                       }}
-                      aria-label={`Quitar ${p.nombre}`}
                     >
-                      −
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => quitar(p.id)}
+                        style={{
+                          color: "#fff",
+                          background: "none",
+                          border: "none",
+                          fontSize: "16px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          lineHeight: 1,
+                          padding: 0,
+                        }}
+                        aria-label={`Quitar ${p.nombre}`}
+                      >
+                        −
+                      </button>
+                      <span
+                        style={{
+                          fontSize: "13px",
+                          fontWeight: 800,
+                          minWidth: "14px",
+                          textAlign: "center",
+                        }}
+                      >
+                        {qty}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (alcanzoStock) return;
+                          agregar(p.id);
+                        }}
+                        disabled={alcanzoStock}
+                        style={{
+                          color: alcanzoStock
+                            ? "rgba(255,255,255,0.3)"
+                            : "#fff",
+                          background: "none",
+                          border: "none",
+                          fontSize: "16px",
+                          fontWeight: 700,
+                          cursor: alcanzoStock ? "not-allowed" : "pointer",
+                          lineHeight: 1,
+                          padding: 0,
+                        }}
+                        aria-label={`Agregar ${p.nombre}`}
+                      >
+                        +
+                      </button>
+                    </div>
                     <span
                       style={{
-                        fontSize: "13px",
+                        fontSize: "12px",
                         fontWeight: 800,
-                        minWidth: "14px",
-                        textAlign: "center",
+                        color: "#fff",
+                        whiteSpace: "nowrap",
                       }}
                     >
-                      {qty}
+                      {fmt(
+                        ((Number(p.precioBase ?? p.precio) || 0) +
+                          (Number(p.precioExtraTotal) || 0)) *
+                          qty,
+                      )}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (alcanzoStock) return;
-                        agregar(p.id);
-                      }}
-                      disabled={alcanzoStock}
-                      style={{
-                        color: alcanzoStock ? "rgba(255,255,255,0.3)" : "#fff",
-                        background: "none",
-                        border: "none",
-                        fontSize: "16px",
-                        fontWeight: 700,
-                        cursor: alcanzoStock ? "not-allowed" : "pointer",
-                        lineHeight: 1,
-                        padding: 0,
-                      }}
-                      aria-label={`Agregar ${p.nombre}`}
-                    >
-                      +
-                    </button>
                   </div>
                 </div>
               );

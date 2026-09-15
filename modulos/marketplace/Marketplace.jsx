@@ -56,12 +56,7 @@ const Marketplace = () => {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/tienda/:slug" element={<Shop />} />
-            <Route
-              path="/seguimiento"
-              element={
-                <SeguimientoPedido onCerrar={() => navigate("/marketplace")} />
-              }
-            />
+            <Route path="/seguimiento" element={<SeguimientoPedido />} />
           </Routes>
         </CartProvider>
       </main>

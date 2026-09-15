@@ -418,6 +418,7 @@ const POS = () => {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([{ id: "all", name: "Todo" }]);
   const [categoryMap, setCategoryMap] = useState({});
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [businessId, setBusinessId] = useState(null);
   const toastTimers = useRef({});
@@ -451,9 +452,12 @@ const POS = () => {
   }, [isModalOpen]);
 
   const fetchCategoriesForBusiness = async (businessId) => {
+    setIsLoadingCategories(true);
+
     if (!businessId) {
       setCategories([{ id: "all", name: "Todo" }]);
       setCategoryMap({});
+      setIsLoadingCategories(false);
       return { categories: [{ id: "all", name: "Todo" }], categoryMap: {} };
     }
 
@@ -483,6 +487,8 @@ const POS = () => {
     } catch (error) {
       console.error("Error cargando categorías:", error);
       return { categories: [{ id: "all", name: "Todo" }], categoryMap: {} };
+    } finally {
+      setIsLoadingCategories(false);
     }
   };
 
@@ -634,6 +640,7 @@ const POS = () => {
         setProducts([]);
         setCategories([{ id: "all", name: "Todo" }]);
         setCategoryMap({});
+        setIsLoadingCategories(false);
         setIsLoadingProducts(false);
         return;
       }
@@ -647,6 +654,7 @@ const POS = () => {
       if (error) {
         console.error("Error cargando perfil:", error);
         setProducts([]);
+        setIsLoadingCategories(false);
         setIsLoadingProducts(false);
         return;
       }
@@ -656,6 +664,7 @@ const POS = () => {
         setProducts([]);
         setCategories([{ id: "all", name: "Todo" }]);
         setCategoryMap({});
+        setIsLoadingCategories(false);
         setIsLoadingProducts(false);
         return;
       }
@@ -2810,22 +2819,29 @@ const POS = () => {
               )}
             </div>
             <div className="flex gap-2 p-2 sticky top-0 bg-background/90 backdrop-blur-md z-10 overflow-x-auto overflow-y-hidden whitespace-nowrap scrollbar-hide no-scrollbar mt-2">
-              {categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => {
-                    setSelectedCategory(cat.id);
-                    setSearchTerm("");
-                  }}
-                  className={`flex-shrink-0 py-2 px-6 rounded-xl font-bold text-xs uppercase tracking-wider transition-all duration-300 ${
-                    selectedCategory === cat.id
-                      ? "bg-primary-container text-on-surface shadow-lg shadow-primary-container/20"
-                      : "bg-surface text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
-                  }`}
-                >
-                  {cat.name}
-                </button>
-              ))}
+              {isLoadingCategories
+                ? [...Array(3)].map((_, idx) => (
+                    <div
+                      key={idx}
+                      className="flex-shrink-0 h-8 w-24 rounded-xl bg-surface animate-pulse"
+                    />
+                  ))
+                : categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => {
+                        setSelectedCategory(cat.id);
+                        setSearchTerm("");
+                      }}
+                      className={`flex-shrink-0 py-2 px-6 rounded-xl font-bold text-xs uppercase tracking-wider transition-all duration-300 ${
+                        selectedCategory === cat.id
+                          ? "bg-primary-container text-on-surface shadow-lg shadow-primary-container/20"
+                          : "bg-surface text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
+                      }`}
+                    >
+                      {cat.name}
+                    </button>
+                  ))}
             </div>
           </div>
 
@@ -2867,11 +2883,19 @@ const POS = () => {
                     onClick={() => addToCart(product)}
                     className="group relative bg-surface  rounded-[25px] hover:bg-surface-hover/50 hover:border-primary-container/40 transition-all duration-500 cursor-pointer flex flex-col active:scale-[0.97]"
                   >
-                    {Number(product.stock) <= 0 && (
-                      <div className="absolute top-2 left-2 z-20 px-2 py-1 rounded-full bg-red-600 text-white text-xs font-bold uppercase tracking-wider">
-                        Agotado
-                      </div>
-                    )}
+                    <div
+                      className={`absolute top-2 left-2 z-10 px-2 py-1 rounded-full text-white text-xs font-bold uppercase tracking-wider ${
+                        product.soldOut || Number(product.stock) <= 0
+                          ? "bg-red-600"
+                          : "bg-green-600"
+                      }`}
+                    >
+                      {product.soldOut || Number(product.stock) <= 0
+                        ? "Agotado"
+                        : Number(product.stock) > 99
+                          ? "Stock: 99+"
+                          : `Stock: ${Number(product.stock)}`}
+                    </div>
                     {/* Botón Info - Elevado con Glassmorphism */}
                     <button
                       onClick={(e) => {

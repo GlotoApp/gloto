@@ -223,9 +223,21 @@ export const CartProvider = ({ children }) => {
     cantidad = 1,
   }) => {
     const itemId = obtenerItemId(productoBase.id, variante, notas);
+    const precioBase = Number(productoBase.precio) || 0;
+    const precioExtraTotal = Number(variante?.precioExtra || 0);
 
     setProductos((prev) => {
       if (prev.some((p) => p.id === itemId)) return prev;
+      const opcionesSeleccionadas = Array.isArray(variante?.opciones)
+        ? variante.opciones.map((opt) => ({
+            id: opt.id,
+            nombre: opt.nombre,
+            precioExtra: Number(opt.precioExtra) || 0,
+          }))
+        : variante
+          ? [{ nombre: variante.nombre, precioExtra: precioExtraTotal }]
+          : [];
+
       const nuevo = {
         ...productoBase,
         id: itemId,
@@ -233,8 +245,11 @@ export const CartProvider = ({ children }) => {
         nombre: variante
           ? `${productoBase.nombre} · ${variante.nombre}`
           : productoBase.nombre,
-        precio: productoBase.precio + (variante?.precioExtra || 0),
+        precioBase,
+        precioExtraTotal,
+        precio: precioBase + precioExtraTotal,
         varianteNombre: variante?.nombre || null,
+        opciones: opcionesSeleccionadas,
         notas: notas.trim(),
       };
       return [...prev, nuevo];

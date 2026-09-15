@@ -1408,6 +1408,11 @@ const Productos = ({ section = "productos" }) => {
                       </button>
                     )}
                   </div>
+
+                  {/* Stock visible sobre la imagen, en la esquina inferior izquierda */}
+                  <div className="absolute bottom-2 left-2 rounded-full border border-white/15 bg-black/75 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white backdrop-blur-sm">
+                    Stock: {Number(item.stock || 0) > 99 ? "99+" : Number(item.stock || 0)}
+                  </div>
                 </div>
 
                 {/* SECCIÓN INTERMEDIA: Datos del Producto */}

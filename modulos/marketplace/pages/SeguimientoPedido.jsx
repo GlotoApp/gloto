@@ -15,6 +15,7 @@ import {
   Armchair,
   Navigation,
   X,
+  Star,
 } from "lucide-react";
 import { supabase } from "../../../src/lib/supabaseClient";
 import { useCart } from "./CartContext";
@@ -120,8 +121,34 @@ const SeguimientoPedido = ({ onCerrar }) => {
   const [fetchedPedido, setFetchedPedido] = useState(null);
   const [loadingPedido, setLoadingPedido] = useState(false);
   const [pedidoError, setPedidoError] = useState(null);
+  const [calificacionTienda, setCalificacionTienda] = useState(0);
+  const [guardandoCalificacion, setGuardandoCalificacion] = useState(false);
+  const [calificacionEnviada, setCalificacionEnviada] = useState(false);
 
   const orderNumber = searchParams.get("order");
+  const isRemoteTracking = Boolean(orderNumber && tokenParam);
+  const pedido = isRemoteTracking
+    ? fetchedPedido || pedidoActivo
+    : pedidoActivo || fetchedPedido;
+
+  useEffect(() => {
+    if (!pedido) return;
+
+    try {
+      const metadataPedido =
+        typeof pedido.metadata === "string"
+          ? JSON.parse(pedido.metadata)
+          : pedido.metadata || {};
+      const valorGuardado = Number(metadataPedido?.calificacion?.valor || 0);
+
+      if (valorGuardado > 0) {
+        setCalificacionTienda(valorGuardado);
+        setCalificacionEnviada(true);
+      }
+    } catch (error) {
+      console.error("Error leyendo la calificación del pedido:", error);
+    }
+  }, [pedido]);
 
   useEffect(() => {
     if (!orderNumber || !tokenParam) return;
@@ -151,6 +178,60 @@ const SeguimientoPedido = ({ onCerrar }) => {
             metodoEntrega,
           );
 
+          let nombreTienda = data.metadata?.tiendaSlug || data.order_number;
+          let slugTienda = data.metadata?.tiendaSlug || "";
+
+          if (data.business_id) {
+            const { data: negocioData, error: negocioError } = await supabase
+              .from("businesses")
+              .select("name, slug")
+              .eq("id", data.business_id)
+              .maybeSingle();
+
+            if (!negocioError && negocioData?.name) {
+              nombreTienda = negocioData.name;
+            }
+
+            if (!negocioError && negocioData?.slug) {
+              slugTienda = negocioData.slug;
+            }
+          }
+
+          const orderItems = data.order_items || [];
+          const productIds = orderItems
+            .map((item) => item.product_id)
+            .filter(Boolean);
+          let optionPricesByName = {};
+
+          if (productIds.length > 0) {
+            const { data: productOptions } = await supabase
+              .from("products_items")
+              .select("*")
+              .in("product_id", productIds);
+
+            (productOptions || []).forEach((option) => {
+              const optionName = String(
+                option.nombre ||
+                  option.name ||
+                  option.title ||
+                  option.label ||
+                  "",
+              )
+                .trim()
+                .toLowerCase();
+              if (!optionName) return;
+              optionPricesByName[optionName] = Number(
+                option.precio_extra ??
+                  option.precioExtra ??
+                  option.price_extra ??
+                  option.extra_price ??
+                  option.price ??
+                  option.monto ??
+                  0,
+              );
+            });
+          }
+
           const paymentMethodsFromMetadata = data.metadata?.payment_methods;
           const metodoPagoFromMetadata =
             Array.isArray(paymentMethodsFromMetadata) &&
@@ -170,19 +251,28 @@ const SeguimientoPedido = ({ onCerrar }) => {
 
           setFetchedPedido({
             ...data,
+            business_id: data.business_id || data.metadata?.business_id || null,
             numero: data.order_number,
-            nombreTienda: data.metadata?.tiendaSlug || data.order_number,
+            nombreTienda,
+            slugTienda,
             businessWhatsapp: data.metadata?.business_whatsapp || "",
             rawStatus: data.status,
             status: trackingStatus,
             metodoEntrega,
-            items: (data.order_items || []).map((item) => ({
+            items: orderItems.map((item) => ({
               id: item.id,
               nombre: item.product_name,
               cantidad: item.quantity,
               precio: item.unit_price,
               notas: item.notes || "",
-              opciones: item.options || [],
+              opciones: (item.options || []).map((option) => {
+                if (typeof option !== "string") return option;
+                return {
+                  nombre: option,
+                  precioExtra:
+                    optionPricesByName[option.trim().toLowerCase()] || 0,
+                };
+              }),
             })),
             metodoPago: metodoPagoFromMetadata,
             datosCliente: {
@@ -208,10 +298,6 @@ const SeguimientoPedido = ({ onCerrar }) => {
     fetchPedido();
   }, [pedidoActivo, orderNumber]);
 
-  const isRemoteTracking = Boolean(orderNumber && tokenParam);
-  const pedido = isRemoteTracking
-    ? fetchedPedido || pedidoActivo
-    : pedidoActivo || fetchedPedido;
   const estadoPedidoActual = isRemoteTracking
     ? pedido?.status || "recibido"
     : pedidoActivo
@@ -220,6 +306,15 @@ const SeguimientoPedido = ({ onCerrar }) => {
 
   const cerrar = () => {
     if (onCerrar) return onCerrar();
+
+    const slugTienda =
+      pedido?.slugTienda || pedido?.metadata?.tiendaSlug || pedido?.slug || "";
+
+    if (slugTienda) {
+      navigate(`/marketplace/tienda/${slugTienda}`);
+      return;
+    }
+
     navigate("/marketplace");
   };
 
@@ -309,10 +404,108 @@ const SeguimientoPedido = ({ onCerrar }) => {
     "",
   );
   const tieneWhatsappDestino = Boolean(whatsappDestino);
+
+  const handleCalificarTienda = async (valor) => {
+    if (
+      guardandoCalificacion ||
+      calificacionEnviada ||
+      valor === calificacionTienda
+    ) {
+      return;
+    }
+
+    setGuardandoCalificacion(true);
+    setCalificacionTienda(valor);
+
+    const businessId = pedido?.business_id || pedido?.metadata?.business_id;
+    const orderId = pedido?.id;
+
+    if (!businessId || !orderId) {
+      setGuardandoCalificacion(false);
+      return;
+    }
+
+    try {
+      const metadataActual =
+        typeof pedido.metadata === "string"
+          ? JSON.parse(pedido.metadata)
+          : pedido.metadata || {};
+
+      const metadataActualizado = {
+        ...metadataActual,
+        calificacion: {
+          valor,
+          fecha: new Date().toISOString(),
+          business_id: businessId,
+        },
+      };
+
+      const { error: errorOrden } = await supabase
+        .from("orders")
+        .update({
+          metadata: metadataActualizado,
+        })
+        .eq("id", orderId);
+
+      if (errorOrden) throw errorOrden;
+
+      const { data: infoActual, error: errorLectura } = await supabase
+        .from("business_info")
+        .select("rating, rating_count")
+        .eq("business_id", businessId)
+        .maybeSingle();
+
+      const ratingActual = Number(infoActual?.rating || 0);
+      const countActual = Number(infoActual?.rating_count || 0);
+      const nuevoCount = countActual + 1;
+      const nuevaCalificacion =
+        countActual === 0
+          ? Number(valor).toFixed(1)
+          : ((ratingActual * countActual + Number(valor)) / nuevoCount).toFixed(
+              1,
+            );
+
+      if (!errorLectura && infoActual) {
+        await supabase
+          .from("business_info")
+          .update({
+            rating: nuevaCalificacion,
+            rating_count: nuevoCount,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("business_id", businessId);
+      } else {
+        await supabase.from("business_info").upsert(
+          {
+            business_id: businessId,
+            rating: Number(valor).toFixed(1),
+            rating_count: 1,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "business_id" },
+        );
+      }
+
+      setCalificacionEnviada(true);
+      setFetchedPedido((prev) =>
+        prev
+          ? {
+              ...prev,
+              metadata: metadataActualizado,
+            }
+          : prev,
+      );
+    } catch (error) {
+      console.error("Error al guardar la calificación:", error);
+    } finally {
+      setGuardandoCalificacion(false);
+    }
+  };
+
   const irAWppTienda = () => {
     if (typeof window === "undefined" || !tieneWhatsappDestino) return;
     window.open(`https://wa.me/${whatsappDestino}`, "_blank");
-    onCerrar();
+    cerrar();
   };
 
   const obtenerPasos = (metodo) => {
@@ -359,7 +552,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
       >
         <button
           type="button"
-          onClick={onCerrar}
+          onClick={cerrar}
           style={{
             width: "36px",
             height: "36px",
@@ -670,7 +863,30 @@ const SeguimientoPedido = ({ onCerrar }) => {
                         paddingLeft: "6px",
                       }}
                     >
-                      • {opt}
+                      •{" "}
+                      {typeof opt === "string"
+                        ? opt
+                        : opt?.nombre || opt?.name || "Opción"}
+                      {Number(
+                        typeof opt === "string"
+                          ? 0
+                          : (opt?.precioExtra ??
+                              opt?.price_extra ??
+                              opt?.extra_price ??
+                              0),
+                      ) > 0 && (
+                        <span style={{ marginLeft: "4px", fontWeight: 700 }}>
+                          +
+                          {fmt(
+                            Number(
+                              opt.precioExtra ??
+                                opt.price_extra ??
+                                opt.extra_price ??
+                                0,
+                            ),
+                          )}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -809,6 +1025,109 @@ const SeguimientoPedido = ({ onCerrar }) => {
             )}
           </div>
         </div>
+
+        {!calificacionEnviada ? (
+          <div
+            style={{
+              background: "#131313",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: "16px",
+              padding: "14px 12px 12px",
+              marginTop: "16px",
+            }}
+          >
+            <p
+              style={{
+                fontSize: "12px",
+                fontWeight: 700,
+                color: "rgba(255,255,255,0.7)",
+                margin: "0 0 10px",
+                textAlign: "center",
+              }}
+            >
+              ¿Cómo calificarías a {pedido?.nombreTienda || "esta tienda"}?
+            </p>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                marginBottom: "8px",
+              }}
+            >
+              {[1, 2, 3, 4, 5].map((estrella) => {
+                const activa = estrella <= calificacionTienda;
+
+                return (
+                  <button
+                    key={estrella}
+                    type="button"
+                    onClick={() => handleCalificarTienda(estrella)}
+                    disabled={guardandoCalificacion}
+                    aria-label={`Calificar con ${estrella} estrella${estrella > 1 ? "s" : ""}`}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      cursor: guardandoCalificacion ? "default" : "pointer",
+                      opacity: guardandoCalificacion && !activa ? 0.7 : 1,
+                      transition: "transform 0.15s ease",
+                    }}
+                  >
+                    <Star
+                      size={28}
+                      fill={activa ? "#fbbf24" : "transparent"}
+                      stroke={activa ? "#fbbf24" : "rgba(255,255,255,0.35)"}
+                      strokeWidth={1.8}
+                      style={{
+                        transform: activa ? "scale(1.04)" : "scale(1)",
+                      }}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+
+            {calificacionTienda > 0 && (
+              <p
+                style={{
+                  fontSize: "12px",
+                  color: "rgba(255,255,255,0.7)",
+                  margin: 0,
+                  textAlign: "center",
+                }}
+              >
+                {guardandoCalificacion
+                  ? "Enviando calificación..."
+                  : `Gracias por calificar con ${calificacionTienda}/5`}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div
+            style={{
+              background: "#131313",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: "16px",
+              padding: "16px 12px",
+              marginTop: "16px",
+              textAlign: "center",
+            }}
+          >
+            <p
+              style={{
+                fontSize: "14px",
+                fontWeight: 700,
+                color: "rgba(255,255,255,0.9)",
+                margin: 0,
+              }}
+            >
+              ¡Gracias por tu calificación!
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Footer: siempre visible, sin importar en qué paso esté la línea de tiempo */}

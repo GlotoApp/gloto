@@ -51,6 +51,7 @@ const ProductoDetalle = ({
   tiendaNombre,
   tiendaLogo,
   tiendaSlug,
+  onAddedToCart,
 }) => {
   const {
     agregarConVariante,
@@ -252,9 +253,14 @@ const ProductoDetalle = ({
           id: selectedOptions.map((opt) => opt.id).join("__"),
           nombre: selectedOptions.map((opt) => opt.nombre).join(" · "),
           precioExtra: selectedOptions.reduce(
-            (sum, opt) => sum + (opt.precioExtra || 0),
+            (sum, opt) => sum + (Number(opt.precioExtra) || 0),
             0,
           ),
+          opciones: selectedOptions.map((opt) => ({
+            id: opt.id,
+            nombre: opt.nombre,
+            precioExtra: Number(opt.precioExtra) || 0,
+          })),
         }
       : null
     : opciones.find((v) => v.id === varianteId) || null;
@@ -321,6 +327,7 @@ const ProductoDetalle = ({
       notas,
       cantidad,
     });
+    onAddedToCart?.(producto);
     onClose();
   };
 

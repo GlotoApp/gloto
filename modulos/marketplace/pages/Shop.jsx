@@ -43,6 +43,101 @@ const fmt = (n) =>
     maximumFractionDigits: 0,
   }).format(n);
 
+const parseMinutes = (value) => {
+  if (!value) return null;
+  const [hours, minutes] = String(value).split(":").map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+  return hours * 60 + minutes;
+};
+
+const formatHourLabel = (value) => {
+  if (!value) return "";
+
+  const [hours, minutes] = String(value).split(":").map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return value;
+
+  const suffix = hours >= 12 ? "PM" : "AM";
+  const normalizedHours = hours % 12 === 0 ? 12 : hours % 12;
+  return `${normalizedHours}:${String(minutes).padStart(2, "0")} ${suffix}`;
+};
+
+const getBusinessHoursStatus = (rows = []) => {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return {
+      isOpen: false,
+      label: "Cerrado",
+      openText: "",
+      closeText: "",
+      nextOpenText: "",
+    };
+  }
+
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const todayWeekday = ((now.getDay() + 6) % 7) + 1;
+  const previousWeekday = todayWeekday === 1 ? 7 : todayWeekday - 1;
+
+  const openRows = rows.filter(
+    (row) => row.is_open && row.open_time && row.close_time,
+  );
+
+  const activeRow = openRows.find((row) => {
+    const rowDay = Number(row.day_of_week);
+    const openMinutes = parseMinutes(row.open_time);
+    const closeMinutes = parseMinutes(row.close_time);
+    const isSameDay = rowDay === todayWeekday;
+    const isPreviousDayNextClose =
+      row.close_day === "next" && rowDay === previousWeekday;
+
+    if (!isSameDay && !isPreviousDayNextClose) return false;
+
+    if (isSameDay) {
+      return nowMinutes >= openMinutes && nowMinutes < closeMinutes;
+    }
+
+    return nowMinutes < closeMinutes;
+  });
+
+  if (activeRow) {
+    return {
+      isOpen: true,
+      label: "Abierto",
+      openText: formatHourLabel(activeRow.open_time),
+      closeText: formatHourLabel(activeRow.close_time),
+      nextOpenText: formatHourLabel(activeRow.open_time),
+    };
+  }
+
+  const nextOpenRow = openRows
+    .map((row) => ({
+      ...row,
+      sortDay: Number(row.day_of_week),
+      sortMinutes: parseMinutes(row.open_time),
+    }))
+    .filter((row) => {
+      const rowDay = Number(row.day_of_week);
+      const openMinutes = parseMinutes(row.open_time);
+
+      if (rowDay === todayWeekday) return openMinutes > nowMinutes;
+      if (rowDay > todayWeekday) return true;
+      return rowDay < todayWeekday;
+    })
+    .sort((a, b) => {
+      const dayDiff =
+        ((Number(a.day_of_week) - todayWeekday + 7) % 7) * 1440 -
+        ((Number(b.day_of_week) - todayWeekday + 7) % 7) * 1440;
+      return dayDiff + (parseMinutes(a.open_time) - parseMinutes(b.open_time));
+    })[0];
+
+  return {
+    isOpen: false,
+    label: "Cerrado",
+    openText: nextOpenRow ? formatHourLabel(nextOpenRow.open_time) : "",
+    closeText: "",
+    nextOpenText: nextOpenRow ? formatHourLabel(nextOpenRow.open_time) : "",
+  };
+};
+
 /* ── Cart Portal ── */
 const CartPortal = ({ totalItems, totalPrecio, fmt, onOpen, isAnimating }) =>
   createPortal(
@@ -101,6 +196,86 @@ const CartPortal = ({ totalItems, totalPrecio, fmt, onOpen, isAnimating }) =>
     document.body,
   );
 
+const CartDropAnimation = ({ product, onComplete }) => {
+  useEffect(() => {
+    const timer = window.setTimeout(onComplete, 850);
+    return () => window.clearTimeout(timer);
+  }, [onComplete]);
+
+  return createPortal(
+    <div
+      aria-hidden="true"
+      style={{
+        position: "fixed",
+        left: "50%",
+        top: "32%",
+        zIndex: 500,
+        pointerEvents: "none",
+        animation: "cartDrop 850ms cubic-bezier(0.22, 0.8, 0.32, 1) forwards",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          width: "190px",
+          padding: "10px",
+          borderRadius: "14px",
+          background: "rgba(24,24,24,0.96)",
+          border: "1px solid rgba(255,255,255,0.14)",
+          boxShadow: "0 14px 36px rgba(0,0,0,0.45)",
+        }}
+      >
+        <div
+          style={{
+            width: "42px",
+            height: "42px",
+            flexShrink: 0,
+            overflow: "hidden",
+            borderRadius: "10px",
+            background: "#131313",
+          }}
+        >
+          {product.image ? (
+            <img
+              src={product.image}
+              alt=""
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          ) : (
+            <span
+              style={{
+                display: "grid",
+                placeItems: "center",
+                width: "100%",
+                height: "100%",
+                color: "#fff",
+                fontWeight: 800,
+              }}
+            >
+              {product.nombre?.charAt(0).toUpperCase() || "+"}
+            </span>
+          )}
+        </div>
+        <span
+          style={{
+            overflow: "hidden",
+            color: "#fff",
+            fontSize: "12px",
+            fontWeight: 800,
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {product.nombre}
+        </span>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
 /* ── Main ── */
 const Shop = () => {
   const { slug } = useParams();
@@ -149,6 +324,7 @@ const Shop = () => {
   const [productoDetalle, setProductoDetalle] = useState(null);
   const [seguimientoOpen, setSeguimientoOpen] = useState(false);
   const [cartPulse, setCartPulse] = useState(false);
+  const [cartDropProduct, setCartDropProduct] = useState(null);
   const [tiendaAnteriorModal, setTiendaAnteriorModal] = useState("");
   const [tiendaActualModal, setTiendaActualModal] = useState("");
   const [tiendaConProductosModal, setTiendaConProductosModal] = useState("");
@@ -232,25 +408,50 @@ const Shop = () => {
         const data = tiendaQuery.data;
         if (!data) throw new Error("Tienda no encontrada");
 
-        const businessInfoRes = await supabase
+        const businessInfoQuery = supabase
           .from("business_info")
           .select(
-            `
-            rating,
-            rating_count,
-            delivery_time_min,
-            delivery_time_max,
-            delivery_fee,
-            free_delivery_min_order,
-            categoria,
-            whatsapp_phone
-          `,
+            "rating,rating_count,delivery_time_min,delivery_time_max,delivery_fee,free_delivery_min_order,categoria,whatsapp_phone,address",
           )
           .eq("business_id", data.id)
           .single();
 
-        const info = businessInfoRes.error ? {} : businessInfoRes.data || {};
+        const [
+          businessInfoRes,
+          categoriasRes,
+          productosRes,
+          availabilityRes,
+          businessHoursRes,
+        ] = await Promise.all([
+          businessInfoQuery,
+          supabase
+            .from("categories")
+            .select("id,name")
+            .eq("business_id", data.id),
+          supabase
+            .from("products")
+            .select(
+              "id,name,description,price,stock,image_url,is_active,is_sold_out,category_id,order_index,created_at",
+            )
+            .eq("business_id", data.id)
+            .eq("is_active", true)
+            .order("order_index", { ascending: true })
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("product_availability")
+            .select("product_id,is_available")
+            .eq("business_id", data.id),
+          supabase
+            .from("business_hours")
+            .select(
+              "day_of_week, shift_index, is_open, open_time, close_time, close_day",
+            )
+            .eq("business_id", data.id)
+            .order("day_of_week", { ascending: true })
+            .order("shift_index", { ascending: true }),
+        ]);
 
+        const info = businessInfoRes.error ? {} : businessInfoRes.data || {};
         const rating = info?.rating ? parseFloat(info.rating) : 4.5;
         const reviews = info?.rating_count || 0;
         const deliveryMin = info?.delivery_time_min || 20;
@@ -259,27 +460,7 @@ const Shop = () => {
           ? parseFloat(info.delivery_fee)
           : 2500;
         const categoria = info?.categoria || "Restaurante";
-
-        const [categoriasRes, productosRes, availabilityRes] =
-          await Promise.all([
-            supabase
-              .from("categories")
-              .select("id,name")
-              .eq("business_id", data.id),
-            supabase
-              .from("products")
-              .select(
-                "id,name,description,price,stock,image_url,is_active,is_sold_out,category_id,order_index,created_at",
-              )
-              .eq("business_id", data.id)
-              .eq("is_active", true)
-              .order("order_index", { ascending: true })
-              .order("created_at", { ascending: true }),
-            supabase
-              .from("product_availability")
-              .select("product_id,is_available")
-              .eq("business_id", data.id),
-          ]);
+        const direccion = info?.address || "";
 
         if (categoriasRes.error) {
           console.error("Error al obtener categorías:", categoriasRes.error);
@@ -297,6 +478,9 @@ const Shop = () => {
         const availabilityMap = (availabilityRes.data || []).reduce(
           (acc, item) => ({ ...acc, [item.product_id]: item.is_available }),
           {},
+        );
+        const businessHoursStatus = getBusinessHoursStatus(
+          businessHoursRes.data || [],
         );
         setAvailabilityByProduct(availabilityMap);
         setShopBusinessId(data.id);
@@ -392,9 +576,59 @@ const Shop = () => {
           };
         };
 
+        const mapearProductos = () =>
+          productosData.map((producto) => {
+            const categoria = categoriasMapeadas.find(
+              (cat) => cat.id === producto.category_id,
+            );
+
+            const opciones = (productsItemsMap[producto.id] || []).map(
+              (item) => ({
+                id: item.id,
+                nombre: getOptionLabel(item),
+                precioExtra: getOptionPrice(item),
+                obligatorio: getOptionMandatory(item),
+                tags: getOptionTags(item),
+              }),
+            );
+
+            const grupos = (productsGroupsMap[producto.id] || [])
+              .map((group) =>
+                normalizeGroup(group, itemsByGroup[group.id] || []),
+              )
+              .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+
+            return {
+              id: producto.id,
+              nombre: producto.name,
+              desc: producto.description || "",
+              precio: Number(producto.price) || 0,
+              stock: producto.stock || 0,
+              isSoldOut: producto.is_sold_out || producto.is_soldout || false,
+              isAvailable:
+                availabilityMap[producto.id] ??
+                (Number(producto.stock || 0) > 0 &&
+                  !Boolean(producto.is_sold_out || producto.is_soldout)),
+              orderIndex: Number(producto.order_index || 0),
+              cat: categoria?.nombre || "Otros",
+              image: producto.image_url,
+              isActive: producto.is_active,
+              variantes: opciones,
+              product_option_groups: grupos,
+              option_groups: grupos,
+              groups: grupos,
+            };
+          });
+
+        const productosMapeados = mapearProductos();
+
+        // Pintar la tienda con los datos críticos sin esperar opciones secundarias.
+        setCategorias(categoriasMapeadas);
+        setProductosState(productosMapeados);
+
         if (productosData.length > 0) {
           const productIds = productosData.map((producto) => producto.id);
-          const [itemsRes, groupsRes] = await Promise.all([
+          Promise.all([
             supabase
               .from("products_items")
               .select("*")
@@ -404,84 +638,49 @@ const Shop = () => {
               .select("*")
               .in("product_id", productIds)
               .order("order_index", { ascending: true }),
-          ]);
-
-          if (itemsRes.error) {
-            console.error(
-              "Error al obtener opciones de producto:",
-              itemsRes.error,
-            );
-          } else {
-            (itemsRes.data || []).forEach((item) => {
-              if (item.option_group_id) {
-                if (!itemsByGroup[item.option_group_id]) {
-                  itemsByGroup[item.option_group_id] = [];
+          ]).then(([itemsRes, groupsRes]) => {
+            if (itemsRes.error) {
+              console.error(
+                "Error al obtener opciones de producto:",
+                itemsRes.error,
+              );
+            } else {
+              (itemsRes.data || []).forEach((item) => {
+                if (item.option_group_id) {
+                  if (!itemsByGroup[item.option_group_id]) {
+                    itemsByGroup[item.option_group_id] = [];
+                  }
+                  itemsByGroup[item.option_group_id].push(item);
+                } else {
+                  if (!productsItemsMap[item.product_id]) {
+                    productsItemsMap[item.product_id] = [];
+                  }
+                  productsItemsMap[item.product_id].push(item);
                 }
-                itemsByGroup[item.option_group_id].push(item);
-              } else {
-                if (!productsItemsMap[item.product_id]) {
-                  productsItemsMap[item.product_id] = [];
-                }
-                productsItemsMap[item.product_id].push(item);
-              }
-            });
-          }
+              });
+            }
 
-          if (groupsRes.error) {
-            console.error(
-              "Error al obtener grupos de opciones:",
-              groupsRes.error,
-            );
-          } else {
-            (groupsRes.data || []).forEach((group) => {
-              if (!productsGroupsMap[group.product_id]) {
-                productsGroupsMap[group.product_id] = [];
-              }
-              productsGroupsMap[group.product_id].push(group);
-            });
-          }
+            if (groupsRes.error) {
+              console.error(
+                "Error al obtener grupos de opciones:",
+                groupsRes.error,
+              );
+            } else {
+              (groupsRes.data || []).forEach((group) => {
+                if (!productsGroupsMap[group.product_id]) {
+                  productsGroupsMap[group.product_id] = [];
+                }
+                productsGroupsMap[group.product_id].push(group);
+              });
+            }
+
+            const productosConOpciones = mapearProductos();
+            setProductosState(productosConOpciones);
+            if (!hayCarritoOtraTienda) {
+              setProductos(productosConOpciones);
+            }
+          });
         }
-
-        const productosMapeados = productosData.map((producto) => {
-          const categoria = categoriasMapeadas.find(
-            (cat) => cat.id === producto.category_id,
-          );
-
-          const opciones = (productsItemsMap[producto.id] || []).map(
-            (item) => ({
-              id: item.id,
-              nombre: getOptionLabel(item),
-              precioExtra: getOptionPrice(item),
-              obligatorio: getOptionMandatory(item),
-              tags: getOptionTags(item),
-            }),
-          );
-
-          const grupos = (productsGroupsMap[producto.id] || [])
-            .map((group) => normalizeGroup(group, itemsByGroup[group.id] || []))
-            .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
-
-          return {
-            id: producto.id,
-            nombre: producto.name,
-            desc: producto.description || "",
-            precio: Number(producto.price) || 0,
-            stock: producto.stock || 0,
-            isSoldOut: producto.is_sold_out || producto.is_soldout || false,
-            isAvailable:
-              availabilityMap[producto.id] ??
-              (Number(producto.stock || 0) > 0 &&
-                !Boolean(producto.is_sold_out || producto.is_soldout)),
-            orderIndex: Number(producto.order_index || 0),
-            cat: categoria?.nombre || "Otros",
-            image: producto.image_url,
-            isActive: producto.is_active,
-            variantes: opciones,
-            product_option_groups: grupos,
-            option_groups: grupos,
-            groups: grupos,
-          };
-        });
 
         const primerProductoConImagen =
           productosMapeados.find((producto) => producto.image)?.image || "";
@@ -492,7 +691,12 @@ const Shop = () => {
         setTiendaData({
           nombre: data.name,
           tipo: categoria,
-          horario: "Abierto · Cierra 11:00 PM",
+          isOpen: businessHoursStatus.isOpen,
+          horario: businessHoursStatus.isOpen
+            ? `Abierto · Abre ${businessHoursStatus.openText} · Cierra ${businessHoursStatus.closeText}`
+            : businessHoursStatus.nextOpenText
+              ? `Cerrado · Abre ${businessHoursStatus.nextOpenText}`
+              : "Cerrado",
           rating,
           reviews,
           tiempo: `${deliveryMin}–${deliveryMax} min`,
@@ -500,21 +704,30 @@ const Shop = () => {
             deliveryFee === 0
               ? "Gratis"
               : `$${deliveryFee.toLocaleString("es-CO")}`,
-          direccion: "Cra. 5 #34-21, El Centro",
+          direccion,
           descripcion: "",
-          logo: data.logo_url
-            ? await resolveImageUrl(data.logo_url)
-            : "/default.png",
-          cover: portadaUrl
-            ? await resolveImageUrl(portadaUrl)
-            : "/default.png",
+          logo: data.logo_url || "/default.png",
+          cover: portadaUrl || "/default.png",
         });
 
-        setCategorias(categoriasMapeadas);
-        setProductosState(productosMapeados);
+        setIsLoadingProductos(false);
+        Promise.all([
+          data.logo_url
+            ? resolveImageUrl(data.logo_url)
+            : Promise.resolve("/default.png"),
+          portadaUrl
+            ? resolveImageUrl(portadaUrl)
+            : Promise.resolve("/default.png"),
+        ]).then(([logo, cover]) => {
+          setTiendaData((current) => ({ ...current, logo, cover }));
+        });
 
         const hayCarritoOtraTienda =
           tiendaSlug && tiendaSlug !== slug && totalItemsRef.current > 0;
+
+        if (!hayCarritoOtraTienda) {
+          setProductos(productosMapeados);
+        }
 
         const normalizeWhatsappNumber = (value) => {
           const digits = String(value || "").replace(/\D/g, "");
@@ -524,13 +737,8 @@ const Shop = () => {
         };
 
         if (!hayCarritoOtraTienda) {
-          setProductos(productosMapeados);
           setNombreTienda(data.name);
-          setLogoTienda(
-            data.logo_url
-              ? await resolveImageUrl(data.logo_url)
-              : "/default.png",
-          );
+          setLogoTienda(data.logo_url || "/default.png");
           setBusinessId(data.id);
           setBusinessWhatsapp(
             normalizeWhatsappNumber(info?.whatsapp_phone || "") || "",
@@ -744,6 +952,10 @@ const Shop = () => {
     setProductoDetalle(producto);
   };
 
+  const animarProductoAlCarrito = (producto) => {
+    setCartDropProduct({ ...producto, animationId: Date.now() });
+  };
+
   // abrirCarrito ahora viene del CartContext (abre <Carrito /> de pantalla completa)
 
   const shareUrl = window.location.href;
@@ -803,6 +1015,12 @@ const Shop = () => {
         @keyframes shimmer {
           0% { background-position: -200% 0; }
           100% { background-position: 200% 0; }
+        }
+        @keyframes cartDrop {
+          0% { top: 32%; opacity: 0; transform: translate(-50%, -50%) scale(1); }
+          12% { top: 32%; opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          78% { top: calc(100% - 90px); opacity: 1; transform: translate(-50%, -50%) scale(0.62) rotate(3deg); }
+          100% { top: calc(100% - 54px); opacity: 0; transform: translate(-50%, -50%) scale(0.18) rotate(-2deg); }
         }
       `}</style>
       <div
@@ -1093,13 +1311,48 @@ const Shop = () => {
                 {tiendaData.nombre}
               </h1>
 
-              {/* Métricas en fila */}
               <div
                 style={{
                   display: "flex",
-                  gap: "20px",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  marginBottom: "16px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  style={{
+                    width: "7px",
+                    height: "7px",
+                    borderRadius: "50%",
+                    background: tiendaData.isOpen ? "#00c448" : "#f43f5e",
+                    boxShadow: tiendaData.isOpen
+                      ? "0 0 7px #00c448"
+                      : "0 0 7px #f43f5e",
+                    flexShrink: 0,
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "#fff",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {tiendaData.horario}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "14px",
                   marginBottom: "16px",
                   justifyContent: "center",
+                  flexWrap: "wrap",
+                  alignItems: "center",
                 }}
               >
                 <div
@@ -1115,6 +1368,7 @@ const Shop = () => {
                     ({tiendaData.reviews})
                   </span>
                 </div>
+
                 <div
                   style={{ display: "flex", alignItems: "center", gap: "5px" }}
                 >
@@ -1132,6 +1386,7 @@ const Shop = () => {
                     {tiendaData.tiempo}
                   </span>
                 </div>
+
                 <div
                   style={{ display: "flex", alignItems: "center", gap: "5px" }}
                 >
@@ -1148,50 +1403,35 @@ const Shop = () => {
                 </div>
               </div>
 
-              {/* Horario + dirección */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "8px",
-                  padding: "10px 14px",
-                  borderRadius: "12px",
-                  marginBottom: "20px",
-                }}
-              >
-                <span
+              {tiendaData.direccion && (
+                <div
                   style={{
-                    width: "7px",
-                    height: "7px",
-                    borderRadius: "50%",
-                    background: "#00c448",
-                    boxShadow: "0 0 7px #00c448",
-                    flexShrink: 0,
-                  }}
-                />
-                <span
-                  style={{ fontSize: "12px", fontWeight: 600, color: "#fff" }}
-                >
-                  {tiendaData.horario}
-                </span>
-                <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
-                <MapPin
-                  size={11}
-                  style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}
-                />
-                <span
-                  style={{
-                    fontSize: "12px",
-                    color: "rgba(255,255,255,0.4)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    flexWrap: "wrap",
+                    marginBottom: "20px",
                   }}
                 >
-                  {tiendaData.direccion}
-                </span>
-              </div>
+                  <MapPin
+                    size={11}
+                    style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}
+                  />
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      color: "rgba(255,255,255,0.4)",
+                      maxWidth: "190px",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {tiendaData.direccion}
+                  </span>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -1450,6 +1690,12 @@ const Shop = () => {
             displayedProducts.map((p, idx) => {
               const qty = obtenerCantidadProducto(p);
               const tieneOpcionesProducto = tieneOpciones(p);
+              const precioExtraMax = Math.max(
+                0,
+                ...(Array.isArray(p.variantes) ? p.variantes : []).map((item) =>
+                  Number(item.precioExtra || 0),
+                ),
+              );
               const isLast = idx === displayedProducts.length - 1;
               return (
                 <div key={p.id}>
@@ -1502,15 +1748,37 @@ const Shop = () => {
                       >
                         {p.desc}
                       </p>
-                      <span
+                      <div
                         style={{
-                          fontWeight: 800,
-                          fontSize: "15px",
-                          color: "#fff",
+                          display: "flex",
+                          alignItems: "baseline",
+                          gap: "8px",
+                          flexWrap: "wrap",
+                          columnGap: "8px",
+                          rowGap: "4px",
                         }}
                       >
-                        {fmt(p.precio)}
-                      </span>
+                        <span
+                          style={{
+                            fontWeight: 800,
+                            fontSize: "15px",
+                            color: "#fff",
+                          }}
+                        >
+                          {fmt(p.precio)}
+                        </span>
+                        {precioExtraMax > 0 && (
+                          <span
+                            style={{
+                              fontWeight: 700,
+                              fontSize: "12px",
+                              color: "rgba(255,255,255,0.65)",
+                            }}
+                          >
+                            +{fmt(precioExtraMax)}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Imagen + botón superpuesto */}
@@ -1943,6 +2211,15 @@ const Shop = () => {
           tiendaNombre={tiendaData?.nombre}
           tiendaLogo={tiendaData?.logo}
           tiendaSlug={slug}
+          onAddedToCart={animarProductoAlCarrito}
+        />
+      )}
+
+      {cartDropProduct && (
+        <CartDropAnimation
+          key={cartDropProduct.animationId}
+          product={cartDropProduct}
+          onComplete={() => setCartDropProduct(null)}
         />
       )}
 
