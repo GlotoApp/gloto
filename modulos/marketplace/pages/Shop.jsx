@@ -73,78 +73,81 @@ const getBusinessHoursStatus = (rows = []) => {
   }
 
   const now = new Date();
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const todayWeekday = ((now.getDay() + 6) % 7) + 1;
-  const previousWeekday = todayWeekday === 1 ? 7 : todayWeekday - 1;
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const minutesPerWeek = 7 * 1440;
+  const currentWeekMinute = (todayWeekday - 1) * 1440 + nowMinutes;
 
-  const openRows = rows.filter(
-    (row) => row.is_open && row.open_time && row.close_time,
+  const intervals = rows
+    .filter((row) => row.is_open && row.open_time && row.close_time)
+    .map((row) => {
+      const openMinutes = parseMinutes(row.open_time);
+      const closeMinutes = parseMinutes(row.close_time);
+      const rowDay = Number(row.day_of_week);
+
+      if (
+        !Number.isInteger(rowDay) ||
+        rowDay < 1 ||
+        rowDay > 7 ||
+        openMinutes === null ||
+        closeMinutes === null
+      ) {
+        return null;
+      }
+
+      const duration =
+        row.close_day === "next"
+          ? closeMinutes - openMinutes + 1440
+          : closeMinutes - openMinutes;
+
+      if (duration <= 0 || duration > 1440) return null;
+
+      return {
+        row,
+        start: (rowDay - 1) * 1440 + openMinutes,
+        end: (rowDay - 1) * 1440 + openMinutes + duration,
+        openMinutes,
+      };
+    })
+    .filter(Boolean);
+
+  const activeInterval = intervals.find((interval) =>
+    [
+      interval.start - minutesPerWeek,
+      interval.start,
+      interval.start + minutesPerWeek,
+    ].some(
+      (start) =>
+        currentWeekMinute >= start && currentWeekMinute < start + (interval.end - interval.start),
+    ),
   );
 
-  const activeRow = openRows.find((row) => {
-    const rowDay = Number(row.day_of_week);
-    const openMinutes = parseMinutes(row.open_time);
-    const closeMinutes = parseMinutes(row.close_time);
-    if (openMinutes === null || closeMinutes === null) return false;
-    const isSameDay = rowDay === todayWeekday;
-    const isPreviousDayNextClose =
-      row.close_day === "next" && rowDay === previousWeekday;
-
-    if (!isSameDay && !isPreviousDayNextClose) return false;
-
-    if (isSameDay && row.close_day === "same") {
-      return (
-        closeMinutes > openMinutes &&
-        nowMinutes >= openMinutes &&
-        nowMinutes < closeMinutes
-      );
-    }
-
-    if (isSameDay && row.close_day === "next") {
-      return nowMinutes >= openMinutes && nowMinutes < closeMinutes + 1440;
-    }
-
-    return nowMinutes < closeMinutes;
-  });
-
-  if (activeRow) {
+  if (activeInterval) {
     return {
       isOpen: true,
       label: "Abierto",
-      openText: formatHourLabel(activeRow.open_time),
-      closeText: formatHourLabel(activeRow.close_time),
-      nextOpenText: formatHourLabel(activeRow.open_time),
+      openText: formatHourLabel(activeInterval.row.open_time),
+      closeText: formatHourLabel(activeInterval.row.close_time),
+      nextOpenText: formatHourLabel(activeInterval.row.open_time),
     };
   }
 
-  const nextOpenRow = openRows
-    .map((row) => ({
-      ...row,
-      sortDay: Number(row.day_of_week),
-      sortMinutes: parseMinutes(row.open_time),
-    }))
-    .filter((row) => {
-      const rowDay = Number(row.day_of_week);
-      const openMinutes = parseMinutes(row.open_time);
-      if (openMinutes === null) return false;
-
-      if (rowDay === todayWeekday) return openMinutes > nowMinutes;
-      if (rowDay > todayWeekday) return true;
-      return rowDay < todayWeekday;
+  const nextInterval = intervals
+    .map((interval) => {
+      const distance =
+        (interval.start - currentWeekMinute + minutesPerWeek) % minutesPerWeek;
+      return { ...interval, distance: distance || minutesPerWeek };
     })
-    .sort((a, b) => {
-      const dayDiff =
-        ((Number(a.day_of_week) - todayWeekday + 7) % 7) * 1440 -
-        ((Number(b.day_of_week) - todayWeekday + 7) % 7) * 1440;
-      return dayDiff + (parseMinutes(a.open_time) - parseMinutes(b.open_time));
-    })[0];
+    .sort((a, b) => a.distance - b.distance)[0];
 
   return {
     isOpen: false,
     label: "Cerrado",
-    openText: nextOpenRow ? formatHourLabel(nextOpenRow.open_time) : "",
+    openText: nextInterval ? formatHourLabel(nextInterval.row.open_time) : "",
     closeText: "",
-    nextOpenText: nextOpenRow ? formatHourLabel(nextOpenRow.open_time) : "",
+    nextOpenText: nextInterval
+      ? formatHourLabel(nextInterval.row.open_time)
+      : "",
   };
 };
 
@@ -300,6 +303,7 @@ const Shop = () => {
   const [categorias, setCategorias] = useState([]);
   const [productos, setProductosState] = useState([]);
   const [shopBusinessId, setShopBusinessId] = useState(null);
+  const [businessHoursRows, setBusinessHoursRows] = useState([]);
   const [, setAvailabilityByProduct] = useState({});
   const [isLoadingProductos, setIsLoadingProductos] = useState(true);
   const {
@@ -492,6 +496,7 @@ const Shop = () => {
         const businessHoursStatus = getBusinessHoursStatus(
           businessHoursRes.data || [],
         );
+        setBusinessHoursRows(businessHoursRes.data || []);
         setAvailabilityByProduct(availabilityMap);
         setShopBusinessId(data.id);
 
@@ -769,6 +774,27 @@ const Shop = () => {
       obtenerTienda();
     }
   }, [slug, setNombreTienda, setLogoTienda, setBusinessWhatsapp]);
+
+  useEffect(() => {
+    if (businessHoursRows.length === 0) return undefined;
+
+    const refreshBusinessHoursStatus = () => {
+      const status = getBusinessHoursStatus(businessHoursRows);
+      setTiendaData((current) => ({
+        ...current,
+        isOpen: status.isOpen,
+        horario: status.isOpen
+          ? `Abierto · Abre ${status.openText} · Cierra ${status.closeText}`
+          : status.nextOpenText
+            ? `Cerrado · Abre ${status.nextOpenText}`
+            : "Cerrado",
+      }));
+    };
+
+    refreshBusinessHoursStatus();
+    const timer = window.setInterval(refreshBusinessHoursStatus, 60_000);
+    return () => window.clearInterval(timer);
+  }, [businessHoursRows]);
 
   useEffect(() => {
     if (!shopBusinessId) return undefined;
