@@ -118,7 +118,8 @@ const getBusinessHoursStatus = (rows = []) => {
       interval.start + minutesPerWeek,
     ].some(
       (start) =>
-        currentWeekMinute >= start && currentWeekMinute < start + (interval.end - interval.start),
+        currentWeekMinute >= start &&
+        currentWeekMinute < start + (interval.end - interval.start),
     ),
   );
 
@@ -486,6 +487,12 @@ const Shop = () => {
           console.error(
             "Error al obtener disponibilidad de productos:",
             availabilityRes.error,
+          );
+        }
+        if (businessHoursRes.error) {
+          console.error(
+            "Error al obtener horarios del negocio:",
+            businessHoursRes.error,
           );
         }
 
