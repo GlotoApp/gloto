@@ -85,14 +85,23 @@ const getBusinessHoursStatus = (rows = []) => {
     const rowDay = Number(row.day_of_week);
     const openMinutes = parseMinutes(row.open_time);
     const closeMinutes = parseMinutes(row.close_time);
+    if (openMinutes === null || closeMinutes === null) return false;
     const isSameDay = rowDay === todayWeekday;
     const isPreviousDayNextClose =
       row.close_day === "next" && rowDay === previousWeekday;
 
     if (!isSameDay && !isPreviousDayNextClose) return false;
 
-    if (isSameDay) {
-      return nowMinutes >= openMinutes && nowMinutes < closeMinutes;
+    if (isSameDay && row.close_day === "same") {
+      return (
+        closeMinutes > openMinutes &&
+        nowMinutes >= openMinutes &&
+        nowMinutes < closeMinutes
+      );
+    }
+
+    if (isSameDay && row.close_day === "next") {
+      return nowMinutes >= openMinutes && nowMinutes < closeMinutes + 1440;
     }
 
     return nowMinutes < closeMinutes;
@@ -117,6 +126,7 @@ const getBusinessHoursStatus = (rows = []) => {
     .filter((row) => {
       const rowDay = Number(row.day_of_week);
       const openMinutes = parseMinutes(row.open_time);
+      if (openMinutes === null) return false;
 
       if (rowDay === todayWeekday) return openMinutes > nowMinutes;
       if (rowDay > todayWeekday) return true;

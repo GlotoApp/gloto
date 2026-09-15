@@ -232,13 +232,16 @@ export default function Horarios() {
         const day = NUMBER_TO_DAY[row.day_of_week];
         if (!day || row.shift_index > 1) return;
 
+        if (!row.is_open) return;
+
+        loadedSchedule[day].isOpen = true;
+
         if (!rowsByDay[day]) rowsByDay[day] = {};
         rowsByDay[day][row.shift_index] = {
           open: String(row.open_time).slice(0, 5),
           close: String(row.close_time).slice(0, 5),
           closeDay: row.close_day,
         };
-        loadedSchedule[day].isOpen = Boolean(row.is_open);
       });
 
       Object.entries(rowsByDay).forEach(([day, turnosByIndex]) => {
@@ -340,6 +343,9 @@ export default function Horarios() {
       });
     });
 
+    const invalidOpenDay = DAYS.find(
+      (day) => schedule[day].isOpen && schedule[day].turnos.length === 0,
+    );
     const invalidRow = rows.find((row) => {
       if (!row.is_open) return false;
 
@@ -347,11 +353,12 @@ export default function Horarios() {
         !row.open_time ||
         !row.close_time ||
         !["same", "next"].includes(row.close_day) ||
-        (row.open_time === row.close_time && row.close_day !== "next")
+        (row.open_time === row.close_time && row.close_day !== "next") ||
+        (row.close_day === "same" && row.close_time <= row.open_time)
       );
     });
 
-    if (invalidRow) {
+    if (invalidOpenDay || invalidRow) {
       setIsSaving(false);
       setErrorMessage("Revisa las horas y el día de cierre de cada turno.");
       openNotification(
