@@ -1,20 +1,24 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  BarChart3,
   Clock,
-  Sparkles,
   DollarSign,
   ShoppingBag,
   Layers,
   Truck,
   Copy,
   Check,
-  TrendingUp,
   User,
   Coffee,
-  Calendar,
   Activity, // Icono para la sección semanal
 } from "lucide-react";
+import { supabase } from "../../src/lib/supabaseClient";
+
+const formatMoney = (value) =>
+  `$ ${Number(value || 0).toLocaleString("es-CO", {
+    maximumFractionDigits: 0,
+  })}`;
+
+const colors = ["#8b5cf6", "#10b981", "#f97316", "#3b82f6", "#eab308"];
 
 const Estadisticas = () => {
   const [activePeriod, setActivePeriod] = useState("30 Días");
@@ -27,186 +31,171 @@ const Estadisticas = () => {
     end: "",
   });
 
-  // --- DATA FORMAT_BAR: MONITOREO SEMANAL EXACTAMENTE IGUAL AL DE HORAS ---
-  const weeklyTrendsData = [
-    { day: "Lunes", percentage: 45, vol: "$2.8M" },
-    { day: "Martes", percentage: 50, vol: "$3.1M" },
-    { day: "Miércoles", percentage: 46, vol: "$2.9M" },
-    { day: "Jueves", percentage: 62, vol: "$3.9M" },
-    { day: "Viernes", percentage: 87, vol: "$5.4M" },
-    { day: "Sábado", percentage: 100, vol: "$6.2M", isPeak: true }, // Pico de carga / ventas
-    { day: "Domingo", percentage: 77, vol: "$4.8M" },
-  ];
+  const getLocalDateString = (date = new Date()) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
 
-  // --- DATA MASTER CENTRALIZADA ---
+  const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    const today = new Date();
+    const end = getLocalDateString(today);
+    const daysByPeriod = {
+      Hoy: 1,
+      "Últimos 7 Días": 7,
+      "30 Días": 30,
+      "2 Meses": 60,
+    };
+    let start = end;
+
+    if (activePeriod === "Personalizado") {
+      if (!customRange.start || !customRange.end) return;
+      start = customRange.start;
+    } else {
+      const date = new Date(today);
+      date.setDate(date.getDate() - (daysByPeriod[activePeriod] || 30) + 1);
+      start = getLocalDateString(date);
+    }
+
+    let cancelled = false;
+    const loadDashboard = async () => {
+      setLoading(true);
+      setLoadError("");
+      const { data, error } = await supabase.rpc("get_statistics_dashboard", {
+        p_start_date: start,
+        p_end_date: activePeriod === "Personalizado" ? customRange.end : end,
+      });
+
+      if (cancelled) return;
+      if (error) {
+        setLoadError(error.message);
+        setDashboard(null);
+      } else {
+        const payload = Array.isArray(data)
+          ? data[0]?.get_statistics_dashboard
+          : data?.get_statistics_dashboard || data;
+        setDashboard(payload || null);
+      }
+      setLoading(false);
+    };
+
+    loadDashboard();
+    return () => {
+      cancelled = true;
+    };
+  }, [activePeriod, customRange]);
+
+  const summary = dashboard?.summary || {};
+  const dailyRows = dashboard?.daily || [];
+  const hourRows = dashboard?.hours || [];
+  const channelRows = dashboard?.channels || [];
+  const paymentRows = dashboard?.payments || [];
+  const productRows = dashboard?.products || [];
+  const stockRows = dashboard?.stock || [];
+  const customersByOrders = dashboard?.customers_by_orders || [];
+  const customersByTotal = dashboard?.customers_by_total || [];
+  const maxDaily = Math.max(...dailyRows.map((row) => Number(row.total)), 1);
+  const maxHour = Math.max(...hourRows.map((row) => Number(row.total)), 1);
+  const totalChannels =
+    channelRows.reduce((sum, row) => sum + Number(row.total || 0), 0) || 1;
+  const totalPayments =
+    paymentRows.reduce((sum, row) => sum + Number(row.total || 0), 0) || 1;
+  const maxProduct = Math.max(
+    ...productRows.map((row) => Number(row.units)),
+    1,
+  );
+
   const mainStats = [
     {
       label: "Total Vendido",
-      value: "$ 24,183,900",
-      sub: "+14.2% Eficiencia",
+      value: formatMoney(summary.total_sold),
+      sub: "Ventas del período",
       icon: DollarSign,
-      progress: 84,
+      progress: 100,
       color: "bg-violet-500",
     },
     {
       label: "Pedidos Totales",
-      value: "3,421",
-      sub: "+6.8% Volumen",
+      value: Number(summary.total_orders || 0).toLocaleString("es-CO"),
+      sub: "Pedidos no cancelados",
       icon: ShoppingBag,
-      progress: 68,
+      progress: 100,
       color: "bg-emerald-500",
     },
     {
       label: "Ticket Promedio",
-      value: "$ 7,069",
-      sub: "+2.1% Retención",
+      value: formatMoney(summary.average_ticket),
+      sub: "Promedio por pedido",
       icon: Layers,
-      progress: 55,
+      progress: 100,
       color: "bg-orange-500",
     },
     {
       label: "Venta Domicilios",
-      value: "$ 15,235,800",
-      sub: "63% Tracción Total",
+      value: formatMoney(summary.delivery_sales),
+      sub: "Ventas a domicilio",
       icon: Truck,
-      progress: 63,
+      progress: summary.total_sold
+        ? (Number(summary.delivery_sales || 0) / Number(summary.total_sold)) *
+          100
+        : 0,
       color: "bg-blue-500",
     },
   ];
 
-  const hourly24hData = [
-    { hour: "00h", percentage: 5, vol: "$110k" },
-    { hour: "01h", percentage: 2, vol: "$45k" },
-    { hour: "02h", percentage: 1, vol: "$20k" },
-    { hour: "03h", percentage: 3, vol: "$60k" },
-    { hour: "04h", percentage: 15, vol: "$320k" },
-    { hour: "05h", percentage: 35, vol: "$740k" },
-    { hour: "06h", percentage: 75, vol: "$1.6M" },
-    { hour: "07h", percentage: 100, vol: "$2.4M", isPeak: true },
-    { hour: "08h", percentage: 85, vol: "$1.9M" },
-    { hour: "09h", percentage: 50, vol: "$1.1M" },
-    { hour: "10h", percentage: 40, vol: "$850k" },
-    { hour: "11h", percentage: 30, vol: "$650k" },
-    { hour: "12h", percentage: 55, vol: "$1.2M" },
-    { hour: "13h", percentage: 65, vol: "$1.4M" },
-    { hour: "14h", percentage: 45, vol: "$980k" },
-    { hour: "15h", percentage: 25, vol: "$510k" },
-    { hour: "16h", percentage: 20, vol: "$420k" },
-    { hour: "17h", percentage: 35, vol: "$790k" },
-    { hour: "18h", percentage: 60, vol: "$1.3M" },
-    { hour: "19h", percentage: 70, vol: "$1.5M" },
-    { hour: "20h", percentage: 50, vol: "$1.1M" },
-    { hour: "21h", percentage: 30, vol: "$680k" },
-    { hour: "22h", percentage: 15, vol: "$340k" }, // Corregido: font -> vol
-    { hour: "23h", percentage: 8, vol: "$180k" },
-  ];
+  const weeklyTrendsData = dailyRows.map((row) => ({
+    day: new Date(`${row.day}T12:00:00`).toLocaleDateString("es-CO", {
+      weekday: "short",
+    }),
+    percentage: (Number(row.total) / maxDaily) * 100,
+    vol: formatMoney(row.total),
+  }));
 
-  const distributionData = [
-    {
-      label: "Domicilio",
-      percentage: 63,
-      amount: "$ 15,235,800",
-      color: "#8b5cf6",
-      strokeDash: "395 628",
-      strokeOffset: "0",
-    },
-    {
-      label: "En Punto",
-      percentage: 18,
-      amount: "$ 4,353,102",
-      color: "#10b981",
-      strokeDash: "113 628",
-      strokeOffset: "-395",
-    },
-    {
-      label: "Mesa",
-      percentage: 12,
-      amount: "$ 2,902,068",
-      color: "#f97316",
-      strokeDash: "75 628",
-      strokeOffset: "-508",
-    },
-    {
-      label: "Recoger",
-      percentage: 7,
-      amount: "$ 1,692,930",
-      color: "#3b82f6",
-      strokeDash: "45 628",
-      strokeOffset: "-583",
-    },
-  ];
+  const hourly24hData = Array.from({ length: 24 }, (_, hour) => {
+    const row = hourRows.find((item) => Number(item.hour) === hour);
+    return {
+      hour: `${String(hour).padStart(2, "0")}h`,
+      percentage: row ? (Number(row.total) / maxHour) * 100 : 0,
+      vol: formatMoney(row?.total),
+    };
+  });
 
-  const paymentData = [
-    {
-      label: "Efectivo",
-      percentage: 55,
-      amount: "$ 13,301,145",
-      color: "#e5e5e5",
-      strokeDash: "345 628",
-      strokeOffset: "0",
-    },
-    {
-      label: "Transferencia",
-      percentage: 38,
-      amount: "$ 9,189,882",
-      color: "#7c3aed",
-      strokeDash: "239 628",
-      strokeOffset: "-345",
-    },
-    {
-      label: "Tarjeta",
-      percentage: 7,
-      amount: "$ 1,692,930",
-      color: "#404040",
-      strokeDash: "44 628",
-      strokeOffset: "-584",
-    },
-  ];
+  const distributionData = channelRows.map((row, index) => ({
+    label: row.channel,
+    percentage: Math.round((Number(row.total || 0) / totalChannels) * 100),
+    amount: formatMoney(row.total),
+    color: colors[index % colors.length],
+    strokeDash: `${(Number(row.total || 0) / totalChannels) * 628} 628`,
+    strokeOffset: `${-channelRows.slice(0, index).reduce((sum, item) => sum + (Number(item.total || 0) / totalChannels) * 628, 0)}`,
+  }));
 
-  const allProducts = [
-    {
-      name: "Buñuelo Tradicional",
-      sales: 4120,
-      total: "$ 8,240,000",
-      share: 95,
-      color: "bg-violet-500",
-    },
-    {
-      name: "Tinto Campesino",
-      sales: 2980,
-      total: "$ 4,470,000",
-      share: 72,
-      color: "bg-emerald-500",
-    },
-    {
-      name: "Pandebono",
-      sales: 1850,
-      total: "$ 4,625,000",
-      share: 48,
-      color: "bg-orange-500",
-    },
-    {
-      name: "Café con Leche",
-      sales: 1240,
-      total: "$ 3,720,000",
-      share: 32,
-      color: "bg-blue-500",
-    },
-    {
-      name: "Avena Helada",
-      sales: 850,
-      total: "$ 2,550,000",
-      share: 22,
-      color: "bg-neutral-600",
-    },
-    {
-      name: "Empanada de Carne",
-      sales: 620,
-      total: "$ 1,860,000",
-      share: 16,
-      color: "bg-neutral-700",
-    },
-  ];
+  const paymentData = paymentRows.map((row, index) => ({
+    label: row.payment_method,
+    percentage: Math.round((Number(row.total || 0) / totalPayments) * 100),
+    amount: formatMoney(row.total),
+    color: ["#e5e5e5", "#7c3aed", "#404040", "#3b82f6"][index % 4],
+    strokeDash: `${(Number(row.total || 0) / totalPayments) * 628} 628`,
+    strokeOffset: `${-paymentRows.slice(0, index).reduce((sum, item) => sum + (Number(item.total || 0) / totalPayments) * 628, 0)}`,
+  }));
+
+  const allProducts = productRows.map((row, index) => ({
+    name: row.product,
+    sales: row.units,
+    total: formatMoney(row.total),
+    share: (Number(row.units) / maxProduct) * 100,
+    color: [
+      "bg-violet-500",
+      "bg-emerald-500",
+      "bg-orange-500",
+      "bg-blue-500",
+      "bg-neutral-600",
+    ][index % 5],
+  }));
 
   const getPeriodString = () => {
     if (
@@ -219,31 +208,31 @@ const Estadisticas = () => {
     return activePeriod;
   };
 
-  const rawReportText = `INFORME OPERATIVO EJECUTIVO - GLOTO INFRASTRUCTURE
+  const rawReportText = `INFORME OPERATIVO EJECUTIVO - GLOTO
 Periodo Evaluado: ${getPeriodString()}
 --------------------------------------------------
-1. DIAGNÓSTICO FINANCIERO Y RENDIMIENTO
-- Facturación Consolidada: $ 24,183,900 COP
-- Volumen Transaccional: 3,421 Pedidos Exitosos
-- Ticket Promedio General: $ 7,069 COP
+1. RENDIMIENTO FINANCIERO
+- Facturación: ${formatMoney(summary.total_sold)} COP
+- Pedidos: ${Number(summary.total_orders || 0)}
+- Ticket Promedio: ${formatMoney(summary.average_ticket)} COP
+- Ventas a Domicilio: ${formatMoney(summary.delivery_sales)} COP
 
-2. LOGÍSTICA DE DESPACHO (CANALES DE CANALIZACIÓN)
-- Domicilios (Líder): 63% ($ 15,235,800 COP)
-- Venta en Punto: 18% ($ 4,353,102 COP)
-- Consumo en Mesa: 12% ($ 2,902,068 COP)
-- Recoger en Sucursal: 7% ($ 1,692,930 COP)
+2. CANALES DE VENTA
+${channelRows.map((row) => `- ${row.channel}: ${formatMoney(row.total)} COP (${row.orders} pedidos)`).join("\n") || "- Sin ventas en el período"}
 
-3. INTENSIDAD HORARIA OPERATIVA (MATRIZ 24 HORAS)
-- Curva de Carga Máxima detectada entre las 06:00 AM y 09:00 AM.
-- Pico Absoluto de Carga del Sistema: 07:00 AM - 08:00 AM (100% Capacidad).
+3. PRODUCTOS MÁS VENDIDOS
+${productRows.map((row) => `- ${row.product}: ${row.units} unidades, ${formatMoney(row.total)} COP`).join("\n") || "- Sin productos vendidos"}
 
-4. MÉTODOS DE CAPTACIÓN DE FLUJO DE CAJA
-- Efectivo Dominante: 55% del Volumen Líquido
-- Transferencias Digitales: 38% del Volumen Líquido
-- Pasarelas / Tarjetas: 7% del Volumen Líquido
-
-5. AUDITORÍA DE PRODUCTO LÍDER
-- SKU Principal: Buñuelo Tradicional (4,120 Unidades Despachadas)`;
+4. INVENTARIO BAJO
+${
+  stockRows
+    .filter((row) => row.low_stock)
+    .map(
+      (row) =>
+        `- ${row.name}: ${row.stock} ${row.unit} (mínimo ${row.min_stock})`,
+    )
+    .join("\n") || "- No hay productos bajo el mínimo"
+}`;
 
   const handleCopyReport = async () => {
     try {
@@ -343,6 +332,17 @@ Periodo Evaluado: ${getPeriodString()}
           </div>
         </header>
 
+        {loading && (
+          <div className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+            Cargando estadísticas reales...
+          </div>
+        )}
+        {loadError && (
+          <div className="border border-red-500/20 bg-red-500/10 rounded-xl px-4 py-3 text-[10px] font-bold text-red-300">
+            No se pudieron cargar las estadísticas: {loadError}
+          </div>
+        )}
+
         {/* METRICAS PRINCIPALES */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {mainStats.map((kpi, idx) => (
@@ -384,10 +384,10 @@ Periodo Evaluado: ${getPeriodString()}
             <div>
               <h3 className="text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 text-neutral-400">
                 <Activity size={14} className="text-violet-500" />
-                Flujo Analítico de Ventas Semanales
+                Flujo Analítico de Ventas por Día
               </h3>
               <p className="text-neutral-600 text-[9px] uppercase font-bold mt-0.5">
-                Volumen y Tracción Operativa por Día Calendario (Picos y Valles)
+                Volumen real registrado por día dentro del período seleccionado
               </p>
             </div>
             <div className="text-right">
@@ -543,10 +543,10 @@ Periodo Evaluado: ${getPeriodString()}
               </svg>
               <div className="absolute flex flex-col items-center justify-center">
                 <span className="text-xs font-black text-white font-mono">
-                  63%
+                  {distributionData[0]?.percentage || 0}%
                 </span>
                 <span className="text-[7px] font-black tracking-widest text-neutral-600 uppercase">
-                  Domicilio
+                  {distributionData[0]?.label || "Sin datos"}
                 </span>
               </div>
             </div>
@@ -616,10 +616,10 @@ Periodo Evaluado: ${getPeriodString()}
               </svg>
               <div className="absolute flex flex-col items-center justify-center">
                 <span className="text-xs font-black text-white font-mono">
-                  55%
+                  {paymentData[0]?.percentage || 0}%
                 </span>
                 <span className="text-[7px] font-black tracking-widest text-neutral-600 uppercase">
-                  Efectivo
+                  {paymentData[0]?.label || "Sin datos"}
                 </span>
               </div>
             </div>
@@ -647,42 +647,21 @@ Periodo Evaluado: ${getPeriodString()}
                     </span>
                   </div>
                   <div className="divide-y divide-white/[0.03] space-y-1">
-                    {[
-                      {
-                        name: "Andrés Mendoza",
-                        value: "48 pedidos",
-                        total: "$ 384,000",
-                      },
-                      {
-                        name: "Camila Torres",
-                        value: "35 pedidos",
-                        total: "$ 282,500",
-                      },
-                      {
-                        name: "Restaurante El Centro",
-                        value: "29 pedidos",
-                        total: "$ 245,000",
-                      },
-                      {
-                        name: "Sofía Martínez",
-                        value: "24 pedidos",
-                        total: "$ 189,200",
-                      },
-                    ].map((client, i) => (
+                    {customersByOrders.map((client, i) => (
                       <div
                         key={i}
                         className="py-2.5 flex justify-between items-center group"
                       >
                         <div>
                           <h4 className="text-[11px] font-black text-white uppercase group-hover:text-violet-400 transition-colors">
-                            {client.name}
+                            {client.customer}
                           </h4>
                           <p className="text-[8px] font-mono text-neutral-500 mt-0.5">
-                            {client.total} acumulado
+                            {formatMoney(client.total)} acumulado
                           </p>
                         </div>
                         <span className="text-[10px] font-mono font-black text-white bg-neutral-950 px-2 py-0.5 rounded border border-white/5">
-                          {client.value}
+                          {client.orders} pedidos
                         </span>
                       </div>
                     ))}
@@ -699,42 +678,21 @@ Periodo Evaluado: ${getPeriodString()}
                     </span>
                   </div>
                   <div className="divide-y divide-white/[0.03] space-y-1">
-                    {[
-                      {
-                        name: "Inversiones Bolívar",
-                        value: "$ 1,240,000",
-                        info: "12 pedidos",
-                      },
-                      {
-                        name: "Andrés Mendoza",
-                        value: "$ 384,000",
-                        info: "48 pedidos",
-                      },
-                      {
-                        name: "Hotel San Diego",
-                        value: "$ 310,500",
-                        info: "8 pedidos",
-                      },
-                      {
-                        name: "Camila Torres",
-                        value: "$ 282,500",
-                        info: "35 pedidos",
-                      },
-                    ].map((client, i) => (
+                    {customersByTotal.map((client, i) => (
                       <div
                         key={i}
                         className="py-2.5 flex justify-between items-center group"
                       >
                         <div>
                           <h4 className="text-[11px] font-black text-white uppercase group-hover:text-emerald-400 transition-colors">
-                            {client.name}
+                            {client.customer}
                           </h4>
                           <p className="text-[8px] font-mono text-neutral-500 mt-0.5">
-                            {client.info}
+                            {client.orders} pedidos
                           </p>
                         </div>
                         <span className="text-[10px] font-mono font-black text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/10">
-                          {client.value}
+                          {formatMoney(client.total)}
                         </span>
                       </div>
                     ))}

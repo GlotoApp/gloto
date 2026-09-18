@@ -261,9 +261,22 @@ export default function KitchenPanel() {
         .order("created_at", { ascending: true });
 
       if (error) throw error;
+      const kitchenOrders = (data || []).filter((order) => {
+        if (order.order_type !== "table") return true;
+        if (order.table_status === null || order.table_status === undefined) {
+          return true;
+        }
+        const tableStatus = String(order.table_status).trim().toLowerCase();
+        return (
+          tableStatus !== "" &&
+          tableStatus !== "clean" &&
+          tableStatus !== "limpia" &&
+          tableStatus !== "cerrada"
+        );
+      });
       const productIds = [
         ...new Set(
-          (data || []).flatMap((order) =>
+          kitchenOrders.flatMap((order) =>
             (order.order_items || [])
               .map((item) => item.product_id)
               .filter(Boolean),
@@ -302,14 +315,14 @@ export default function KitchenPanel() {
           );
         });
       }
-      const nuevosPedidos = (data || []).filter((order) => {
+      const nuevosPedidos = kitchenOrders.filter((order) => {
         const status = String(order.status || "").toLowerCase();
         return (
           ["pending", "confirmed"].includes(status) &&
           !knownOrderIdsRef.current.has(order.id)
         );
       });
-      const orderIds = new Set((data || []).map((order) => order.id));
+      const orderIds = new Set(kitchenOrders.map((order) => order.id));
       knownOrderIdsRef.current = orderIds;
       if (
         initializedOrdersRef.current &&
@@ -320,7 +333,7 @@ export default function KitchenPanel() {
       }
       initializedOrdersRef.current = true;
       setOrdenes(
-        (data || [])
+        kitchenOrders
           .map((order) => mapOrderToKitchen(order, optionPricesByProduct))
           .filter(
             (order) =>

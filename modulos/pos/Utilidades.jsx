@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   FileText,
   QrCode,
@@ -21,6 +21,7 @@ import {
 
 import { QRCodeCanvas } from "qrcode.react";
 import logo from "../../public/logogloto.png"; // <-- AJUSTA ESTA RUTA A DONDE ESTÉ TU LOGO
+import { supabase } from "../../src/lib/supabaseClient";
 
 const Utilidades = () => {
   const [activeTab, setActiveTab] = useState("qr");
@@ -29,6 +30,9 @@ const Utilidades = () => {
   const [copiedEmployees, setCopiedEmployees] = useState(false);
   const [qrLoading, setQrLoading] = useState(true);
   const [employeesQrLoading, setEmployeesQrLoading] = useState(true);
+  const [storeSlug, setStoreSlug] = useState("");
+  const [storeLoading, setStoreLoading] = useState(true);
+  const [storeError, setStoreError] = useState("");
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [qrTypeToDownload, setQrTypeToDownload] = useState(null);
   const [downloadOptions, setDownloadOptions] = useState({
@@ -160,11 +164,68 @@ const Utilidades = () => {
     },
   ]);
 
-  // Constante estática para la URL base (no cambia)
   const qrUrls = {
-    menu: "https://gloto.com/menu",
-    employees: "https://gloto.com/employees/login",
+    menu: storeSlug
+      ? `${window.location.origin}/marketplace/tienda/${storeSlug}`
+      : "",
+    employees: `${window.location.origin}/marketplace/empleados/login`,
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStore = async () => {
+      setStoreLoading(true);
+      setStoreError("");
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError || !userData?.user?.id) {
+        if (!cancelled) {
+          setStoreError("No hay una sesión activa para identificar la tienda.");
+          setStoreLoading(false);
+        }
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", userData.user.id)
+        .maybeSingle();
+
+      if (profileError || !profile?.business_id) {
+        if (!cancelled) {
+          setStoreError("No se encontró el negocio de este usuario.");
+          setStoreLoading(false);
+        }
+        return;
+      }
+
+      const { data: business, error: businessError } = await supabase
+        .from("businesses")
+        .select("slug, name")
+        .eq("id", profile.business_id)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (businessError || !business?.slug) {
+        setStoreError("La tienda no tiene un slug público configurado.");
+      } else {
+        setStoreSlug(business.slug);
+        setTableConfig((current) => ({
+          ...current,
+          restaurantName: business.name || current.restaurantName,
+          qrUrl: `${window.location.origin}/marketplace/tienda/${business.slug}`,
+        }));
+      }
+      setStoreLoading(false);
+    };
+
+    loadStore();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ── Estado habladores ──
   const [tableConfig, setTableConfig] = useState({
@@ -220,15 +281,19 @@ const Utilidades = () => {
   };
 
   const generateQRImage = () =>
-    `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrUrls[qrMenu])}`;
+    qrUrls[qrMenu]
+      ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrUrls[qrMenu])}`
+      : "";
 
   const handleCopyURL = () => {
+    if (!qrUrls[qrMenu]) return;
     navigator.clipboard.writeText(qrUrls[qrMenu]);
     setCopiedMenu(true);
     setTimeout(() => setCopiedMenu(false), 2000);
   };
 
   const downloadQR = (type) => {
+    if (!qrUrls[type]) return;
     setQrTypeToDownload(type);
     setDownloadOptions({
       withBackground: true,
@@ -356,6 +421,7 @@ const Utilidades = () => {
 
   // ── Generador PDF de habladores ──
   const generateTableCardsPDF = () => {
+    if (!storeSlug) return;
     const isTent = tableConfig.layout === "tent";
 
     // CORRECCIÓN: Definir la paleta aquí dentro para capturar el estado en tiempo real antes de imprimir
@@ -692,6 +758,16 @@ const Utilidades = () => {
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 md:mb-12 gap-4 md:gap-6">
           <div className="flex flex-col gap-1">
             <h1 className="text-2xl font-black tracking-tighter">Utilidades</h1>
+            {storeLoading && (
+              <p className="text-[9px] text-neutral-500 uppercase font-bold">
+                Cargando URL real de la tienda...
+              </p>
+            )}
+            {storeError && (
+              <p className="text-[9px] text-red-400 uppercase font-bold">
+                {storeError}
+              </p>
+            )}
           </div>
         </header>
 
@@ -723,10 +799,10 @@ const Utilidades = () => {
             <div className="p-6 md:p-8 bg-neutral-900/40 border border-white/5 rounded-2xl">
               <h2 className="text-lg md:text-xl font-black uppercase mb-6 flex items-center gap-3">
                 <QrCode className="text-violet-500" size={20} />
-                QR del Menú
+                QR de la Tienda
               </h2>
               <div className="space-y-6">
-                {/* QR del Menú */}
+                {/* QR de la tienda real */}
                 <div className="p-8 bg-white rounded-xl flex items-center justify-center min-h-[300px] relative overflow-hidden">
                   {qrLoading && (
                     <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/10 via-transparent to-transparent z-10">
@@ -735,19 +811,25 @@ const Utilidades = () => {
                   )}
 
                   {/* AÑADIMOS 'p-4' PARA EL ESPACIO (PADDING) INTERNO */}
-                  <div className="p-4 bg-white rounded-lg">
-                    <QRCodeCanvas
-                      value={qrUrls.menu}
-                      size={200} // Ajustamos un poco para dejar espacio al padding
-                      level={"H"}
-                      imageSettings={{
-                        src: logo,
-                        height: 50, // Logo ligeramente más pequeño para mejor lectura
-                        width: 50,
-                        excavate: true,
-                      }}
-                    />
-                  </div>
+                  {storeSlug ? (
+                    <div className="p-4 bg-white rounded-lg">
+                      <QRCodeCanvas
+                        value={qrUrls.menu}
+                        size={200}
+                        level="H"
+                        imageSettings={{
+                          src: logo,
+                          height: 50,
+                          width: 50,
+                          excavate: true,
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-xs font-bold uppercase text-neutral-500">
+                      Esperando la tienda real...
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-3">
@@ -757,13 +839,14 @@ const Utilidades = () => {
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      value={qrUrls.menu}
+                      value={qrUrls.menu || ""}
                       readOnly
                       className="flex-1 bg-neutral-800/50 border border-white/5 rounded-lg px-3 py-2 text-xs text-neutral-400 select-all cursor-not-allowed focus:outline-none"
                     />
                     <button
                       onClick={handleCopyURL}
-                      className={`px-4 py-2 rounded-lg font-black uppercase text-[8px] transition-all ${copiedMenu ? "bg-green-500/20 text-green-400" : "bg-neutral-800 hover:bg-neutral-700 text-neutral-300"}`}
+                      disabled={!storeSlug}
+                      className={`px-4 py-2 rounded-lg font-black uppercase text-[8px] transition-all disabled:opacity-40 disabled:cursor-not-allowed ${copiedMenu ? "bg-green-500/20 text-green-400" : "bg-neutral-800 hover:bg-neutral-700 text-neutral-300"}`}
                     >
                       {copiedMenu ? "✓ Copiado" : <Copy size={14} />}
                     </button>
@@ -771,7 +854,8 @@ const Utilidades = () => {
                 </div>
                 <button
                   onClick={() => downloadQR("menu")}
-                  className="w-full py-3 bg-violet-500 hover:bg-violet-600 text-white rounded-lg font-black uppercase text-[9px] flex items-center justify-center gap-2 transition-all"
+                  disabled={!storeSlug}
+                  className="w-full py-3 bg-violet-500 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-black uppercase text-[9px] flex items-center justify-center gap-2 transition-all"
                 >
                   <Download size={16} /> Descargar QR
                 </button>
@@ -1141,7 +1225,7 @@ const Utilidades = () => {
 
                 <button
                   onClick={generateTableCardsPDF}
-                  disabled={totalMesas <= 0}
+                  disabled={!storeSlug || totalMesas <= 0}
                   className="w-full py-3.5 bg-violet-500 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black uppercase text-[9px] flex items-center justify-center gap-2 transition-all shadow-lg shadow-violet-500/20"
                 >
                   <Printer size={16} />

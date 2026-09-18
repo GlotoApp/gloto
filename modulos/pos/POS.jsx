@@ -420,6 +420,7 @@ const POS = () => {
   const [categoryMap, setCategoryMap] = useState({});
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
+  const [isProductCatalogReady, setIsProductCatalogReady] = useState(false);
   const [businessId, setBusinessId] = useState(null);
   const toastTimers = useRef({});
   const cartScrollRef = useRef(null);
@@ -522,17 +523,18 @@ const POS = () => {
     if (!businessId) {
       setProducts([]);
       setIsLoadingProducts(false);
+      setIsProductCatalogReady(false);
       return;
     }
 
     const cachedProducts = readProductCache(businessId);
+    setIsProductCatalogReady(false);
     if (cachedProducts.length > 0) {
       setProducts(cachedProducts);
-      setIsLoadingProducts(false);
     } else {
       setProducts([]);
-      setIsLoadingProducts(true);
     }
+    setIsLoadingProducts(true);
 
     try {
       const { data, error } = await supabase
@@ -549,8 +551,16 @@ const POS = () => {
         console.error("Error cargando productos:", error);
         if (cachedProducts.length > 0) {
           setProducts(cachedProducts);
+          setIsProductCatalogReady(
+            cachedProducts.every(
+              (product) =>
+                Array.isArray(product.optionGroups) &&
+                typeof product.hasOptionGroups === "boolean",
+            ),
+          );
         } else {
           setProducts([]);
+          setIsProductCatalogReady(false);
         }
         return;
       }
@@ -621,12 +631,21 @@ const POS = () => {
 
       setProducts(normalizedProducts);
       writeProductCache(businessId, normalizedProducts);
+      setIsProductCatalogReady(true);
     } catch (error) {
       console.error("Error cargando productos:", error);
       if (cachedProducts.length > 0) {
         setProducts(cachedProducts);
+        setIsProductCatalogReady(
+          cachedProducts.every(
+            (product) =>
+              Array.isArray(product.optionGroups) &&
+              typeof product.hasOptionGroups === "boolean",
+          ),
+        );
       } else {
         setProducts([]);
+        setIsProductCatalogReady(false);
       }
     } finally {
       setIsLoadingProducts(false);
@@ -638,6 +657,7 @@ const POS = () => {
       if (!user?.id) {
         setBusinessId(null);
         setProducts([]);
+        setIsProductCatalogReady(false);
         setCategories([{ id: "all", name: "Todo" }]);
         setCategoryMap({});
         setIsLoadingCategories(false);
@@ -654,6 +674,7 @@ const POS = () => {
       if (error) {
         console.error("Error cargando perfil:", error);
         setProducts([]);
+        setIsProductCatalogReady(false);
         setIsLoadingCategories(false);
         setIsLoadingProducts(false);
         return;
@@ -662,6 +683,7 @@ const POS = () => {
       if (!profile?.business_id) {
         setBusinessId(null);
         setProducts([]);
+        setIsProductCatalogReady(false);
         setCategories([{ id: "all", name: "Todo" }]);
         setCategoryMap({});
         setIsLoadingCategories(false);
@@ -1173,6 +1195,11 @@ const POS = () => {
   };
 
   const addToCart = (product, skipStockWarning = false) => {
+    if (!isProductCatalogReady) {
+      addToast("Cargando opciones del producto...", "error");
+      return;
+    }
+
     const quantityInCart = cart.reduce(
       (sum, item) =>
         item.productId === product?.id ? sum + Number(item.qty || 0) : sum,
@@ -1828,25 +1855,6 @@ const POS = () => {
     return errors;
   };
 
-  // Abrir modal de reserva
-  const abrirModalReserva = () => {
-    if (!selectedTable.trim()) {
-      addToast("Seleccionar número de mesa", "error");
-      return;
-    }
-
-    navigate("/pos/reservas", {
-      state: {
-        nuevaReserva: {
-          mesa: selectedTable,
-          nombre: customerName || "",
-          telefono: customerNumber || "",
-          personas: "1",
-        },
-      },
-    });
-  };
-
   const canSubmitReservation =
     reservationData.nombre.trim() &&
     reservationData.telefono.trim() &&
@@ -2095,6 +2103,7 @@ const POS = () => {
           : null,
         opciones: Array.isArray(item.selectedOptions)
           ? item.selectedOptions.map((option) => ({
+              id: option.id || null,
               nombre: option.nombre || option.name || option.label || "Opción",
               precio_extra: Number(option.precio_extra || 0),
             }))
@@ -2881,7 +2890,12 @@ const POS = () => {
                   <div
                     key={product.id}
                     onClick={() => addToCart(product)}
-                    className="group relative bg-surface  rounded-[25px] hover:bg-surface-hover/50 hover:border-primary-container/40 transition-all duration-500 cursor-pointer flex flex-col active:scale-[0.97]"
+                    aria-disabled={!isProductCatalogReady}
+                    className={`group relative flex flex-col rounded-[25px] bg-surface transition-all duration-500 hover:bg-surface-hover/50 hover:border-primary-container/40 active:scale-[0.97] ${
+                      isProductCatalogReady
+                        ? "cursor-pointer"
+                        : "cursor-wait opacity-80"
+                    }`}
                   >
                     <div
                       className={`absolute top-2 left-2 z-10 px-2 py-1 rounded-full text-white text-xs font-bold uppercase tracking-wider ${
@@ -3149,20 +3163,6 @@ const POS = () => {
                     </span>
                   </button>
                 </div>
-                {selectedTable && !tableOccupancyWarning?.occupied && (
-                  <div className="mt-3 space-y-2">
-                    <button
-                      onClick={abrirModalReserva}
-                      className="w-full py-2.5 px-3 rounded-lg border-2 border-dashed border-blue-400/80 hover:border-blue-400 bg-blue-500/5 hover:bg-blue-500/10 text-blue-300 hover:text-blue-200 font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2"
-                      title="Crear una reserva para esta mesa"
-                    >
-                      <span className="material-symbols-outlined text-sm">
-                        event_available
-                      </span>
-                      Hacer Reserva en Mesa {selectedTable}
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           )}

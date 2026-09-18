@@ -1,4 +1,4 @@
-import React, { useState, useMemo, memo } from "react";
+import React, { useEffect, useState, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   TrendingUp,
@@ -14,69 +14,7 @@ import {
   MinusCircle,
   AlertCircle,
 } from "lucide-react";
-
-// ─── CONSTANTES MOCK ─────────────────────────────────────────────────────────
-const TRANSACCIONES_MOCK = [
-  {
-    id: "TRX-081",
-    hora: "12:43",
-    mesa: "03",
-    metodo: "efectivo",
-    total: 87500,
-    estado: "ok",
-  },
-  {
-    id: "TRX-080",
-    hora: "12:31",
-    mesa: "07",
-    metodo: "tarjeta",
-    total: 134000,
-    estado: "ok",
-  },
-  {
-    id: "TRX-079",
-    hora: "12:18",
-    mesa: "01",
-    metodo: "tarjeta",
-    total: 56000,
-    estado: "ok",
-  },
-  {
-    id: "TRX-078",
-    hora: "11:55",
-    mesa: "05",
-    metodo: "efectivo",
-    total: 210000,
-    estado: "ok",
-  },
-  {
-    id: "TRX-077",
-    hora: "11:40",
-    mesa: "02",
-    metodo: "transferencia",
-    total: 43000,
-    estado: "ok",
-  },
-];
-
-const HISTORIAL_INICIAL = [
-  {
-    id: "CIE-003",
-    fecha: "2026-05-20",
-    horaApertura: "06:00",
-    horaCierre: "22:15",
-    cajero: "María López",
-    fondoInicial: 200000,
-    totalVentas: 1240000,
-    totalEfectivo: 680000,
-    totalTarjeta: 560000,
-    totalTransferencia: 43000,
-    enCaja: 880000,
-    totalContado: 875000,
-    diferencia: -5000,
-    transacciones: 18,
-  },
-];
+import { supabase } from "../../src/lib/supabaseClient";
 
 // ─── HELPERS FORMATO ─────────────────────────────────────────────────────────
 const fmt = (n) =>
@@ -141,17 +79,11 @@ export default function Caja() {
   const [nombreCajero, setNombreCajero] = useState("");
   const [cierreExpandido, setCierreExpandido] = useState(null);
 
-  const [historial, setHistorial] = useState(HISTORIAL_INICIAL);
-  const [novedades, setNovedades] = useState([
-    {
-      id: "NOV-001",
-      tipo: "egreso",
-      concepto: "Compra de hielo de urgencia",
-      monto: 12000,
-      hora: "10:15",
-      metodo: "efectivo",
-    },
-  ]);
+  const [transacciones, setTransacciones] = useState([]);
+  const [historial, setHistorial] = useState([]);
+  const [novedades, setNovedades] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [nuevaNovedad, setNuevaNovedad] = useState({
     tipo: "egreso",
     concepto: "",
@@ -164,9 +96,62 @@ export default function Caja() {
     tarjeta: "",
   });
 
+  useEffect(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    let cancelled = false;
+
+    const loadCashData = async () => {
+      setLoading(true);
+      setLoadError("");
+      const { data, error } = await supabase
+        .from("orders")
+        .select(
+          "id, order_number, created_at, total, payment_method, payment_status, status, mesa",
+        )
+        .gte("created_at", start.toISOString())
+        .lt("created_at", end.toISOString())
+        .eq("is_reservation", false)
+        .not("status", "in", "(cancelled,cancelado)")
+        .order("created_at", { ascending: false });
+
+      if (cancelled) return;
+      if (error) {
+        setLoadError(error.message);
+      } else {
+        setTransacciones(
+          (data || []).map((order) => ({
+            id: order.order_number || order.id,
+            hora: new Date(order.created_at).toLocaleTimeString("es-CO", {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+            mesa: order.mesa || "-",
+            metodo: String(
+              order.payment_method || "sin especificar",
+            ).toLowerCase(),
+            total: Number(order.total || 0),
+            estado: order.status,
+            paymentStatus: String(
+              order.payment_status || "pending",
+            ).toLowerCase(),
+          })),
+        );
+      }
+      setLoading(false);
+    };
+
+    loadCashData();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Cálculos de flujo financiero
-  const transaccionesValidas = TRANSACCIONES_MOCK.filter(
-    (t) => t.estado === "ok",
+  const transaccionesValidas = transacciones.filter(
+    (t) => t.paymentStatus === "paid",
   );
   const totalEfectivoVentas = transaccionesValidas
     .filter((t) => t.metodo === "efectivo")
@@ -186,7 +171,8 @@ export default function Caja() {
     .reduce((a, n) => a + n.monto, 0);
 
   const totalVentas = totalEfectivoVentas + totalTarjeta + totalTransferencia;
-  const fondoInicial = 200000;
+  // No se inventa una base inicial: hasta persistir una apertura real, es cero.
+  const fondoInicial = 0;
 
   // El esperado físico en caja solo contempla efectivo real + base + movimientos manuales
   const enCajaEsperado =
@@ -245,6 +231,16 @@ export default function Caja() {
           <h1 className="text-2xl font-black tracking-tighter mt-2">
             CONTROL DE CAJA
           </h1>
+          {loading && (
+            <p className="text-[8px] text-neutral-500 font-mono uppercase mt-1">
+              Cargando movimientos reales...
+            </p>
+          )}
+          {loadError && (
+            <p className="text-[8px] text-red-400 font-mono uppercase mt-1">
+              Error al cargar caja: {loadError}
+            </p>
+          )}
         </div>
 
         {seccion === "resumen" && (

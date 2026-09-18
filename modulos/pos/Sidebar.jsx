@@ -15,6 +15,7 @@ import {
   Clock3,
   PencilRuler,
   CreditCard,
+  Banknote,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
@@ -65,6 +66,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
         },
       ],
     },
+    { name: "Caja", path: "/pos/caja", icon: Banknote },
     { name: "Horarios", path: "/pos/horarios", icon: Clock3 },
     { name: "Estadísticas", path: "/pos/estadisticas", icon: BarChart3 },
     { name: "Utilidades", path: "/pos/utilidades", icon: PencilRuler },
@@ -196,56 +198,142 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
 
             return (
               <React.Fragment key={item.path}>
-                {item.name !== "Catálogo" && item.name !== "Inventario" && (
-                  <Link
-                    to={item.path}
-                    onClick={handleItemClick}
-                    className={`group relative flex items-center h-12 rounded-default transition-all duration-300 pl-4 pr-3.75 gap-4 w-full ${
-                      isActive
-                        ? "text-primary font-medium"
-                        : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
-                    }`}
-                  >
-                    <span
-                      className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                {item.name !== "Caja" &&
+                  item.name !== "Catálogo" &&
+                  item.name !== "Inventario" && (
+                    <Link
+                      to={item.path}
+                      onClick={handleItemClick}
+                      className={`group relative flex items-center h-12 rounded-default transition-all duration-300 pl-4 pr-3.75 gap-4 w-full ${
                         isActive
-                          ? "scale-y-100 opacity-100"
-                          : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
-                      }`}
-                    />
-
-                    <div
-                      className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
-                        !isExpanded && "group-hover:scale-110"
-                      } ${isActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
-                    >
-                      {isGoogleIcon ? (
-                        <span className="material-symbols-outlined !text-[22px]">
-                          {item.icon}
-                        </span>
-                      ) : (
-                        <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
-                      )}
-                    </div>
-
-                    <span
-                      className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate flex-1 transition-all duration-300 ${
-                        isActive ? "text-primary-container" : ""
-                      } ${
-                        isExpanded
-                          ? "opacity-100 translate-x-0"
-                          : "opacity-0 -translate-x-4 pointer-events-none w-0"
+                          ? "text-primary font-medium"
+                          : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
                       }`}
                     >
-                      {item.name}
-                    </span>
+                      <span
+                        className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                          isActive
+                            ? "scale-y-100 opacity-100"
+                            : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
+                        }`}
+                      />
 
-                    {!isExpanded && (
-                      <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                      <div
+                        className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
+                          !isExpanded && "group-hover:scale-110"
+                        } ${isActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
+                      >
+                        {isGoogleIcon ? (
+                          <span className="material-symbols-outlined !text-[22px]">
+                            {item.icon}
+                          </span>
+                        ) : (
+                          <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+                        )}
+                      </div>
+
+                      <span
+                        className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate flex-1 transition-all duration-300 ${
+                          isActive ? "text-primary-container" : ""
+                        } ${
+                          isExpanded
+                            ? "opacity-100 translate-x-0"
+                            : "opacity-0 -translate-x-4 pointer-events-none w-0"
+                        }`}
+                      >
                         {item.name}
+                      </span>
+
+                      {!isExpanded && (
+                        <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                          {item.name}
+                        </div>
+                      )}
+                    </Link>
+                  )}
+
+                {item.name === "Caja" && (
+                  <div className="flex flex-col transition-all duration-300">
+                    <button
+                      onClick={handleToggleClickCaja}
+                      className={`group relative flex items-center h-12 rounded-default transition-all duration-300 px-4 gap-4 w-full ${
+                        isCajaActive
+                          ? "text-primary"
+                          : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                      }`}
+                    >
+                      <span
+                        className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                          isCajaActive
+                            ? "scale-y-100 opacity-100"
+                            : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
+                        }`}
+                      />
+                      <div
+                        className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
+                          !isExpanded && "group-hover:scale-110"
+                        } ${isCajaActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
+                      >
+                        <Banknote
+                          size={20}
+                          strokeWidth={isCajaActive ? 2.5 : 2}
+                        />
+                      </div>
+                      <span
+                        className={`font-label-caps text-xs font-bold uppercase tracking-tight flex-1 truncate text-left transition-all duration-300 ${
+                          isCajaActive ? "text-primary-container" : ""
+                        } ${
+                          isExpanded
+                            ? "opacity-100 translate-x-0"
+                            : "opacity-0 -translate-x-4 pointer-events-none w-0"
+                        }`}
+                      >
+                        Caja
+                      </span>
+                      {isExpanded && (
+                        <ChevronDown
+                          size={14}
+                          className={`text-primary/50 transition-transform duration-300 flex-shrink-0 ${
+                            cajaOpen ? "rotate-180" : ""
+                          }`}
+                        />
+                      )}
+                      {!isExpanded && (
+                        <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                          Caja
+                        </div>
+                      )}
+                    </button>
+
+                    {cajaOpen && isExpanded && (
+                      <div className="mt-2 ml-4 flex flex-col border-l border-primary-container/30 space-y-1 pl-3 animate-in slide-in-from-top-2 duration-300">
+                        {cajaSubMenu.map((sub) => {
+                          const isSubActive = location.pathname === sub.path;
+                          return (
+                            <Link
+                              key={sub.path}
+                              to={sub.path}
+                              onClick={handleItemClick}
+                              className={`group relative flex items-center rounded-default transition-all duration-300 px-3 py-2 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                                isSubActive
+                                  ? "bg-primary-container/10 text-primary"
+                                  : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                              }`}
+                            >
+                              <span
+                                className={`absolute left-0 w-1 h-5 rounded-r-full bg-primary transition-all duration-300 ${
+                                  isSubActive
+                                    ? "scale-y-100 opacity-100"
+                                    : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
+                                }`}
+                              />
+                              {sub.name}
+                            </Link>
+                          );
+                        })}
                       </div>
                     )}
-                  </Link>
+                  </div>
                 )}
 
                 {item.name === "Catálogo" && (

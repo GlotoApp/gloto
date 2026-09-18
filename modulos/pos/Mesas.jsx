@@ -46,7 +46,7 @@ const ESTADO = {
     label: "Por Limpiar",
     pulse: true,
   },
-  "": {
+  clean: {
     color: "#6b7280",
     glow: "#6b728010",
     border: "#6b728030",
@@ -69,9 +69,15 @@ const calc = (c) =>
 
 // El estado de la mesa depende únicamente de table_status, no del estado de la orden.
 const mapTableStatusToTableState = (tableStatus) =>
-  String(tableStatus ?? "")
-    .trim()
-    .toLowerCase();
+  ["", "clean", "limpia"].includes(
+    String(tableStatus ?? "")
+      .trim()
+      .toLowerCase(),
+  )
+    ? "clean"
+    : String(tableStatus ?? "")
+        .trim()
+        .toLowerCase();
 
 const getTableStateFromOrder = (order) => {
   // Un table_status vacio significa mesa limpia. Solo usamos status como
@@ -83,10 +89,17 @@ const getTableStateFromOrder = (order) => {
   const orderStatus = String(order.status ?? "")
     .trim()
     .toLowerCase();
-  return ["pending", "confirmed", "preparing", "ready"].includes(orderStatus)
+  return ["pending", "confirmed", "preparing", "ready", "complete"].includes(
+    orderStatus,
+  )
     ? "ocupada"
     : "";
 };
+
+const isClosedTableOrder = (order) =>
+  String(order.table_status ?? "")
+    .trim()
+    .toLowerCase() === "cerrada";
 
 const getLocalDateKey = (date = new Date()) => {
   const year = date.getFullYear();
@@ -256,15 +269,51 @@ const getStoredOptionLabel = (option) => {
     option.title ||
     option.text ||
     option.value ||
+    option.option ||
+    option.variant ||
+    option.variant_name ||
+    option.nombre_opcion ||
     "Opción"
   );
 };
 
 const formatStoredOption = (option) => {
+  if (typeof option === "string") {
+    try {
+      const parsedOption = JSON.parse(option);
+      if (parsedOption && typeof parsedOption === "object") {
+        return formatStoredOption(parsedOption);
+      }
+    } catch {
+      return option.trim() || "Opción";
+    }
+  }
   const label = getStoredOptionLabel(option);
   const extraPrice =
-    typeof option === "object" ? Number(option.precio_extra || 0) : 0;
+    typeof option === "object"
+      ? Number(
+          option.precio_extra ??
+            option.price_extra ??
+            option.extra_price ??
+            option.price ??
+            0,
+        )
+      : 0;
   return extraPrice > 0 ? `${label} (+$${fmt(extraPrice).slice(1)})` : label;
+};
+
+const getCatalogOption = (products, productId, option) => {
+  const optionId = typeof option === "object" ? option?.id : option;
+  if (!optionId) return null;
+  const product = products.find((item) => item.id === productId);
+  return (product?.optionGroups || [])
+    .flatMap((group) => group.opciones || [])
+    .find((catalogOption) => String(catalogOption.id) === String(optionId));
+};
+
+const formatOrderOption = (option, products, productId) => {
+  const catalogOption = getCatalogOption(products, productId, option);
+  return formatStoredOption(catalogOption || option);
 };
 
 const normalizeStoredOption = (option, itemId, index) => ({
@@ -390,7 +439,7 @@ function MesaTile({ mesa, onOpen }) {
         </div>
 
         {/* Total */}
-        {isOcc && total > 0 && (
+        {total > 0 && (
           <div className="text-sm font-black text-white">{fmt(total)}</div>
         )}
       </div>
@@ -399,11 +448,19 @@ function MesaTile({ mesa, onOpen }) {
 }
 
 // ─── Panel Body ───────────────────────────────────────────────────────────────
-function PanelBody({ mesa, onUpdate, onClose, onToast }) {
+function PanelBody({
+  mesa,
+  onUpdate,
+  onClose,
+  onCloseMesa,
+  onToast,
+  products = [],
+}) {
   const navigate = useNavigate();
   const [tab, setTab] = useState("comanda");
   const [personas, setPersonas] = useState(mesa.personas);
   const [showReservaForm, setShowReservaForm] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [reservaNombre, setReservaNombre] = useState(
     mesa.reserva?.nombre || "",
   );
@@ -436,30 +493,18 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
         estado: s,
         startTime: null,
         personas: 0,
-        comanda: [],
-        total: 0,
-        nota: "",
+        nota: mesa.nota || "",
       });
       onToast(`Mesa ${mesa.numero} lista para limpiar`);
       onClose();
-    } else if (s === "") {
-      // Limpia: mesa está limpia y cerrada, lista para próxima orden
+    } else if (s === "clean") {
+      // Limpia: permanece visible hasta que se cierre explícitamente.
       onUpdate({
         ...mesa,
-        estado: "",
+        estado: "clean",
         startTime: null,
         personas: 0,
-        comanda: [],
-        total: 0,
-        nota: "",
-        reserva: {
-          nombre: "",
-          telefono: "",
-          email: "",
-          hora: "",
-          personas: 0,
-          activa: false,
-        },
+        nota: mesa.nota || "",
       });
       onToast(`✓ Mesa ${mesa.numero} limpia y lista`);
       onClose();
@@ -491,6 +536,13 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
     if (mesa.reserva?.activa) {
       handleEstado("ocupada");
     }
+  };
+
+  const handleCerrarMesa = () => {
+    setShowCloseConfirm(false);
+    onCloseMesa(mesa);
+    onToast(`Mesa ${mesa.numero} cerrada`);
+    onClose();
   };
 
   const handleEditarEnPOS = () => {
@@ -532,11 +584,20 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
         price: Number(item.precio || 0),
         note: item.notes || "",
         notes: item.notes || "",
-        optionNames: Array.isArray(item.options) ? item.options : [],
+        optionNames: Array.isArray(item.options)
+          ? item.options.map((option) =>
+              formatOrderOption(option, products, item.productId || item.id),
+            )
+          : [],
         options: Array.isArray(item.options) ? item.options : [],
         selectedOptions: Array.isArray(item.options)
           ? item.options.map((option, index) =>
-              normalizeStoredOption(option, item.id, index),
+              normalizeStoredOption(
+                getCatalogOption(products, item.productId || item.id, option) ||
+                  option,
+                item.id,
+                index,
+              ),
             )
           : [],
       })),
@@ -548,9 +609,9 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
   return (
     <>
       {/* Header */}
-      <div className="px-6 pt-5 pb-4 border-b border-white/6 flex-shrink-0">
-        <div className="flex items-start justify-between">
-          <div>
+      <div className="flex-shrink-0 border-b border-white/6 px-6 pb-4 pt-5">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
+          <div className="min-w-0">
             <div className="flex items-center gap-1.5 mb-1">
               <div
                 className="w-1.5 h-1.5 rounded-full"
@@ -572,12 +633,15 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
               MESA {mesa.numero}
             </h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-white/8 rounded-xl transition-colors"
-          >
-            <X size={16} className="text-slate-500" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onClose}
+              className="rounded-xl p-2 transition-colors hover:bg-white/8"
+              aria-label="Cerrar panel"
+            >
+              <X size={16} className="text-slate-500" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -631,7 +695,11 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
                     </div>
                     {item.options?.length > 0 && (
                       <p className="text-[10px] text-blue-400">
-                        {item.options.map(formatStoredOption).join(" · ")}
+                        {item.options
+                          .map((option) =>
+                            formatOrderOption(option, products, item.productId),
+                          )
+                          .join(" · ")}
                       </p>
                     )}
                   </div>
@@ -780,16 +848,6 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
 
       {/* Footer */}
       <div className="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-black/40 border-t border-white/6 flex-shrink-0 space-y-3">
-        {mesa.estado === "ocupada" && (
-          <div className="flex justify-between items-center">
-            <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">
-              Total
-            </span>
-            <span className="text-2xl font-black text-white tracking-tighter">
-              {fmt(total)}
-            </span>
-          </div>
-        )}
         <div className="flex gap-1.5 flex-wrap">
           {/* BOTÓN 1: Ocupada */}
           <button
@@ -821,41 +879,81 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
           </button>
           {/* BOTÓN 3: Limpia (sucio → vacío) */}
           <button
-            onClick={() => handleEstado("")}
+            onClick={() => handleEstado("clean")}
             className={`px-3 py-1.5 rounded-xl border text-[8px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center gap-1 ${
-              mesa.estado === "" ? "shadow-lg" : "opacity-45"
+              mesa.estado === "clean" ? "shadow-lg" : "opacity-45"
             }`}
             style={{
-              background: mesa.estado === "" ? "#22c55e35" : "#22c55e08",
-              borderColor: mesa.estado === "" ? "#22c55e" : "#22c55e40",
+              background: mesa.estado === "clean" ? "#22c55e35" : "#22c55e08",
+              borderColor: mesa.estado === "clean" ? "#22c55e" : "#22c55e40",
               color: "#22c55e",
             }}
           >
             <CheckCircle2 size={9} /> Limpia
           </button>
-          {mesa.estado === "" && (
+        </div>
+        {total > 0 && (
+          <div className="flex items-center justify-between border-y border-white/6 py-3">
+            <span className="text-sm font-black uppercase tracking-[0.18em] text-white">
+              Total del pedido
+            </span>
+            <span className="text-2xl font-black tracking-tighter text-white">
+              {fmt(total)}
+            </span>
+          </div>
+        )}
+        <div
+          className={`grid gap-2 ${mesa.estado !== "reserva" ? "grid-cols-2" : "grid-cols-1"}`}
+        >
+          {mesa.estado !== "reserva" && (
             <button
-              onClick={() => setShowReservaForm(true)}
-              className="px-3 py-1.5 rounded-xl border text-[8px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center gap-1"
-              style={{
-                background: "#3b82f615",
-                borderColor: "#3b82f640",
-                color: "#3b82f6",
-              }}
+              onClick={() => setShowCloseConfirm(true)}
+              className="flex items-center justify-center gap-1 rounded-2xl border border-red-500/25 bg-red-500/10 py-4 text-[9px] font-black uppercase tracking-widest text-red-300 transition-colors hover:bg-red-500/20 active:scale-95"
             >
-              <Calendar size={9} /> Hacer Reserva
+              <CheckCircle2 size={11} /> Cerrar mesa
             </button>
           )}
-        </div>
-        <div className="grid grid-cols-1 gap-2">
           <button
             onClick={handleEditarEnPOS}
-            className="py-4 bg-violet-500/10 border border-violet-500/25 rounded-2xl text-[9px] font-black uppercase tracking-widest text-violet-300 active:scale-95 transition-all flex items-center justify-center gap-1.5"
+            className="flex items-center justify-center gap-1.5 rounded-2xl border border-violet-500/25 bg-violet-500/10 py-4 text-[9px] font-black uppercase tracking-widest text-violet-300 transition-all active:scale-95"
           >
             <Edit3 size={11} /> Editar
           </button>
         </div>
       </div>
+
+      {showCloseConfirm && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70"
+            onClick={() => setShowCloseConfirm(false)}
+          />
+          <div className="relative w-full max-w-sm rounded-2xl border border-white/10 bg-[#0c0c0c] p-6 shadow-2xl">
+            <h3 className="text-lg font-black uppercase text-white">
+              ¿Cerrar mesa {mesa.numero}?
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-400">
+              La mesa se cerrará y dejará de estar disponible en el tablero.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowCloseConfirm(false)}
+                className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-300 hover:bg-white/10"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleCerrarMesa}
+                className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-red-500"
+              >
+                Cerrar mesa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Reserva */}
       <AnimatePresence>
@@ -983,7 +1081,14 @@ function PanelBody({ mesa, onUpdate, onClose, onToast }) {
 }
 
 // ─── Panel / Bottom Sheet (responsive) ───────────────────────────────────────
-function MesaPanel({ mesa, onClose, onUpdate, onToast, products = [] }) {
+function MesaPanel({
+  mesa,
+  onClose,
+  onUpdate,
+  onCloseMesa,
+  onToast,
+  products = [],
+}) {
   return (
     <AnimatePresence>
       {mesa && (
@@ -1029,6 +1134,7 @@ function MesaPanel({ mesa, onClose, onUpdate, onToast, products = [] }) {
             <PanelBody
               mesa={mesa}
               onUpdate={onUpdate}
+              onCloseMesa={onCloseMesa}
               onClose={onClose}
               onToast={onToast}
               products={products}
@@ -1236,7 +1342,7 @@ export default function MesasPOS() {
       // Las reservas caducan visualmente por fecha; las mesas activas no.
       const mesasOrdenes = (ordenes || [])
         .filter((orden) => {
-          if (!orden.mesa || !getTableStateFromOrder(orden)) {
+          if (!orden.mesa || isClosedTableOrder(orden)) {
             return false;
           }
 
@@ -1365,15 +1471,7 @@ export default function MesasPOS() {
   // Actualizar mesa y sincronizar con Supabase
   const updateMesa = useCallback(
     async (updated) => {
-      // Una mesa limpia deja de ser una mesa activa y desaparece del tablero.
-      if (updated.estado === "") {
-        setMesas((prev) => prev.filter((m) => m.id !== updated.id));
-        setSelected((current) => (current?.id === updated.id ? null : current));
-      } else {
-        setMesas((prev) =>
-          prev.map((m) => (m.id === updated.id ? updated : m)),
-        );
-      }
+      setMesas((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
 
       // Si tiene orderId, actualizar en Supabase
       if (updated.orderId && businessId) {
@@ -1381,8 +1479,12 @@ export default function MesasPOS() {
           const { error } = await supabase
             .from("orders")
             .update({
-              status: updated.estado === "" ? "pending" : updated.orderStatus,
-              table_status: updated.estado,
+              status:
+                updated.estado === "clean"
+                  ? updated.orderStatus || "complete"
+                  : updated.orderStatus,
+              table_status:
+                updated.estado === "clean" ? "clean" : updated.estado,
               notes: updated.nota,
               personas: Number(updated.personas) || 0,
               updated_at: new Date().toISOString(),
@@ -1401,6 +1503,27 @@ export default function MesasPOS() {
       }
     },
     [businessId, showToast],
+  );
+
+  const closeMesa = useCallback(
+    async (mesa) => {
+      setMesas((prev) => prev.filter((item) => item.id !== mesa.id));
+      setSelected((current) => (current?.id === mesa.id ? null : current));
+
+      if (!mesa.orderId || !businessId) return;
+
+      const { error } = await supabase.rpc("close_table_order", {
+        p_order_id: mesa.orderId,
+        p_business_id: businessId,
+      });
+
+      if (error) {
+        console.error("Error cerrando mesa en Supabase:", error);
+        showToast("⚠️ Error cerrando la mesa");
+        loadMesasFromDB();
+      }
+    },
+    [businessId, loadMesasFromDB, showToast],
   );
 
   const kpis = {
@@ -1550,6 +1673,7 @@ export default function MesasPOS() {
         mesa={selected}
         onClose={() => setSelected(null)}
         onUpdate={updateMesa}
+        onCloseMesa={closeMesa}
         onToast={showToast}
         products={products}
       />
