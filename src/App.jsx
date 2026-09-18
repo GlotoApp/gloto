@@ -116,6 +116,7 @@ function App() {
             <Route path="utilidades" element={<Utilidades />} />
             <Route path="planes" element={<Planes />} />
             <Route path="configuracion" element={<Configuracion />} />
+            <Route path="configuracion/:section" element={<Configuracion />} />
           </Route>
         </Routes>
       </Suspense>

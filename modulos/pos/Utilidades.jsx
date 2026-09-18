@@ -177,7 +177,8 @@ const Utilidades = () => {
     const loadStore = async () => {
       setStoreLoading(true);
       setStoreError("");
-      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
 
       if (userError || !userData?.user?.id) {
         if (!cancelled) {
