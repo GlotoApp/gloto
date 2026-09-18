@@ -35,7 +35,9 @@ const Configuracion = () => {
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
             Configuración
           </p>
-          <h1 className="mt-1 text-2xl font-black tracking-tight">{section.title}</h1>
+          <h1 className="mt-1 text-2xl font-black tracking-tight">
+            {section.title}
+          </h1>
           <p className="mt-1 text-xs text-neutral-500">{section.description}</p>
         </header>
         <main className="rounded-3xl border border-white/[0.06] bg-neutral-900/10 p-3 backdrop-blur-md md:p-5">

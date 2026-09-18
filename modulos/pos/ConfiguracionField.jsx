@@ -4,9 +4,12 @@ const FIELD_DESCRIPTIONS = {
   "Nombre del negocio": "Nombre público que verán tus clientes.",
   Categoría: "Clasifica la tienda dentro del marketplace.",
   "Dirección física": "Dirección donde opera o recibe pedidos la tienda.",
-  "Número de WhatsApp": "Número usado para recibir pedidos y contactar el negocio.",
-  "Tiempo mínimo (minutos)": "Tiempo mínimo estimado para preparar y entregar un pedido.",
-  "Tiempo máximo (minutos)": "Tiempo máximo estimado para preparar y entregar un pedido.",
+  "Número de WhatsApp":
+    "Número usado para recibir pedidos y contactar el negocio.",
+  "Tiempo mínimo (minutos)":
+    "Tiempo mínimo estimado para preparar y entregar un pedido.",
+  "Tiempo máximo (minutos)":
+    "Tiempo máximo estimado para preparar y entregar un pedido.",
   "Tarifa por kilómetro": "Valor cobrado por cada kilómetro de distancia.",
   "Costo mínimo de domicilio": "Valor mínimo que puede tener un domicilio.",
   "Costo máximo de domicilio": "Límite máximo cobrado por un domicilio.",
@@ -17,7 +20,15 @@ const FIELD_DESCRIPTIONS = {
   Rol: "Permiso o función del usuario dentro del sistema.",
 };
 
-const ConfiguracionField = ({ label, value, onChange, type = "text", inputMode, placeholder = "", showError = false }) => (
+const ConfiguracionField = ({
+  label,
+  value,
+  onChange,
+  type = "text",
+  inputMode,
+  placeholder = "",
+  showError = false,
+}) => (
   <label className="flex flex-col gap-2">
     <span className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-500">
       {label}
