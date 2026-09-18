@@ -111,7 +111,7 @@ const Productos = ({ section = "productos" }) => {
     }));
     setCategoryRecords(records);
     setCategories(records.map((category) => category.name));
-    const { error } = await supabase.from("categories").upsert(records);
+    const { error } = await supabase.from("categories_shop").upsert(records);
     if (error) console.error("Error guardando categorías:", error);
   };
 
@@ -152,7 +152,7 @@ const Productos = ({ section = "productos" }) => {
     }
 
     const { error: categoryError } = await supabase
-      .from("categories")
+      .from("categories_shop")
       .delete()
       .eq("id", categoryId)
       .eq("business_id", businessId);
@@ -265,7 +265,7 @@ const Productos = ({ section = "productos" }) => {
         { data: ingredientCategoriesData, error: ingredientCategoriesError },
       ] = await Promise.all([
         supabase
-          .from("categories")
+          .from("categories_shop")
           .select("id, business_id, name")
           .eq("business_id", profile.business_id),
         supabase

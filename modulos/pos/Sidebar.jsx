@@ -27,11 +27,13 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
   const catalogoSectionRef = useRef(null);
   const inventarioSectionRef = useRef(null);
   const configSectionRef = useRef(null);
+  const finanzasSectionRef = useRef(null);
 
   const [cajaOpen, setCajaOpen] = useState(false);
   const [catalogoOpen, setCatalogoOpen] = useState(false);
   const [inventarioOpen, setInventarioOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
+  const [finanzasOpen, setFinanzasOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [businessName, setBusinessName] = useState("Gloto");
@@ -61,7 +63,6 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
     { name: "Horarios", path: "/pos/horarios", icon: Clock3 },
     { name: "Estadísticas", path: "/pos/estadisticas", icon: BarChart3 },
     { name: "Utilidades", path: "/pos/utilidades", icon: PencilRuler },
-    { name: "Planes", path: "/pos/planes", icon: CreditCard },
   ];
 
   const cajaSubMenu = [
@@ -72,6 +73,11 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
   const catalogoSubMenu = [
     { name: "Categorías", path: "/pos/categorias" },
     { name: "Productos", path: "/pos/productos" },
+  ];
+
+  const finanzasSubMenu = [
+    { name: "Planes", path: "/pos/planes" },
+    { name: "Promociones", path: "/pos/promociones" },
   ];
 
   const configSubMenu = [
@@ -86,6 +92,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
       setCatalogoOpen(false);
       setInventarioOpen(false);
       setConfigOpen(false);
+      setFinanzasOpen(false);
     }
   }, [isExpanded]);
 
@@ -117,6 +124,9 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
     location.pathname === "/pos/categorias";
   const isConfigSectionActive =
     location.pathname.startsWith("/pos/configuracion");
+  const isFinanzasActive =
+    location.pathname.startsWith("/pos/planes") ||
+    location.pathname.startsWith("/pos/promociones");
 
   useEffect(() => {
     if (isCatalogoActive) setCatalogoOpen(true);
@@ -133,6 +143,10 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
   useEffect(() => {
     if (isConfigSectionActive) setConfigOpen(true);
   }, [isConfigSectionActive]);
+
+  useEffect(() => {
+    if (isFinanzasActive) setFinanzasOpen(true);
+  }, [isFinanzasActive]);
 
   useEffect(() => {
     if (isExpanded && cajaOpen) {
@@ -169,6 +183,15 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
       });
     }
   }, [configOpen, isExpanded]);
+
+  useEffect(() => {
+    if (isExpanded && finanzasOpen) {
+      finanzasSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [finanzasOpen, isExpanded]);
 
   useEffect(() => {
     const loadBusinessBrand = async () => {
@@ -239,6 +262,12 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
     e.preventDefault();
     if (!isExpanded) toggleSidebar();
     setConfigOpen((prev) => !prev);
+  };
+
+  const handleToggleClickFinanzas = (e) => {
+    e.preventDefault();
+    if (!isExpanded) toggleSidebar();
+    setFinanzasOpen((prev) => !prev);
   };
 
   return (
@@ -641,6 +670,95 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
               </Link>
             );
           })}
+
+          <div
+            ref={finanzasSectionRef}
+            className="flex flex-col transition-all duration-300"
+          >
+            <button
+              onClick={handleToggleClickFinanzas}
+              className={`group relative flex items-center h-12 rounded-default transition-all duration-300 px-4 gap-4 w-full ${
+                isFinanzasActive
+                  ? "text-primary"
+                  : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+              }`}
+            >
+              <span
+                className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                  isFinanzasActive
+                    ? "scale-y-100 opacity-100"
+                    : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
+                }`}
+              />
+              <div
+                className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
+                  !isExpanded && "group-hover:scale-110"
+                } ${
+                  isFinanzasActive
+                    ? "text-primary-container"
+                    : "group-hover:text-on-surface"
+                }`}
+              >
+                <CreditCard
+                  size={20}
+                  strokeWidth={isFinanzasActive ? 2.5 : 2}
+                />
+              </div>
+              <span
+                className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate flex-1 text-left transition-all duration-300 ${
+                  isFinanzasActive ? "text-primary-container" : ""
+                } ${
+                  isExpanded
+                    ? "opacity-100 translate-x-0"
+                    : "opacity-0 -translate-x-4 pointer-events-none w-0"
+                }`}
+              >
+                Finanzas
+              </span>
+              {isExpanded && (
+                <ChevronDown
+                  size={14}
+                  className={`text-primary/50 transition-transform duration-300 ${
+                    finanzasOpen ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+              {!isExpanded && (
+                <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                  Finanzas
+                </div>
+              )}
+            </button>
+
+            {finanzasOpen && isExpanded && (
+              <div className="mt-2 ml-4 flex flex-col border-l border-primary-container/30 space-y-1 pl-3 animate-in slide-in-from-top-2 duration-300">
+                {finanzasSubMenu.map((sub) => {
+                  const isSubActive = location.pathname === sub.path;
+                  return (
+                    <Link
+                      key={sub.path}
+                      to={sub.path}
+                      onClick={handleItemClick}
+                      className={`group relative flex items-center rounded-default transition-all duration-300 px-3 py-2 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                        isSubActive
+                          ? "bg-primary-container/10 text-primary"
+                          : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                      }`}
+                    >
+                      <span
+                        className={`absolute left-0 w-1 h-5 rounded-r-full bg-primary transition-all duration-300 ${
+                          isSubActive
+                            ? "scale-y-100 opacity-100"
+                            : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
+                        }`}
+                      />
+                      {sub.name}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           <div
             ref={configSectionRef}

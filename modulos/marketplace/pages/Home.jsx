@@ -24,44 +24,35 @@ import {
   Motorbike,
   ClockFading,
   Star,
+  Tag,
 } from "lucide-react";
 import { supabase, resolveImageUrl } from "../../../src/lib/supabaseClient";
 
 // ─── Datos ──────────────────────────────────
 
-const CATEGORIAS = [
-  { n: "Desayuno", i: Coffee },
-
-  { n: "Colombiana", i: UtensilsCrossed },
-  { n: "Latina", i: UtensilsCrossed },
-  { n: "Internacional", i: UtensilsCrossed },
-
-  { n: "Postres", i: CakeSlice },
-  { n: "Tortas", i: CakeSlice },
-  { n: "Snacks", i: CakeSlice },
-  { n: "Helados", i: CakeSlice },
-
-  { n: "Súper", i: ShoppingBasket },
-
-  { n: "Saludable", i: Leaf },
-
-  { n: "Arepas", i: Sandwich },
-
-  { n: "Salchipapa", i: Beef },
-  { n: "Comida rápida", i: Beef },
-  { n: "Hamburguesas", i: Beef },
-
-  { n: "Pizza", i: Pizza },
-  { n: "Italiana", i: Pizza },
-
-  { n: "Pollo", i: Drumstick },
-
-  { n: "Carne", i: Beef },
-  { n: "Americana", i: Beef },
-
-  { n: "Asiática", i: Fish },
-  { n: "Mariscos", i: Fish },
-];
+const ICONOS_CATEGORIA = {
+  Desayuno: Coffee,
+  Colombiana: UtensilsCrossed,
+  Latina: UtensilsCrossed,
+  Internacional: UtensilsCrossed,
+  Postres: CakeSlice,
+  Tortas: CakeSlice,
+  Snacks: CakeSlice,
+  Helados: IceCream,
+  Súper: ShoppingBasket,
+  Saludable: Leaf,
+  Arepas: Sandwich,
+  Salchipapa: Beef,
+  "Comida rápida": Beef,
+  Hamburguesas: Hamburger,
+  Pizza,
+  Italiana: Pizza,
+  Pollo: Drumstick,
+  Carne: Beef,
+  Americana: Beef,
+  Asiática: Fish,
+  Mariscos: Fish,
+};
 
 // Relaciona cada categoría con el/los tipos de cocina de las tiendas (campo "tipo")
 const CATEGORIA_TIPOS = {
@@ -75,32 +66,11 @@ const CATEGORIA_TIPOS = {
   Saludable: ["Saludable", "Vegetariana", "Vegana"],
 };
 
-const PROMOS = [
-  {
-    id: 1,
-    slug: "burger-house",
-    tag: "PATROCINADO",
-    oferta: "2×1 en combos",
-    nombre: "Burger House",
-    icon: Hamburger,
-  },
-  {
-    id: 2,
-    slug: "obsidian-brew",
-    tag: "NUEVO",
-    oferta: "Café gratis",
-    nombre: "Obsidian Brew",
-    icon: Coffee,
-  },
-  {
-    id: 3,
-    slug: "pizza-luna",
-    tag: "TRENDING",
-    oferta: "-30% hoy",
-    nombre: "Pizza Luna",
-    icon: Pizza,
-  },
-];
+const ICONOS_PROMOCION = {
+  PATROCINADO: Hamburger,
+  NUEVO: Coffee,
+  TRENDING: Pizza,
+};
 
 const FILTROS = ["Relevancia", "Más cerca", "Calificación", "Precio", "Rápido"];
 
@@ -131,6 +101,8 @@ const Home = () => {
   const [verTodasPromos, setVerTodasPromos] = useState(false);
   const [busquedaPromo, setBusquedaPromo] = useState("");
   const [tiendas, setTiendas] = useState([]);
+  const [categorias, setCategorias] = useState([]);
+  const [promociones, setPromociones] = useState([]);
   const [cargando, setCargando] = useState(true);
 
   // Obtener negocios de Supabase
@@ -163,6 +135,59 @@ const Home = () => {
           .order("created_at", { ascending: true });
 
         if (error) throw error;
+
+        const { data: categoriasData, error: categoriasError } = await supabase
+          .from("categories")
+          .select("id,name,icon_url")
+          .order("name", { ascending: true });
+
+        if (categoriasError) throw categoriasError;
+
+        const categoriasUnicas = Array.from(
+          new Map(
+            (categoriasData || [])
+              .filter((categoria) => categoria.name?.trim())
+              .map((categoria) => [
+                normalizarTexto(categoria.name),
+                {
+                  id: categoria.id,
+                  n: categoria.name.trim(),
+                  iconUrl: categoria.icon_url || null,
+                },
+              ]),
+          ).values(),
+        );
+        setCategorias(categoriasUnicas);
+
+        const { data: promocionesData, error: promocionesError } =
+          await supabase
+            .from("promotions")
+            .select(
+              "id,tag,offer_text,title,icon_url,order_index,business_id,businesses(slug,name)",
+            )
+            .eq("is_active", true)
+            .eq("payment_status", "paid")
+            .order("order_index", { ascending: true });
+
+        if (promocionesError) {
+          console.error(
+            "No se pudieron cargar las promociones:",
+            promocionesError,
+          );
+          setPromociones([]);
+        } else {
+          setPromociones(
+            (promocionesData || []).map((promocion) => ({
+              id: promocion.id,
+              slug: promocion.businesses?.slug,
+              tag: promocion.tag,
+              oferta: promocion.offer_text,
+              nombre: promocion.title || promocion.businesses?.name || "",
+              icon: ICONOS_PROMOCION[promocion.tag] || Tag,
+              iconUrl: promocion.icon_url || null,
+            })),
+          );
+        }
 
         // Mapear datos de Supabase al formato esperado
         const tiendasMapeadas = data.map((negocio) => {
@@ -278,6 +303,13 @@ const Home = () => {
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "");
 
+  const normalizarTexto = (str) =>
+    String(str ?? "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+
   const tiendasFiltradas = tiendas.filter((t) => {
     const pasaBusqueda =
       busqueda.trim() === "" ||
@@ -291,6 +323,7 @@ const Home = () => {
 
     const pasaCategoria =
       !categoriaActiva ||
+      normalizar(t.tipo) === normalizar(categoriaActiva) ||
       (CATEGORIA_TIPOS[categoriaActiva] || []).some(
         (tipo) => normalizar(t.tipo) === normalizar(tipo),
       );
@@ -299,7 +332,7 @@ const Home = () => {
   });
 
   // ← AQUÍ AFUERA
-  const promocionesFiltradas = PROMOS.filter((promo) => {
+  const promocionesFiltradas = promociones.filter((promo) => {
     const q = normalizar(busquedaPromo);
 
     return (
@@ -514,8 +547,8 @@ const Home = () => {
       {!buscando && !verTodasPromos && (
         <section className="px-2 mb-4">
           <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
-            {CATEGORIAS.map((cat) => {
-              const Icon = cat.i;
+            {categorias.map((cat) => {
+              const Icon = ICONOS_CATEGORIA[cat.n] || Utensils;
               const activa = categoriaActiva === cat.n;
               return (
                 <button
@@ -527,7 +560,15 @@ const Home = () => {
                       : "bg-surface/60 text-on-surface-variant"
                   }`}
                 >
-                  <Icon size={22} />
+                  {cat.iconUrl ? (
+                    <img
+                      src={cat.iconUrl}
+                      alt=""
+                      className="h-[22px] w-[22px] object-contain"
+                    />
+                  ) : (
+                    <Icon size={22} />
+                  )}
                   <span
                     className={`text-[10px] font-bold uppercase tracking-wide ${
                       activa ? "text-white" : "text-on-surface-variant"
@@ -557,7 +598,15 @@ const Home = () => {
                   {promo.tag}
                 </div>
                 <div className="absolute right-3 bottom-2 opacity-70">
-                  <IconPromo size={40} className="text-white" />
+                  {promo.iconUrl ? (
+                    <img
+                      src={promo.iconUrl}
+                      alt=""
+                      className="h-10 w-10 object-contain"
+                    />
+                  ) : (
+                    <IconPromo size={40} className="text-white" />
+                  )}
                 </div>
                 <div className="absolute left-3 bottom-3 text-white">
                   <p className="font-black text-base">{promo.oferta}</p>
@@ -650,7 +699,15 @@ const Home = () => {
                     className="relative h-36 rounded-3xl bg-primary-container overflow-hidden p-5"
                   >
                     <div className="absolute right-4 bottom-2 opacity-20">
-                      <IconPromo size={56} className="text-white" />
+                      {promo.iconUrl ? (
+                        <img
+                          src={promo.iconUrl}
+                          alt=""
+                          className="h-14 w-14 object-contain"
+                        />
+                      ) : (
+                        <IconPromo size={56} className="text-white" />
+                      )}
                     </div>
 
                     <span className="inline-flex px-3 py-1 rounded-full text-[10px] font-bold bg-white/10 text-white">

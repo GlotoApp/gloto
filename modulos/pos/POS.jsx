@@ -464,7 +464,7 @@ const POS = () => {
 
     try {
       const { data, error } = await supabase
-        .from("categories")
+        .from("categories_shop")
         .select("id,name")
         .eq("business_id", businessId);
 

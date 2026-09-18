@@ -1190,7 +1190,7 @@ export default function MesasPOS() {
       }
 
       const { data: categoryData, error: categoryError } = await supabase
-        .from("categories")
+        .from("categories_shop")
         .select("id,name")
         .eq("business_id", businessIdParam);
 

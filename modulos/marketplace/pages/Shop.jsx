@@ -440,7 +440,7 @@ const Shop = () => {
         ] = await Promise.all([
           businessInfoQuery,
           supabase
-            .from("categories")
+            .from("categories_shop")
             .select("id,name")
             .eq("business_id", data.id),
           supabase
