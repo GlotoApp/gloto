@@ -9,7 +9,6 @@ import {
   Save,
   Store,
 } from "lucide-react";
-import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { supabase } from "../../src/lib/supabaseClient";
 import ConfiguracionField from "./ConfiguracionField";
@@ -138,27 +137,36 @@ const ConfiguracionTienda = () => {
   };
 
   useEffect(() => {
-    if (!mapElement.current || mapInstance.current) return undefined;
+    let isMounted = true;
 
-    const initialCenter = coordinates || [10.373842, -75.473796];
-    const map = L.map(mapElement.current, { zoomControl: true }).setView(
-      initialCenter,
-      coordinates ? 15 : 12,
-    );
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors",
-      maxZoom: 19,
-    }).addTo(map);
+    import("leaflet").then((L) => {
+      if (!isMounted || !mapElement.current || mapInstance.current) return;
 
-    map.on("moveend", () => {
-      const center = map.getCenter();
-      updateCoordinates(center.lat, center.lng);
+      const initialCenter = coordinates || [10.373842, -75.473796];
+      const map = L.default
+        .map(mapElement.current, { zoomControl: true })
+        .setView(initialCenter, coordinates ? 15 : 12);
+
+      L.default
+        .tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "&copy; OpenStreetMap contributors",
+          maxZoom: 19,
+        })
+        .addTo(map);
+
+      map.on("moveend", () => {
+        const center = map.getCenter();
+        updateCoordinates(center.lat, center.lng);
+      });
+      mapInstance.current = map;
     });
-    mapInstance.current = map;
 
     return () => {
-      map.remove();
-      mapInstance.current = null;
+      isMounted = false;
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
     };
   }, []);
 
@@ -269,24 +277,22 @@ const ConfiguracionTienda = () => {
         .from("businesses")
         .update({ name: data.name.trim() })
         .eq("id", businessId),
-      supabase
-        .from("business_info")
-        .upsert(
-          {
-            business_id: businessId,
-            address: data.address.trim(),
-            whatsapp_phone: data.whatsapp_phone.trim(),
-            delivery_time_min: Number(data.delivery_time_min) || 0,
-            delivery_time_max: Number(data.delivery_time_max) || 0,
-            delivery_fee_per_km: parseThousands(data.delivery_fee_per_km),
-            min_delivery_fee: parseThousands(data.min_delivery_fee),
-            max_delivery_fee: parseThousands(data.max_delivery_fee),
-            categoria: data.category.trim(),
-            latitude: data.latitude ? Number(data.latitude) : null,
-            longitude: data.longitude ? Number(data.longitude) : null,
-          },
-          { onConflict: "business_id" },
-        ),
+      supabase.from("business_info").upsert(
+        {
+          business_id: businessId,
+          address: data.address.trim(),
+          whatsapp_phone: data.whatsapp_phone.trim(),
+          delivery_time_min: Number(data.delivery_time_min) || 0,
+          delivery_time_max: Number(data.delivery_time_max) || 0,
+          delivery_fee_per_km: parseThousands(data.delivery_fee_per_km),
+          min_delivery_fee: parseThousands(data.min_delivery_fee),
+          max_delivery_fee: parseThousands(data.max_delivery_fee),
+          categoria: data.category.trim(),
+          latitude: data.latitude ? Number(data.latitude) : null,
+          longitude: data.longitude ? Number(data.longitude) : null,
+        },
+        { onConflict: "business_id" },
+      ),
     ]);
     const error = businessError || infoError;
     setMessage(
