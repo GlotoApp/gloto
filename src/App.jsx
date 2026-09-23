@@ -20,6 +20,7 @@ const Caja = lazy(() => import("../modulos/pos/Caja"));
 const CierresEliminados = lazy(
   () => import("../modulos/pos/CierresEliminados"),
 );
+const HistorialCierres = lazy(() => import("../modulos/pos/HistorialCierres"));
 const Horarios = lazy(() => import("../modulos/pos/Horarios"));
 const Reservas = lazy(() => import("../modulos/pos/Reservas"));
 const Productos = lazy(() => import("../modulos/pos/Productos"));
@@ -108,6 +109,7 @@ function App() {
               element={<InventarioMovimientos />}
             />
             <Route path="caja" element={<Caja />} />
+            <Route path="caja/historial" element={<HistorialCierres />} />
             <Route
               path="caja/CierresEliminados"
               element={<CierresEliminados />}

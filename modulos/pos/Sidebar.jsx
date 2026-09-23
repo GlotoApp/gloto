@@ -67,6 +67,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
 
   const cajaSubMenu = [
     { name: "Cierre de Caja", path: "/pos/caja" },
+    { name: "Historial de cierres", path: "/pos/caja/historial" },
     { name: "Cierres Eliminados", path: "/pos/caja/CierresEliminados" },
   ];
 
@@ -84,6 +85,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
     { name: "Tienda", path: "/pos/configuracion/tienda" },
     { name: "Datos", path: "/pos/configuracion/datos" },
     { name: "Notificaciones", path: "/pos/configuracion/notificaciones" },
+    { name: "Empleados", path: "/pos/configuracion/empleados" },
   ];
 
   useEffect(() => {
