@@ -35,6 +35,8 @@ const InventarioMovimientos = lazy(
 const Estadisticas = lazy(() => import("../modulos/pos/Estadisticas"));
 const Utilidades = lazy(() => import("../modulos/pos/Utilidades"));
 const Planes = lazy(() => import("../modulos/pos/Planes"));
+const MiPlan = lazy(() => import("../modulos/pos/MiPlan"));
+const HistorialPagos = lazy(() => import("../modulos/pos/HistorialPagos"));
 const Configuracion = lazy(() => import("../modulos/pos/Configuracion"));
 const SuperAdmin = lazy(() => import("../modulos/admin/SuperAdmin"));
 const Login = lazy(() => import("../modulos/pos/Login"));
@@ -119,6 +121,8 @@ function App() {
             <Route path="estadisticas" element={<Estadisticas />} />
             <Route path="utilidades" element={<Utilidades />} />
             <Route path="planes" element={<Planes />} />
+            <Route path="mi-plan" element={<MiPlan />} />
+            <Route path="historial-pagos" element={<HistorialPagos />} />
             <Route path="configuracion" element={<Configuracion />} />
             <Route path="configuracion/:section" element={<Configuracion />} />
           </Route>

@@ -77,8 +77,10 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
   ];
 
   const finanzasSubMenu = [
-    { name: "Planes", path: "/pos/planes" },
+    { name: "Mi plan", path: "/pos/mi-plan" },
     { name: "Promociones", path: "/pos/promociones" },
+    { name: "Planes", path: "/pos/planes" },
+    { name: "Historial de pagos", path: "/pos/historial-pagos" },
   ];
 
   const configSubMenu = [
@@ -128,6 +130,8 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
     location.pathname.startsWith("/pos/configuracion");
   const isFinanzasActive =
     location.pathname.startsWith("/pos/planes") ||
+    location.pathname.startsWith("/pos/mi-plan") ||
+    location.pathname.startsWith("/pos/historial-pagos") ||
     location.pathname.startsWith("/pos/promociones");
 
   useEffect(() => {
