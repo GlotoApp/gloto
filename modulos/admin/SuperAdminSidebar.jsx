@@ -148,6 +148,11 @@ const SuperAdminSidebar = ({ activeSection, onNavigate }) => {
               "promociones-pendientes",
               WalletCards,
             )}
+            {renderLink(
+              "Pagos de suscripciones",
+              "pagos-suscripciones",
+              WalletCards,
+            )}
           </>,
         )}
         {renderGroup(

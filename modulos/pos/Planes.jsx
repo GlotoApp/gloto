@@ -10,7 +10,7 @@ const Planes = () => {
       name: "Inicial",
       icon: Rocket,
       description: "Hasta 800 ticket pos / mes * pdv",
-      priceMonthly: 100000,
+      priceMonthly: 99500,
       pricePeriod: 300000,
       periodLabel: "por 3 meses",
       isCommission: false,
@@ -35,7 +35,7 @@ const Planes = () => {
       name: "Pro",
       icon: Zap,
       description: "Hasta 2,000 ticket pos / mes * pdv",
-      priceMonthly: 150000,
+      priceMonthly: 149500,
       pricePeriod: 450000,
       periodLabel: "por 3 meses",
       isCommission: false,
@@ -53,11 +53,11 @@ const Planes = () => {
       name: "Premium",
       icon: Crown,
       description: "Sin límites de tickets",
-      priceMonthly: 250000,
-      pricePeriod: 250000,
+      priceMonthly: 249500,
+      pricePeriod: 748500,
       isCommission: true,
-      commissionText: "0.25%",
-      subText: "de ventas netas (mín. $250,000 x PDV)",
+      commissionText: "0.5%",
+      subText: "de ventas netas",
       buttonText: "Probar Gratis",
       highlight: false,
       features: [
@@ -156,7 +156,12 @@ const Planes = () => {
                       </span>
                     </div>
                     <p className="text-[10px] text-neutral-400 uppercase font-black mt-2 tracking-widest">
-                      Mínimo ${plan.priceMonthly.toLocaleString("es-CO")} x PDV
+                      Mínimo $
+                      {(isAnnual
+                        ? plan.pricePeriod
+                        : plan.priceMonthly
+                      ).toLocaleString("es-CO")}{" "}
+                      x PDV
                     </p>
                   </div>
                 ) : (

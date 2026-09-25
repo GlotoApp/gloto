@@ -23,9 +23,11 @@ import {
   XCircle,
   Phone,
   Tag,
+  CreditCard,
   Rocket,
   Zap,
   Crown,
+  Upload,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
@@ -303,9 +305,20 @@ const SuperAdmin = ({ onVolver }) => {
   const [categoriasMaestras, setCategoriasMaestras] = useState([]);
   const [cargandoCategorias, setCargandoCategorias] = useState(true);
   const [guardandoCategoria, setGuardandoCategoria] = useState(null);
+  const [planesFacturacion, setPlanesFacturacion] = useState([]);
+  const [periodosFacturacion, setPeriodosFacturacion] = useState([]);
+  const [cargandoPlanes, setCargandoPlanes] = useState(true);
+  const [guardandoPlan, setGuardandoPlan] = useState(null);
+  const [guardandoPeriodo, setGuardandoPeriodo] = useState(null);
+  const [qrPago, setQrPago] = useState(null);
+  const [subiendoQr, setSubiendoQr] = useState(false);
   const [promocionesPendientes, setPromocionesPendientes] = useState([]);
   const [cargandoPromociones, setCargandoPromociones] = useState(true);
   const [confirmandoPromocion, setConfirmandoPromocion] = useState(null);
+  const [pagosPendientes, setPagosPendientes] = useState([]);
+  const [cargandoPagos, setCargandoPagos] = useState(true);
+  const [confirmandoPago, setConfirmandoPago] = useState(null);
+  const [periodosSeleccionados, setPeriodosSeleccionados] = useState({});
   const [activeSection, setActiveSection] = useState("resumen");
 
   const [tiendaAEliminar, setTiendaAEliminar] = useState(null);
@@ -337,6 +350,38 @@ const SuperAdmin = ({ onVolver }) => {
     };
 
     cargarPromocionesPendientes();
+  }, []);
+
+  useEffect(() => {
+    const cargarPagosPendientes = async () => {
+      const { data, error } = await supabase
+        .from("payment_records")
+        .select(
+          "id,business_id,subscription_id,amount,status,support_path,created_at,businesses(name),subscriptions(id,plan_name,plan_id,period_id,billing_period)",
+        )
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("No se pudieron cargar pagos pendientes:", error);
+        setPagosPendientes([]);
+      } else {
+        const pagos = data || [];
+        setPagosPendientes(pagos);
+        setPeriodosSeleccionados((actuales) =>
+          pagos.reduce(
+            (seleccionados, pago) => ({
+              ...seleccionados,
+              [pago.id]: pago.subscriptions?.period_id || "",
+            }),
+            actuales,
+          ),
+        );
+      }
+      setCargandoPagos(false);
+    };
+
+    cargarPagosPendientes();
   }, []);
 
   // Guardar cada vez que cambien las tiendas (después de la carga inicial)
@@ -371,6 +416,60 @@ const SuperAdmin = ({ onVolver }) => {
     };
 
     cargarCategoriasMaestras();
+  }, []);
+
+  useEffect(() => {
+    const cargarConfiguracionFacturacion = async () => {
+      const [
+        { data: planes, error: planesError },
+        { data: periodos, error: periodosError },
+        { data: qr, error: qrError },
+      ] = await Promise.all([
+        supabase
+          .from("billing_plans")
+          .select(
+            "id,code,name,description,billing_type,price_amount,commission_rate,minimum_amount,is_active,display_order",
+          )
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("billing_plan_periods")
+          .select(
+            "id,plan_id,code,label,duration_days,price_amount,commission_rate,minimum_amount,is_active",
+          )
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("payment_qr_codes")
+          .select("id,label,storage_path,is_active,updated_at")
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (planesError) {
+        console.error("No se pudieron cargar los planes:", planesError);
+        setPlanesFacturacion([]);
+      } else {
+        setPlanesFacturacion(planes || []);
+      }
+      if (periodosError) {
+        console.error("No se pudieron cargar los periodos:", periodosError);
+        setPeriodosFacturacion([]);
+      } else {
+        setPeriodosFacturacion(periodos || []);
+      }
+
+      if (qrError) {
+        console.error("No se pudo cargar el QR de pago:", qrError);
+      } else if (qr?.storage_path) {
+        const { data: publicUrlData } = supabase.storage
+          .from("payment-qr")
+          .getPublicUrl(qr.storage_path);
+        setQrPago({ ...qr, publicUrl: publicUrlData.publicUrl });
+      }
+      setCargandoPlanes(false);
+    };
+
+    cargarConfiguracionFacturacion();
   }, []);
 
   const tiendasFiltradas = useMemo(() => {
@@ -420,6 +519,193 @@ const SuperAdmin = ({ onVolver }) => {
       });
     }
     setGuardandoCategoria(null);
+  };
+
+  const guardarPlanFacturacion = async (plan) => {
+    setGuardandoPlan(plan.id);
+    const { error } = await supabase
+      .from("billing_plans")
+      .update({
+        name: plan.name,
+        description: plan.description,
+        billing_type: plan.billing_type,
+        price_amount: Number(plan.price_amount) || 0,
+        commission_rate:
+          plan.billing_type === "commission"
+            ? Number(plan.commission_rate) || 0
+            : null,
+        minimum_amount:
+          plan.billing_type === "commission"
+            ? Number(plan.minimum_amount) || 0
+            : null,
+        is_active: plan.is_active,
+      })
+      .eq("id", plan.id);
+
+    setMensajeEstado(
+      error
+        ? { tipo: "error", texto: "No se pudo guardar el plan." }
+        : { tipo: "success", texto: `Plan ${plan.name} actualizado.` },
+    );
+    setGuardandoPlan(null);
+  };
+
+  const guardarPeriodoFacturacion = async (periodo) => {
+    setGuardandoPeriodo(periodo.id);
+    const { error } = await supabase
+      .from("billing_plan_periods")
+      .update({
+        price_amount: Number(periodo.price_amount) || 0,
+        commission_rate:
+          periodo.commission_rate === null
+            ? null
+            : Number(periodo.commission_rate) || 0,
+        minimum_amount:
+          periodo.minimum_amount === null
+            ? null
+            : Number(periodo.minimum_amount) || 0,
+        is_active: periodo.is_active,
+      })
+      .eq("id", periodo.id);
+
+    setMensajeEstado(
+      error
+        ? { tipo: "error", texto: "No se pudo guardar el periodo." }
+        : { tipo: "success", texto: `${periodo.label} actualizado.` },
+    );
+    setGuardandoPeriodo(null);
+  };
+
+  const confirmarPagoSuscripcion = async (pago) => {
+    const periodId = periodosSeleccionados[pago.id];
+    if (!periodId) {
+      setMensajeEstado({
+        tipo: "error",
+        texto: "Selecciona mensual o trimestral antes de confirmar.",
+      });
+      return;
+    }
+
+    setConfirmandoPago(pago.id);
+    const { data, error } = await supabase.rpc("approve_subscription_payment", {
+      p_payment_id: pago.id,
+      p_period_id: periodId,
+    });
+
+    if (error) {
+      console.error("No se pudo aprobar el pago de suscripción:", error);
+      setMensajeEstado({
+        tipo: "error",
+        texto: error.message || "No se pudo aprobar el pago.",
+      });
+    } else {
+      setPagosPendientes((actuales) =>
+        actuales.filter((actual) => actual.id !== pago.id),
+      );
+      setMensajeEstado({
+        tipo: "success",
+        texto: `Pago aprobado. La suscripción de ${pago.businesses?.name || "la tienda"} fue renovada.`,
+      });
+      void data;
+    }
+    setConfirmandoPago(null);
+  };
+
+  const rechazarPagoSuscripcion = async (pago) => {
+    const motivo = window.prompt(
+      "Indica el motivo del rechazo (monto incorrecto, imagen ilegible, etc.):",
+    );
+    if (!motivo?.trim()) return;
+
+    setConfirmandoPago(pago.id);
+    const { error } = await supabase.rpc("reject_subscription_payment", {
+      p_payment_id: pago.id,
+      p_reason: motivo.trim(),
+    });
+
+    if (error) {
+      console.error("No se pudo rechazar el pago de suscripción:", error);
+      setMensajeEstado({
+        tipo: "error",
+        texto: error.message || "No se pudo rechazar el pago.",
+      });
+    } else {
+      setPagosPendientes((actuales) =>
+        actuales.filter((actual) => actual.id !== pago.id),
+      );
+      setMensajeEstado({
+        tipo: "success",
+        texto:
+          "Soporte rechazado. El negocio verá el motivo y podrá corregirlo.",
+      });
+    }
+    setConfirmandoPago(null);
+  };
+
+  const verSoportePago = async (pago) => {
+    if (!pago.support_path) return;
+    const { data, error } = await supabase.storage
+      .from("payment-supports")
+      .createSignedUrl(pago.support_path, 300);
+    if (error) {
+      setMensajeEstado({
+        tipo: "error",
+        texto: "No se pudo abrir el soporte.",
+      });
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const subirQrPago = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (
+      !/^image\/(jpeg|png|webp)$/.test(file.type) ||
+      file.size > 2 * 1024 * 1024
+    ) {
+      setMensajeEstado({
+        tipo: "error",
+        texto: "El QR debe ser JPG, PNG o WEBP y pesar máximo 2 MB.",
+      });
+      return;
+    }
+
+    setSubiendoQr(true);
+    const filePath = `qr/${crypto.randomUUID()}.${file.name.split(".").pop()?.toLowerCase() || "png"}`;
+    const { error: uploadError } = await supabase.storage
+      .from("payment-qr")
+      .upload(filePath, file, { upsert: false });
+
+    if (uploadError) {
+      setMensajeEstado({ tipo: "error", texto: "No se pudo subir el QR." });
+      setSubiendoQr(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("payment_qr_codes")
+      .insert({
+        label: "QR principal",
+        storage_path: filePath,
+        is_active: true,
+      })
+      .select("id,label,storage_path,is_active,updated_at")
+      .single();
+
+    if (error) {
+      setMensajeEstado({
+        tipo: "error",
+        texto: "Se subió el archivo, pero no se pudo guardar la configuración.",
+      });
+    } else {
+      const { data: publicUrlData } = supabase.storage
+        .from("payment-qr")
+        .getPublicUrl(filePath);
+      setQrPago({ ...data, publicUrl: publicUrlData.publicUrl });
+      setMensajeEstado({ tipo: "success", texto: "QR de pago actualizado." });
+    }
+    setSubiendoQr(false);
   };
 
   const confirmarPagoPromocion = async (promocion) => {
@@ -889,6 +1175,605 @@ const SuperAdmin = ({ onVolver }) => {
               );
             })}
           </div>
+
+          <section
+            id="planes"
+            style={{
+              background: "#131313",
+              border: "1px solid rgba(124,58,237,0.25)",
+              borderRadius: "16px",
+              padding: "16px",
+              marginBottom: "20px",
+              scrollMarginTop: "24px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+                marginBottom: "12px",
+              }}
+            >
+              <div>
+                <h2 style={{ fontSize: "14px", fontWeight: 800, margin: 0 }}>
+                  Planes y QR de pago
+                </h2>
+                <p
+                  style={{
+                    fontSize: "11px",
+                    color: "rgba(255,255,255,0.45)",
+                    margin: "4px 0 0",
+                  }}
+                >
+                  Actualiza precios, comisión y el QR que verán los negocios.
+                </p>
+              </div>
+              <CreditCard size={18} color="#a78bfa" />
+            </div>
+
+            {cargandoPlanes ? (
+              <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "12px" }}>
+                Cargando planes...
+              </p>
+            ) : planesFacturacion.length === 0 ? (
+              <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "12px" }}>
+                Ejecuta la migración de planes en Supabase para activar esta
+                sección.
+              </p>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                }}
+              >
+                {planesFacturacion.map((plan) => (
+                  <div
+                    key={plan.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "minmax(120px, 0.7fr) minmax(130px, 1fr) minmax(130px, 1fr) auto",
+                      gap: "10px",
+                      alignItems: "end",
+                      padding: "12px 0",
+                      borderTop: "1px solid rgba(255,255,255,0.06)",
+                    }}
+                  >
+                    <div>
+                      <label style={labelStyle}>Plan</label>
+                      <input
+                        value={plan.name}
+                        onChange={(event) =>
+                          setPlanesFacturacion((current) =>
+                            current.map((item) =>
+                              item.id === plan.id
+                                ? { ...item, name: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>
+                        {plan.billing_type === "commission"
+                          ? "Comisión (%)"
+                          : "Precio mensual"}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={
+                          plan.billing_type === "commission"
+                            ? plan.commission_rate || 0
+                            : plan.price_amount || 0
+                        }
+                        onChange={(event) =>
+                          setPlanesFacturacion((current) =>
+                            current.map((item) =>
+                              item.id === plan.id
+                                ? plan.billing_type === "commission"
+                                  ? {
+                                      ...item,
+                                      commission_rate: event.target.value,
+                                    }
+                                  : {
+                                      ...item,
+                                      price_amount: event.target.value,
+                                    }
+                                : item,
+                            ),
+                          )
+                        }
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>
+                        {plan.billing_type === "commission"
+                          ? "Mínimo mensual"
+                          : "Descripción"}
+                      </label>
+                      {plan.billing_type === "commission" ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="500"
+                          value={plan.minimum_amount || 0}
+                          onChange={(event) =>
+                            setPlanesFacturacion((current) =>
+                              current.map((item) =>
+                                item.id === plan.id
+                                  ? {
+                                      ...item,
+                                      minimum_amount: event.target.value,
+                                    }
+                                  : item,
+                              ),
+                            )
+                          }
+                          style={inputStyle}
+                        />
+                      ) : (
+                        <input
+                          value={plan.description || ""}
+                          onChange={(event) =>
+                            setPlanesFacturacion((current) =>
+                              current.map((item) =>
+                                item.id === plan.id
+                                  ? { ...item, description: event.target.value }
+                                  : item,
+                              ),
+                            )
+                          }
+                          style={inputStyle}
+                        />
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => guardarPlanFacturacion(plan)}
+                      disabled={guardandoPlan === plan.id}
+                      style={{
+                        background: "#7c3aed",
+                        border: "none",
+                        borderRadius: "10px",
+                        color: "#fff",
+                        padding: "11px 12px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        opacity: guardandoPlan === plan.id ? 0.6 : 1,
+                      }}
+                    >
+                      {guardandoPlan === plan.id ? "Guardando..." : "Guardar"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                marginTop: "4px",
+                paddingTop: "10px",
+                borderTop: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              <span style={labelStyle}>Periodos de cobro</span>
+              {periodosFacturacion.map((periodo) => {
+                const periodoPlan = planesFacturacion.find(
+                  (plan) => plan.id === periodo.plan_id,
+                );
+                if (!periodoPlan) return null;
+
+                return (
+                  <div
+                    key={periodo.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "120px 1fr 1fr auto",
+                      gap: "8px",
+                      alignItems: "end",
+                    }}
+                  >
+                    <div>
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: "11px",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {periodoPlan.name} · {periodo.label}
+                      </span>
+                      <span
+                        style={{
+                          display: "block",
+                          marginTop: "3px",
+                          fontSize: "10px",
+                          color: "rgba(255,255,255,0.4)",
+                        }}
+                      >
+                        {periodo.duration_days} días
+                      </span>
+                    </div>
+                    <div>
+                      <label style={labelStyle}>
+                        {periodoPlan.billing_type === "commission"
+                          ? "Comisión (%)"
+                          : "Precio"}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step={
+                          periodoPlan.billing_type === "commission"
+                            ? "0.01"
+                            : "500"
+                        }
+                        value={
+                          periodoPlan.billing_type === "commission"
+                            ? periodo.commission_rate || 0
+                            : periodo.price_amount || 0
+                        }
+                        onChange={(event) =>
+                          setPeriodosFacturacion((current) =>
+                            current.map((item) =>
+                              item.id === periodo.id
+                                ? periodoPlan.billing_type === "commission"
+                                  ? {
+                                      ...item,
+                                      commission_rate: event.target.value,
+                                    }
+                                  : {
+                                      ...item,
+                                      price_amount: event.target.value,
+                                    }
+                                : item,
+                            ),
+                          )
+                        }
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>
+                        {periodoPlan.billing_type === "commission"
+                          ? "Mínimo"
+                          : "Código"}
+                      </label>
+                      {periodoPlan.billing_type === "commission" ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="500"
+                          value={periodo.minimum_amount || 0}
+                          onChange={(event) =>
+                            setPeriodosFacturacion((current) =>
+                              current.map((item) =>
+                                item.id === periodo.id
+                                  ? {
+                                      ...item,
+                                      minimum_amount: event.target.value,
+                                    }
+                                  : item,
+                              ),
+                            )
+                          }
+                          style={inputStyle}
+                        />
+                      ) : (
+                        <span
+                          style={{
+                            display: "block",
+                            padding: "12px 10px",
+                            color: "rgba(255,255,255,0.4)",
+                            fontSize: "11px",
+                          }}
+                        >
+                          {periodo.code}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => guardarPeriodoFacturacion(periodo)}
+                      disabled={guardandoPeriodo === periodo.id}
+                      style={{
+                        background: "rgba(124,58,237,0.7)",
+                        border: "none",
+                        borderRadius: "10px",
+                        color: "#fff",
+                        padding: "11px 12px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        opacity: guardandoPeriodo === periodo.id ? 0.6 : 1,
+                      }}
+                    >
+                      {guardandoPeriodo === periodo.id ? "..." : "Guardar"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "14px",
+                flexWrap: "wrap",
+                borderTop: "1px solid rgba(255,255,255,0.06)",
+                paddingTop: "14px",
+                marginTop: "8px",
+              }}
+            >
+              {qrPago?.publicUrl && (
+                <img
+                  src={qrPago.publicUrl}
+                  alt="QR de pago actual"
+                  style={{
+                    width: "72px",
+                    height: "72px",
+                    objectFit: "contain",
+                    background: "#fff",
+                    borderRadius: "8px",
+                  }}
+                />
+              )}
+              <div style={{ flex: 1, minWidth: "180px" }}>
+                <p style={{ margin: 0, fontSize: "12px", fontWeight: 800 }}>
+                  QR de pago
+                </p>
+                <p
+                  style={{
+                    margin: "4px 0 0",
+                    fontSize: "11px",
+                    color: "rgba(255,255,255,0.45)",
+                  }}
+                >
+                  {qrPago
+                    ? "Se mostrará en Mi plan."
+                    : "Aún no hay un QR configurado."}
+                </p>
+              </div>
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "7px",
+                  background: "#7c3aed",
+                  borderRadius: "10px",
+                  color: "#fff",
+                  padding: "10px 12px",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  cursor: subiendoQr ? "wait" : "pointer",
+                  opacity: subiendoQr ? 0.6 : 1,
+                }}
+              >
+                <Upload size={14} />
+                {subiendoQr ? "Subiendo..." : "Subir nuevo QR"}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={subirQrPago}
+                  disabled={subiendoQr}
+                  style={{ display: "none" }}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section
+            id="pagos-suscripciones"
+            style={{
+              background: "#131313",
+              border: "1px solid rgba(52,211,153,0.2)",
+              borderRadius: "16px",
+              padding: "16px",
+              marginBottom: "20px",
+              scrollMarginTop: "24px",
+            }}
+          >
+            <div style={{ marginBottom: "12px" }}>
+              <h2 style={{ fontSize: "14px", fontWeight: 800, margin: 0 }}>
+                Pagos de suscripciones
+              </h2>
+              <p
+                style={{
+                  fontSize: "11px",
+                  color: "rgba(255,255,255,0.45)",
+                  margin: "4px 0 0",
+                }}
+              >
+                Selecciona el ciclo contratado y confirma el soporte para
+                renovar.
+              </p>
+            </div>
+
+            {cargandoPagos ? (
+              <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "12px" }}>
+                Cargando pagos...
+              </p>
+            ) : pagosPendientes.length === 0 ? (
+              <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "12px" }}>
+                No hay pagos de suscripciones pendientes.
+              </p>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                }}
+              >
+                {pagosPendientes.map((pago) => {
+                  const periodos = periodosFacturacion.filter(
+                    (periodo) =>
+                      periodo.plan_id === pago.subscriptions?.plan_id,
+                  );
+                  const periodoSeleccionado = periodos.find(
+                    (periodo) => periodo.id === periodosSeleccionados[pago.id],
+                  );
+                  const planSeleccionado = planesFacturacion.find(
+                    (plan) => plan.id === pago.subscriptions?.plan_id,
+                  );
+                  const montoEsperado =
+                    periodoSeleccionado &&
+                    planSeleccionado?.billing_type !== "commission"
+                      ? Number(periodoSeleccionado.price_amount)
+                      : null;
+                  const montoNoCoincide =
+                    montoEsperado !== null &&
+                    Number(pago.amount) !== montoEsperado;
+                  return (
+                    <div
+                      key={pago.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        flexWrap: "wrap",
+                        borderTop: "1px solid rgba(255,255,255,0.06)",
+                        padding: "12px 0",
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: "190px" }}>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: "12px",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {pago.businesses?.name || "Tienda"} ·{" "}
+                          {pago.subscriptions?.plan_name || "Plan"}
+                        </p>
+                        <p
+                          style={{
+                            margin: "4px 0 0",
+                            fontSize: "11px",
+                            color: "rgba(255,255,255,0.5)",
+                          }}
+                        >
+                          Soporte pendiente · Valor recibido:{" "}
+                          {fmtCOP(pago.amount)}
+                        </p>
+                      </div>
+                      <select
+                        value={periodosSeleccionados[pago.id] || ""}
+                        onChange={(event) =>
+                          setPeriodosSeleccionados((actuales) => ({
+                            ...actuales,
+                            [pago.id]: event.target.value,
+                          }))
+                        }
+                        style={{
+                          ...inputStyle,
+                          width: "180px",
+                          padding: "10px",
+                        }}
+                      >
+                        <option value="">Elegir periodo</option>
+                        {periodos.map((periodo) => (
+                          <option key={periodo.id} value={periodo.id}>
+                            {periodo.label} ·{" "}
+                            {fmtCOP(
+                              periodo.price_amount || periodo.minimum_amount,
+                            )}
+                          </option>
+                        ))}
+                      </select>
+                      {montoNoCoincide && (
+                        <span
+                          style={{
+                            flexBasis: "100%",
+                            color: "#fbbf24",
+                            fontSize: "11px",
+                          }}
+                        >
+                          El monto recibido ({fmtCOP(pago.amount)}) no coincide
+                          con el periodo elegido ({fmtCOP(montoEsperado)}).
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => verSoportePago(pago)}
+                        disabled={!pago.support_path}
+                        style={{
+                          background: "rgba(255,255,255,0.08)",
+                          border: "none",
+                          borderRadius: "10px",
+                          color: "#fff",
+                          padding: "10px 12px",
+                          fontSize: "11px",
+                          fontWeight: 800,
+                          cursor: pago.support_path ? "pointer" : "not-allowed",
+                          opacity: pago.support_path ? 1 : 0.45,
+                        }}
+                      >
+                        Ver soporte
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => confirmarPagoSuscripcion(pago)}
+                        disabled={
+                          confirmandoPago === pago.id ||
+                          periodos.length === 0 ||
+                          montoNoCoincide
+                        }
+                        style={{
+                          background: "#059669",
+                          border: "none",
+                          borderRadius: "10px",
+                          color: "#fff",
+                          padding: "10px 12px",
+                          fontSize: "11px",
+                          fontWeight: 800,
+                          cursor: "pointer",
+                          opacity: confirmandoPago === pago.id ? 0.6 : 1,
+                        }}
+                      >
+                        {confirmandoPago === pago.id
+                          ? "Renovando..."
+                          : "Confirmar y renovar"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => rechazarPagoSuscripcion(pago)}
+                        disabled={confirmandoPago === pago.id}
+                        style={{
+                          background: "rgba(248,113,113,0.12)",
+                          border: "none",
+                          borderRadius: "10px",
+                          color: "#fda4af",
+                          padding: "10px 12px",
+                          fontSize: "11px",
+                          fontWeight: 800,
+                          cursor: "pointer",
+                          opacity: confirmandoPago === pago.id ? 0.6 : 1,
+                        }}
+                      >
+                        Rechazar
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
 
           <section
             id="categorias-maestras"
