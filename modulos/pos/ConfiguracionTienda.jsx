@@ -10,7 +10,10 @@ import {
   Store,
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
-import { supabase } from "../../src/lib/supabaseClient";
+import {
+  removeStorageObjectIfUnused,
+  supabase,
+} from "../../src/lib/supabaseClient";
 import ConfiguracionField from "./ConfiguracionField";
 
 const EMPTY_DATA = {
@@ -314,7 +317,8 @@ const ConfiguracionTienda = () => {
     }
     setSaving(true);
     setMessage("");
-    const path = `${businessId}/${type}-${Date.now()}.${file.type.split("/")[1]}`;
+    const folder = type === "cover" ? "portadas-negocios" : "logos-negocio";
+    const path = `${businessId}/${folder}/${type}-${Date.now()}.${file.type.split("/")[1]}`;
     const { error: uploadError } = await supabase.storage
       .from("business-assets")
       .upload(path, file, { contentType: file.type, upsert: false });
@@ -327,14 +331,34 @@ const ConfiguracionTienda = () => {
       .from("business-assets")
       .getPublicUrl(path);
     const url = publicData?.publicUrl;
+    const previousUrl = type === "logo" ? logoUrl : coverUrl;
     const { error } = await supabase
       .from("businesses")
       .update({ [type === "logo" ? "logo_url" : "cover_url"]: url })
       .eq("id", businessId);
-    if (error) setMessage(error.message);
-    else {
+    if (error) {
+      setMessage(error.message);
+      try {
+        await removeStorageObjectIfUnused("business-assets", path);
+      } catch (cleanupError) {
+        console.warn(
+          "No se pudo limpiar la imagen que no se guardó:",
+          cleanupError,
+        );
+      }
+    } else {
       type === "logo" ? setLogoUrl(url) : setCoverUrl(url);
       setMessage("Imagen actualizada");
+      if (previousUrl && previousUrl !== url) {
+        try {
+          await removeStorageObjectIfUnused("business-assets", previousUrl);
+        } catch (cleanupError) {
+          console.warn("No se pudo limpiar la imagen anterior:", cleanupError);
+          setMessage(
+            "Imagen actualizada; no se pudo limpiar el archivo anterior.",
+          );
+        }
+      }
     }
     setSaving(false);
   };

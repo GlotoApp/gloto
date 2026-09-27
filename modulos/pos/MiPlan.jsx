@@ -216,7 +216,7 @@ export default function MiPlan() {
     setSaving(true);
     setMessage("");
     const extension = paymentFile.name.split(".").pop()?.toLowerCase() || "bin";
-    const filePath = `${businessId}/${crypto.randomUUID()}.${extension}`;
+    const filePath = `${businessId}/planes/${crypto.randomUUID()}.${extension}`;
     const { error: uploadError } = await supabase.storage
       .from("payment-supports")
       .upload(filePath, paymentFile, { upsert: false });

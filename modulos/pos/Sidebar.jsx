@@ -16,6 +16,7 @@ import {
   PencilRuler,
   CreditCard,
   Banknote,
+  Bell,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 
@@ -23,11 +24,6 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const navRef = useRef(null);
-  const cajaSectionRef = useRef(null);
-  const catalogoSectionRef = useRef(null);
-  const inventarioSectionRef = useRef(null);
-  const configSectionRef = useRef(null);
-  const finanzasSectionRef = useRef(null);
 
   const [cajaOpen, setCajaOpen] = useState(false);
   const [catalogoOpen, setCatalogoOpen] = useState(false);
@@ -35,6 +31,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
   const [configOpen, setConfigOpen] = useState(false);
   const [finanzasOpen, setFinanzasOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [businessName, setBusinessName] = useState("Gloto");
   const [businessLogo, setBusinessLogo] = useState(logoPng);
@@ -86,12 +83,18 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
   const configSubMenu = [
     { name: "Tienda", path: "/pos/configuracion/tienda" },
     { name: "Datos", path: "/pos/configuracion/datos" },
-    { name: "Notificaciones", path: "/pos/configuracion/notificaciones" },
     { name: "Empleados", path: "/pos/configuracion/empleados" },
   ];
 
   useEffect(() => {
-    if (!isExpanded) {
+    if (isExpanded) {
+      setCajaOpen(true);
+      setCatalogoOpen(true);
+      setInventarioOpen(true);
+      setConfigOpen(true);
+      setFinanzasOpen(true);
+      navRef.current?.scrollTo({ top: 0 });
+    } else {
       setCajaOpen(false);
       setCatalogoOpen(false);
       setInventarioOpen(false);
@@ -155,51 +158,6 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
   }, [isFinanzasActive]);
 
   useEffect(() => {
-    if (isExpanded && cajaOpen) {
-      cajaSectionRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    }
-  }, [cajaOpen, isExpanded]);
-
-  useEffect(() => {
-    if (isExpanded && catalogoOpen) {
-      catalogoSectionRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    }
-  }, [catalogoOpen, isExpanded]);
-
-  useEffect(() => {
-    if (isExpanded && inventarioOpen) {
-      inventarioSectionRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    }
-  }, [inventarioOpen, isExpanded]);
-
-  useEffect(() => {
-    if (isExpanded && configOpen) {
-      configSectionRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    }
-  }, [configOpen, isExpanded]);
-
-  useEffect(() => {
-    if (isExpanded && finanzasOpen) {
-      finanzasSectionRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    }
-  }, [finanzasOpen, isExpanded]);
-
-  useEffect(() => {
     const loadBusinessBrand = async () => {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData?.user?.id) return;
@@ -223,6 +181,39 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
     };
 
     loadBusinessBrand();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadNotifications = async () => {
+      const { error: refreshError } = await supabase.rpc(
+        "refresh_business_notifications",
+      );
+      if (refreshError) {
+        console.error("No se pudieron sincronizar avisos:", refreshError);
+      }
+
+      const { count, error } = await supabase
+        .from("business_notifications")
+        .select("id", { count: "exact", head: true })
+        .is("read_at", null);
+
+      if (!isMounted) return;
+      if (error) {
+        console.error("No se pudieron cargar las notificaciones:", error);
+      } else {
+        setUnreadNotificationCount(count || 0);
+      }
+    };
+
+    loadNotifications();
+    const intervalId = window.setInterval(loadNotifications, 5 * 60 * 1000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   const handleLogout = async () => {
@@ -301,7 +292,9 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
             }`}
           >
             <div
-              className={`flex items-center ${isExpanded ? "gap-3" : "justify-center"}`}
+              className={`flex items-center min-w-0 ${
+                isExpanded ? "flex-1 gap-3" : "justify-center"
+              }`}
             >
               <button
                 onClick={!isExpanded ? toggleSidebar : undefined}
@@ -323,10 +316,11 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
               </button>
 
               <span
-                className={`text-on-surface font-h2 font-bold tracking-tight text-lg whitespace-nowrap transition-all duration-300 ${
+                title={businessName || "Gloto"}
+                className={`min-w-0 text-on-surface font-h2 font-bold tracking-tight text-lg whitespace-nowrap transition-all duration-300 ${
                   isExpanded
-                    ? "opacity-100 translate-x-0"
-                    : "opacity-0 -translate-x-4 pointer-events-none w-0 overflow-hidden"
+                    ? "flex-1 truncate opacity-100 translate-x-0"
+                    : "flex-none w-0 opacity-0 -translate-x-4 pointer-events-none overflow-hidden"
                 }`}
               >
                 {businessName || "Gloto"}
@@ -336,7 +330,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
             {isExpanded && (
               <button
                 onClick={toggleSidebar}
-                className="p-2 rounded-default hover:bg-surface-hover text-on-surface-variant hover:text-primary transition-all animate-in fade-in zoom-in-95 duration-200"
+                className="shrink-0 p-2 rounded-default hover:bg-surface-hover text-on-surface-variant hover:text-primary transition-all animate-in fade-in zoom-in-95 duration-200"
               >
                 <X size={18} />
               </button>
@@ -346,19 +340,21 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
 
         <nav
           ref={navRef}
-          className="flex-1 px-3 pt-12 space-y-1 overflow-y-auto overflow-x-hidden custom-sidebar scrollbar-gutter-stable"
+          className="flex-1 px-3 pt-6 space-y-0.5 overflow-y-auto overflow-x-hidden custom-sidebar scrollbar-gutter-stable"
+          style={{ scrollbarGutter: isExpanded ? "stable" : "auto" }}
         >
           {menuItems.map((item) => {
             if (item.name === "Caja") {
               return (
                 <div
                   key={item.path}
-                  ref={cajaSectionRef}
                   className="flex flex-col transition-all duration-300"
                 >
                   <button
                     onClick={handleToggleClickCaja}
-                    className={`group relative flex items-center h-12 rounded-default transition-all duration-300 px-4 gap-4 w-full ${
+                    className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                      isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
+                    } ${
                       isCajaActive
                         ? "text-primary"
                         : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -382,12 +378,12 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                       />
                     </div>
                     <span
-                      className={`font-label-caps text-xs font-bold uppercase tracking-tight flex-1 truncate text-left transition-all duration-300 ${
+                      className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
                         isCajaActive ? "text-primary-container" : ""
                       } ${
                         isExpanded
-                          ? "opacity-100 translate-x-0"
-                          : "opacity-0 -translate-x-4 pointer-events-none w-0"
+                          ? "flex-1 opacity-100 translate-x-0"
+                          : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
                       }`}
                     >
                       Caja
@@ -408,7 +404,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                   </button>
 
                   {cajaOpen && isExpanded && (
-                    <div className="mt-2 ml-4 flex flex-col border-l border-primary-container/30 space-y-1 pl-3 animate-in slide-in-from-top-2 duration-300">
+                    <div className="mt-1 ml-5 flex flex-col border-l border-primary-container/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
                       {cajaSubMenu.map((sub) => {
                         const isSubActive = location.pathname === sub.path;
                         return (
@@ -416,7 +412,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                             key={sub.path}
                             to={sub.path}
                             onClick={handleItemClick}
-                            className={`group relative flex items-center rounded-default transition-all duration-300 px-3 py-2 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                            className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
                               isSubActive
                                 ? "bg-primary-container/10 text-primary"
                                 : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -443,12 +439,13 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
               return (
                 <div
                   key={item.path}
-                  ref={catalogoSectionRef}
                   className="flex flex-col transition-all duration-300"
                 >
                   <button
                     onClick={handleToggleClickCatalogo}
-                    className={`group relative flex items-center h-12 rounded-default transition-all duration-300 px-4 gap-4 w-full ${
+                    className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                      isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
+                    } ${
                       isCatalogoActive
                         ? "text-primary"
                         : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -472,12 +469,12 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                       />
                     </div>
                     <span
-                      className={`font-label-caps text-xs font-bold uppercase tracking-tight flex-1 truncate text-left transition-all duration-300 ${
+                      className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
                         isCatalogoActive ? "text-primary-container" : ""
                       } ${
                         isExpanded
-                          ? "opacity-100 translate-x-0"
-                          : "opacity-0 -translate-x-4 pointer-events-none w-0"
+                          ? "flex-1 opacity-100 translate-x-0"
+                          : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
                       }`}
                     >
                       Catálogo
@@ -498,7 +495,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                   </button>
 
                   {catalogoOpen && isExpanded && (
-                    <div className="mt-2 ml-4 flex flex-col border-l border-primary-container/30 space-y-1 pl-3 animate-in slide-in-from-top-2 duration-300">
+                    <div className="mt-1 ml-5 flex flex-col border-l border-primary-container/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
                       {catalogoSubMenu.map((sub) => {
                         const isSubActive = location.pathname === sub.path;
                         return (
@@ -506,7 +503,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                             key={sub.path}
                             to={sub.path}
                             onClick={handleItemClick}
-                            className={`group relative flex items-center rounded-default transition-all duration-300 px-3 py-2 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                            className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
                               isSubActive
                                 ? "bg-primary-container/10 text-primary"
                                 : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -533,12 +530,13 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
               return (
                 <div
                   key={item.path}
-                  ref={inventarioSectionRef}
                   className="flex flex-col transition-all duration-300"
                 >
                   <button
                     onClick={handleToggleClickInventario}
-                    className={`group relative flex items-center h-12 rounded-default transition-all duration-300 px-4 gap-4 w-full ${
+                    className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                      isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
+                    } ${
                       isInventarioActive
                         ? "text-primary"
                         : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -562,12 +560,12 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                       />
                     </div>
                     <span
-                      className={`font-label-caps text-xs font-bold uppercase tracking-tight flex-1 truncate text-left transition-all duration-300 ${
+                      className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
                         isInventarioActive ? "text-primary-container" : ""
                       } ${
                         isExpanded
-                          ? "opacity-100 translate-x-0"
-                          : "opacity-0 -translate-x-4 pointer-events-none w-0"
+                          ? "flex-1 opacity-100 translate-x-0"
+                          : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
                       }`}
                     >
                       Inventario
@@ -588,7 +586,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                   </button>
 
                   {inventarioOpen && isExpanded && (
-                    <div className="mt-2 ml-4 flex flex-col border-l border-primary-container/30 space-y-1 pl-3 animate-in slide-in-from-top-2 duration-300">
+                    <div className="mt-1 ml-5 flex flex-col border-l border-primary-container/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
                       {item.subMenu.map((sub) => {
                         const isSubActive = location.pathname === sub.path;
                         return (
@@ -596,7 +594,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                             key={sub.path}
                             to={sub.path}
                             onClick={handleItemClick}
-                            className={`group relative flex items-center rounded-default transition-all duration-300 px-3 py-2 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                            className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
                               isSubActive
                                 ? "bg-primary-container/10 text-primary"
                                 : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -628,7 +626,9 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                 key={item.path}
                 to={item.path}
                 onClick={handleItemClick}
-                className={`group relative flex items-center h-12 rounded-default transition-all duration-300 pl-4 pr-3.75 gap-4 w-full ${
+                className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                  isExpanded ? "pl-3 pr-3 gap-3" : "justify-center px-0 gap-0"
+                } ${
                   isActive
                     ? "text-primary font-medium"
                     : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -657,12 +657,12 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                 </div>
 
                 <span
-                  className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate flex-1 transition-all duration-300 ${
+                  className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate transition-all duration-300 ${
                     isActive ? "text-primary-container" : ""
                   } ${
                     isExpanded
-                      ? "opacity-100 translate-x-0"
-                      : "opacity-0 -translate-x-4 pointer-events-none w-0"
+                      ? "flex-1 opacity-100 translate-x-0"
+                      : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
                   }`}
                 >
                   {item.name}
@@ -677,13 +677,12 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
             );
           })}
 
-          <div
-            ref={finanzasSectionRef}
-            className="flex flex-col transition-all duration-300"
-          >
+          <div className="flex flex-col transition-all duration-300">
             <button
               onClick={handleToggleClickFinanzas}
-              className={`group relative flex items-center h-12 rounded-default transition-all duration-300 px-4 gap-4 w-full ${
+              className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
+              } ${
                 isFinanzasActive
                   ? "text-primary"
                   : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -711,12 +710,12 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                 />
               </div>
               <span
-                className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate flex-1 text-left transition-all duration-300 ${
+                className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
                   isFinanzasActive ? "text-primary-container" : ""
                 } ${
                   isExpanded
-                    ? "opacity-100 translate-x-0"
-                    : "opacity-0 -translate-x-4 pointer-events-none w-0"
+                    ? "flex-1 opacity-100 translate-x-0"
+                    : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
                 }`}
               >
                 Finanzas
@@ -737,7 +736,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
             </button>
 
             {finanzasOpen && isExpanded && (
-              <div className="mt-2 ml-4 flex flex-col border-l border-primary-container/30 space-y-1 pl-3 animate-in slide-in-from-top-2 duration-300">
+              <div className="mt-1 ml-5 flex flex-col border-l border-primary-container/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
                 {finanzasSubMenu.map((sub) => {
                   const isSubActive = location.pathname === sub.path;
                   return (
@@ -745,7 +744,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                       key={sub.path}
                       to={sub.path}
                       onClick={handleItemClick}
-                      className={`group relative flex items-center rounded-default transition-all duration-300 px-3 py-2 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                      className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
                         isSubActive
                           ? "bg-primary-container/10 text-primary"
                           : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -766,13 +765,12 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
             )}
           </div>
 
-          <div
-            ref={configSectionRef}
-            className="flex flex-col transition-all duration-300"
-          >
+          <div className="flex flex-col transition-all duration-300">
             <button
               onClick={handleToggleClickConfig}
-              className={`group relative flex items-center h-12 rounded-default transition-all duration-300 px-4 gap-4 w-full ${
+              className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
+              } ${
                 isConfigSectionActive
                   ? "text-primary"
                   : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -800,12 +798,12 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                 />
               </div>
               <span
-                className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate flex-1 text-left transition-all duration-300 ${
+                className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
                   isConfigSectionActive ? "text-primary-container" : ""
                 } ${
                   isExpanded
-                    ? "opacity-100 translate-x-0"
-                    : "opacity-0 -translate-x-4 pointer-events-none w-0"
+                    ? "flex-1 opacity-100 translate-x-0"
+                    : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
                 }`}
               >
                 Configuración
@@ -826,13 +824,13 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
             </button>
 
             {configOpen && isExpanded && (
-              <div className="mt-2 ml-4 flex flex-col border-l border-primary-container/30 space-y-1 pl-3 animate-in slide-in-from-top-2 duration-300">
+              <div className="mt-1 ml-5 flex flex-col border-l border-primary-container/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
                 {configSubMenu.map((sub) => (
                   <Link
                     key={sub.path}
                     to={sub.path}
                     onClick={handleItemClick}
-                    className={`rounded-default px-3 py-2 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                    className={`rounded-default px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
                       location.pathname === sub.path
                         ? "bg-primary-container/10 text-primary"
                         : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
@@ -846,12 +844,42 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
           </div>
         </nav>
 
-        <div className="p-4 relative">
+        <div className="p-3 relative">
           <div className="relative">
+            <div className={`mb-2 ${isExpanded ? "" : "flex justify-center"}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  navigate("/pos/notificaciones");
+                  if (isExpanded) toggleSidebar();
+                }}
+                aria-label={`Notificaciones${unreadNotificationCount ? `, ${unreadNotificationCount} sin leer` : ""}`}
+                className={`relative flex h-10 w-full items-center rounded-default transition-colors hover:bg-surface-hover ${isExpanded ? "gap-3 px-3" : "w-10 justify-center"}`}
+              >
+                <span className="relative flex h-5 w-5 shrink-0 items-center justify-center text-on-surface-variant">
+                  <Bell size={19} />
+                  {unreadNotificationCount > 0 && (
+                    <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-error px-1 text-[9px] font-black text-white">
+                      {unreadNotificationCount > 9
+                        ? "9+"
+                        : unreadNotificationCount}
+                    </span>
+                  )}
+                </span>
+                {isExpanded && (
+                  <span className="truncate text-left font-label-caps text-xs font-bold uppercase tracking-tight text-on-surface-variant">
+                    Notificaciones
+                  </span>
+                )}
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => setUserMenuOpen((prev) => !prev)}
-              className={`flex items-center rounded-default p-2 gap-3 w-full justify-start overflow-hidden transition-all duration-300 ${
+              className={`flex items-center rounded-default p-2 w-full overflow-hidden transition-all duration-300 ${
+                isExpanded ? "gap-3 justify-start" : "justify-center"
+              } ${
                 userMenuOpen ? "bg-surface-hover" : "hover:bg-surface-hover"
               }`}
             >
@@ -862,10 +890,10 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
               </div>
 
               <div
-                className={`flex-1 min-w-0 transition-all duration-300 ${
+                className={`min-w-0 transition-all duration-300 ${
                   isExpanded
-                    ? "opacity-100 translate-x-0"
-                    : "opacity-0 -translate-x-2 pointer-events-none w-0"
+                    ? "flex-1 opacity-100 translate-x-0"
+                    : "flex-none opacity-0 -translate-x-2 pointer-events-none w-0"
                 }`}
               >
                 <p className="text-on-surface font-body-sm text-[11px] font-black uppercase tracking-tighter truncate">

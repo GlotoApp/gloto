@@ -35,6 +35,7 @@ import CrearTiendaWizard from "./CrearTiendaWizard";
 import SuperAdminSidebar from "./SuperAdminSidebar";
 import SuperAdminStatCard from "./SuperAdminStatCard";
 import SuperAdminToggle from "./SuperAdminToggle";
+import SuperAdminStorageCleanup from "./SuperAdminStorageCleanup";
 
 const STORAGE_KEY = "superadmin_tiendas";
 
@@ -312,6 +313,13 @@ const SuperAdmin = ({ onVolver }) => {
   const [guardandoPeriodo, setGuardandoPeriodo] = useState(null);
   const [qrPago, setQrPago] = useState(null);
   const [subiendoQr, setSubiendoQr] = useState(false);
+  const [tarifaDiariaPromociones, setTarifaDiariaPromociones] =
+    useState("1000");
+  const [descuentosPromociones, setDescuentosPromociones] = useState([]);
+  const [cargandoTarifasPromociones, setCargandoTarifasPromociones] =
+    useState(true);
+  const [guardandoTarifasPromociones, setGuardandoTarifasPromociones] =
+    useState(false);
   const [promocionesPendientes, setPromocionesPendientes] = useState([]);
   const [cargandoPromociones, setCargandoPromociones] = useState(true);
   const [confirmandoPromocion, setConfirmandoPromocion] = useState(null);
@@ -335,7 +343,7 @@ const SuperAdmin = ({ onVolver }) => {
       const { data, error } = await supabase
         .from("promotions")
         .select(
-          "id,business_id,tag,title,offer_text,payment_status,created_at,businesses(name)",
+          "id,business_id,tag,title,offer_text,payment_status,payment_support_path,payment_notes,duration_days,daily_rate,discount_percent,subtotal_amount,discount_amount,total_amount,created_at,businesses(name)",
         )
         .eq("payment_status", "pending")
         .order("created_at", { ascending: false });
@@ -350,6 +358,42 @@ const SuperAdmin = ({ onVolver }) => {
     };
 
     cargarPromocionesPendientes();
+  }, []);
+
+  useEffect(() => {
+    const cargarTarifasPromociones = async () => {
+      const [{ data: pricing, error: pricingError }, { data: tiers, error }] =
+        await Promise.all([
+          supabase
+            .from("promotion_pricing_settings")
+            .select("daily_rate")
+            .eq("id", true)
+            .maybeSingle(),
+          supabase
+            .from("promotion_discount_tiers")
+            .select("id,min_days,discount_percent")
+            .eq("is_active", true)
+            .order("min_days", { ascending: true }),
+        ]);
+
+      if (pricingError || error || !pricing) {
+        console.error(
+          "No se pudieron cargar tarifas de promociones:",
+          pricingError || error,
+        );
+        setMensajeEstado({
+          tipo: "error",
+          texto:
+            "No se pudieron cargar las tarifas de promociones. Revisa la migración 060.",
+        });
+      } else {
+        setTarifaDiariaPromociones(String(pricing.daily_rate));
+        setDescuentosPromociones(tiers || []);
+      }
+      setCargandoTarifasPromociones(false);
+    };
+
+    cargarTarifasPromociones();
   }, []);
 
   useEffect(() => {
@@ -428,7 +472,7 @@ const SuperAdmin = ({ onVolver }) => {
         supabase
           .from("billing_plans")
           .select(
-            "id,code,name,description,billing_type,price_amount,commission_rate,minimum_amount,is_active,display_order",
+            "id,code,name,billing_type,price_amount,commission_rate,minimum_amount,is_active,display_order",
           )
           .order("display_order", { ascending: true }),
         supabase
@@ -527,7 +571,6 @@ const SuperAdmin = ({ onVolver }) => {
       .from("billing_plans")
       .update({
         name: plan.name,
-        description: plan.description,
         billing_type: plan.billing_type,
         price_amount: Number(plan.price_amount) || 0,
         commission_rate:
@@ -708,15 +751,90 @@ const SuperAdmin = ({ onVolver }) => {
     setSubiendoQr(false);
   };
 
+  const guardarTarifasPromociones = async () => {
+    const dailyRate = Number(tarifaDiariaPromociones);
+    const invalidDiscount = descuentosPromociones.some((tier) => {
+      const discount = Number(tier.discount_percent);
+      return !Number.isFinite(discount) || discount < 0 || discount > 100;
+    });
+
+    if (!Number.isFinite(dailyRate) || dailyRate <= 0 || invalidDiscount) {
+      setMensajeEstado({
+        tipo: "error",
+        texto:
+          "Ingresa una tarifa diaria mayor que cero y descuentos entre 0 y 100%.",
+      });
+      return;
+    }
+
+    setGuardandoTarifasPromociones(true);
+    const { error: pricingError } = await supabase
+      .from("promotion_pricing_settings")
+      .update({ daily_rate: dailyRate, updated_at: new Date().toISOString() })
+      .eq("id", true);
+
+    if (pricingError) {
+      console.error("No se pudo guardar la tarifa diaria:", pricingError);
+      setMensajeEstado({
+        tipo: "error",
+        texto: "No se pudo guardar la tarifa diaria de promociones.",
+      });
+      setGuardandoTarifasPromociones(false);
+      return;
+    }
+
+    const tierResults = await Promise.all(
+      descuentosPromociones.map((tier) =>
+        supabase
+          .from("promotion_discount_tiers")
+          .update({
+            discount_percent: Number(tier.discount_percent),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", tier.id),
+      ),
+    );
+    const tierError = tierResults.find((result) => result.error)?.error;
+
+    setMensajeEstado(
+      tierError
+        ? {
+            tipo: "error",
+            texto:
+              "La tarifa diaria se guardó, pero hubo un error al guardar los descuentos.",
+          }
+        : { tipo: "success", texto: "Tarifas de promociones actualizadas." },
+    );
+    setGuardandoTarifasPromociones(false);
+  };
+
   const confirmarPagoPromocion = async (promocion) => {
+    if (!promocion.payment_support_path || promocion.total_amount == null) {
+      setMensajeEstado({
+        tipo: "error",
+        texto:
+          promocion.total_amount == null
+            ? "No se puede confirmar: la promoción no tiene una cotización calculada."
+            : "No se puede confirmar una promoción sin soporte de pago.",
+      });
+      return;
+    }
+
     setConfirmandoPromocion(promocion.id);
+    const paidAt = new Date();
+    const endsAt = new Date(
+      paidAt.getTime() + Number(promocion.duration_days) * 86400000,
+    );
     const { error } = await supabase
       .from("promotions")
       .update({
         payment_status: "paid",
         payment_reference: "confirmed_by_superadmin",
-        paid_at: new Date().toISOString(),
+        paid_at: paidAt.toISOString(),
+        payment_notes: null,
         is_active: true,
+        starts_at: paidAt.toISOString(),
+        ends_at: endsAt.toISOString(),
       })
       .eq("id", promocion.id);
 
@@ -733,6 +851,37 @@ const SuperAdmin = ({ onVolver }) => {
       setMensajeEstado({
         tipo: "success",
         texto: `Promoción de ${promocion.businesses?.name || "la tienda"} publicada.`,
+      });
+    }
+    setConfirmandoPromocion(null);
+  };
+
+  const rechazarPagoPromocion = async (promocion) => {
+    const motivo = window.prompt(
+      "Indica el motivo del rechazo del soporte de pago:",
+    );
+    if (!motivo?.trim()) return;
+
+    setConfirmandoPromocion(promocion.id);
+    const { error } = await supabase
+      .from("promotions")
+      .update({ payment_status: "failed", payment_notes: motivo.trim() })
+      .eq("id", promocion.id);
+
+    if (error) {
+      console.error("No se pudo rechazar el pago de promoción:", error);
+      setMensajeEstado({
+        tipo: "error",
+        texto: "No se pudo rechazar el pago de la promoción.",
+      });
+    } else {
+      setPromocionesPendientes((actuales) =>
+        actuales.filter((actual) => actual.id !== promocion.id),
+      );
+      setMensajeEstado({
+        tipo: "success",
+        texto:
+          "Soporte rechazado. El negocio verá el motivo y podrá reenviarlo.",
       });
     }
     setConfirmandoPromocion(null);
@@ -1236,7 +1385,9 @@ const SuperAdmin = ({ onVolver }) => {
                     style={{
                       display: "grid",
                       gridTemplateColumns:
-                        "minmax(120px, 0.7fr) minmax(130px, 1fr) minmax(130px, 1fr) auto",
+                        plan.billing_type === "commission"
+                          ? "minmax(120px, 0.7fr) minmax(130px, 1fr) minmax(130px, 1fr) auto"
+                          : "minmax(120px, 0.7fr) minmax(130px, 1fr) auto",
                       gap: "10px",
                       alignItems: "end",
                       padding: "12px 0",
@@ -1294,13 +1445,9 @@ const SuperAdmin = ({ onVolver }) => {
                         style={inputStyle}
                       />
                     </div>
-                    <div>
-                      <label style={labelStyle}>
-                        {plan.billing_type === "commission"
-                          ? "Mínimo mensual"
-                          : "Descripción"}
-                      </label>
-                      {plan.billing_type === "commission" ? (
+                    {plan.billing_type === "commission" && (
+                      <div>
+                        <label style={labelStyle}>Mínimo mensual</label>
                         <input
                           type="number"
                           min="0"
@@ -1320,22 +1467,8 @@ const SuperAdmin = ({ onVolver }) => {
                           }
                           style={inputStyle}
                         />
-                      ) : (
-                        <input
-                          value={plan.description || ""}
-                          onChange={(event) =>
-                            setPlanesFacturacion((current) =>
-                              current.map((item) =>
-                                item.id === plan.id
-                                  ? { ...item, description: event.target.value }
-                                  : item,
-                              ),
-                            )
-                          }
-                          style={inputStyle}
-                        />
-                      )}
-                    </div>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => guardarPlanFacturacion(plan)}
@@ -1896,6 +2029,116 @@ const SuperAdmin = ({ onVolver }) => {
             )}
           </section>
 
+          <SuperAdminStorageCleanup />
+
+          <section
+            id="tarifas-promociones"
+            style={{
+              background: "#131313",
+              border: "1px solid rgba(245,158,11,0.2)",
+              borderRadius: "16px",
+              padding: "16px",
+              marginBottom: "20px",
+            }}
+          >
+            <div style={{ marginBottom: "12px" }}>
+              <h2 style={{ fontSize: "14px", fontWeight: 800, margin: 0 }}>
+                Tarifas de promociones
+              </h2>
+              <p
+                style={{
+                  fontSize: "11px",
+                  color: "rgba(255,255,255,0.45)",
+                  margin: "4px 0 0",
+                }}
+              >
+                Se cobra por día calendario. Se aplica solo el mayor descuento
+                alcanzado, hasta 30 días.
+              </p>
+            </div>
+            {cargandoTarifasPromociones ? (
+              <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "12px" }}>
+                Cargando tarifas...
+              </p>
+            ) : descuentosPromociones.length === 0 ? (
+              <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "12px" }}>
+                Ejecuta la migración 060 para configurar las tarifas.
+              </p>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
+                    gap: "10px",
+                    alignItems: "end",
+                  }}
+                >
+                  <div>
+                    <label style={labelStyle}>Tarifa diaria (COP)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      step="100"
+                      value={tarifaDiariaPromociones}
+                      onChange={(event) =>
+                        setTarifaDiariaPromociones(event.target.value)
+                      }
+                      style={inputStyle}
+                    />
+                  </div>
+                  {descuentosPromociones.map((tier) => (
+                    <div key={tier.id}>
+                      <label style={labelStyle}>
+                        Desde {tier.min_days} días (%)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        value={tier.discount_percent}
+                        onChange={(event) =>
+                          setDescuentosPromociones((current) =>
+                            current.map((item) =>
+                              item.id === tier.id
+                                ? {
+                                    ...item,
+                                    discount_percent: event.target.value,
+                                  }
+                                : item,
+                            ),
+                          )
+                        }
+                        style={inputStyle}
+                      />
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={guardarTarifasPromociones}
+                    disabled={guardandoTarifasPromociones}
+                    style={{
+                      background: "#b45309",
+                      border: "none",
+                      borderRadius: "10px",
+                      color: "#fff",
+                      padding: "11px 12px",
+                      fontSize: "11px",
+                      fontWeight: 800,
+                      cursor: guardandoTarifasPromociones ? "wait" : "pointer",
+                      opacity: guardandoTarifasPromociones ? 0.6 : 1,
+                    }}
+                  >
+                    {guardandoTarifasPromociones
+                      ? "Guardando..."
+                      : "Guardar tarifas"}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+
           <section
             id="promociones-pendientes"
             style={{
@@ -1962,6 +2205,21 @@ const SuperAdmin = ({ onVolver }) => {
                         {promocion.businesses?.name || "Tienda"} ·{" "}
                         {promocion.offer_text}
                       </p>
+                      {promocion.total_amount != null && (
+                        <p
+                          style={{
+                            margin: "5px 0 0",
+                            fontSize: "11px",
+                            color: "#fcd34d",
+                          }}
+                        >
+                          {promocion.duration_days} días · Subtotal{" "}
+                          {fmtCOP(promocion.subtotal_amount)} · Descuento{" "}
+                          {promocion.discount_percent}% (-
+                          {fmtCOP(promocion.discount_amount)}) · Total{" "}
+                          {fmtCOP(promocion.total_amount)}
+                        </p>
+                      )}
                     </div>
                     <span
                       style={{
@@ -1975,8 +2233,55 @@ const SuperAdmin = ({ onVolver }) => {
                     </span>
                     <button
                       type="button"
-                      onClick={() => confirmarPagoPromocion(promocion)}
+                      onClick={() =>
+                        verSoportePago({
+                          support_path: promocion.payment_support_path,
+                        })
+                      }
+                      disabled={!promocion.payment_support_path}
+                      style={{
+                        background: "rgba(255,255,255,0.08)",
+                        border: "none",
+                        borderRadius: "10px",
+                        color: "#fff",
+                        padding: "9px 12px",
+                        fontSize: "11px",
+                        fontWeight: 800,
+                        cursor: promocion.payment_support_path
+                          ? "pointer"
+                          : "not-allowed",
+                        opacity: promocion.payment_support_path ? 1 : 0.45,
+                      }}
+                    >
+                      Ver soporte
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => rechazarPagoPromocion(promocion)}
                       disabled={confirmandoPromocion === promocion.id}
+                      style={{
+                        background: "#be123c",
+                        border: "none",
+                        borderRadius: "10px",
+                        color: "#fff",
+                        padding: "9px 12px",
+                        fontSize: "11px",
+                        fontWeight: 800,
+                        cursor: "pointer",
+                        opacity:
+                          confirmandoPromocion === promocion.id ? 0.6 : 1,
+                      }}
+                    >
+                      Rechazar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => confirmarPagoPromocion(promocion)}
+                      disabled={
+                        confirmandoPromocion === promocion.id ||
+                        !promocion.payment_support_path ||
+                        promocion.total_amount == null
+                      }
                       style={{
                         background: "#059669",
                         border: "none",

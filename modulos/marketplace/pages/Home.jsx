@@ -24,7 +24,6 @@ import {
   Motorbike,
   ClockFading,
   Star,
-  Tag,
 } from "lucide-react";
 import { supabase, resolveImageUrl } from "../../../src/lib/supabaseClient";
 
@@ -64,12 +63,6 @@ const CATEGORIA_TIPOS = {
   Tacos: ["Mexicana"],
   Postres: ["Postres", "Repostería"],
   Saludable: ["Saludable", "Vegetariana", "Vegana"],
-};
-
-const ICONOS_PROMOCION = {
-  PATROCINADO: Hamburger,
-  NUEVO: Coffee,
-  TRENDING: Pizza,
 };
 
 const FILTROS = ["Relevancia", "Más cerca", "Calificación", "Precio", "Rápido"];
@@ -163,7 +156,7 @@ const Home = () => {
           await supabase
             .from("promotions")
             .select(
-              "id,tag,offer_text,title,icon_url,order_index,business_id,businesses(slug,name)",
+              "id,tag,offer_text,title,cover_path,order_index,business_id,businesses(slug,name)",
             )
             .eq("is_active", true)
             .eq("payment_status", "paid")
@@ -183,8 +176,11 @@ const Home = () => {
               tag: promocion.tag,
               oferta: promocion.offer_text,
               nombre: promocion.title || promocion.businesses?.name || "",
-              icon: ICONOS_PROMOCION[promocion.tag] || Tag,
-              iconUrl: promocion.icon_url || null,
+              coverUrl: promocion.cover_path
+                ? supabase.storage
+                    .from("business-assets")
+                    .getPublicUrl(promocion.cover_path).data.publicUrl
+                : null,
             })),
           );
         }
@@ -587,30 +583,30 @@ const Home = () => {
       {!buscando && !modoCategoria && !verTodasPromos && (
         <div className="flex gap-3 overflow-x-auto px-2 no-scrollbar pb-4">
           {promocionesFiltradas.map((promo) => {
-            const IconPromo = promo.icon;
             return (
               <Link
                 key={promo.id}
                 to={`/marketplace/tienda/${promo.slug}`}
                 className="relative flex-shrink-0 w-[140px] sm:w-[160px] md:w-[190px] h-[105px] rounded-3xl bg-primary-container/80 overflow-hidden"
               >
+                {promo.coverUrl && (
+                  <img
+                    src={promo.coverUrl}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                )}
+                <div className="absolute inset-0 bg-black/45" />
                 <div className="absolute top-3 left-3 px-2 py-1 rounded-full text-[8px] font-bold bg-white/10 text-white/70">
                   {promo.tag}
                 </div>
-                <div className="absolute right-3 bottom-2 opacity-70">
-                  {promo.iconUrl ? (
-                    <img
-                      src={promo.iconUrl}
-                      alt=""
-                      className="h-10 w-10 object-contain"
-                    />
-                  ) : (
-                    <IconPromo size={40} className="text-white" />
-                  )}
-                </div>
-                <div className="absolute left-3 bottom-3 text-white">
-                  <p className="font-black text-base">{promo.oferta}</p>
-                  <p className="text-[11px] opacity-70">{promo.nombre}</p>
+                <div className="absolute inset-x-3 bottom-3 min-w-0 text-white">
+                  <p className="line-clamp-1 font-black text-base">
+                    {promo.oferta}
+                  </p>
+                  <p className="line-clamp-1 text-[11px] opacity-80">
+                    {promo.nombre}
+                  </p>
                 </div>
               </Link>
             );
@@ -691,34 +687,32 @@ const Home = () => {
               </div>
             ) : (
               promocionesFiltradas.map((promo) => {
-                const IconPromo = promo.icon;
                 return (
                   <Link
                     key={promo.id}
                     to={`/marketplace/tienda/${promo.slug}`}
                     className="relative h-36 rounded-3xl bg-primary-container overflow-hidden p-5"
                   >
-                    <div className="absolute right-4 bottom-2 opacity-20">
-                      {promo.iconUrl ? (
-                        <img
-                          src={promo.iconUrl}
-                          alt=""
-                          className="h-14 w-14 object-contain"
-                        />
-                      ) : (
-                        <IconPromo size={56} className="text-white" />
-                      )}
-                    </div>
+                    {promo.coverUrl && (
+                      <img
+                        src={promo.coverUrl}
+                        alt=""
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    )}
+                    <div className="absolute inset-0 bg-black/45" />
 
-                    <span className="inline-flex px-3 py-1 rounded-full text-[10px] font-bold bg-white/10 text-white">
+                    <span className="relative inline-flex rounded-full bg-white/10 px-3 py-1 text-[10px] font-bold text-white">
                       {promo.tag}
                     </span>
 
-                    <h3 className="mt-4 text-2xl font-black text-white">
+                    <h3 className="relative mt-4 line-clamp-1 text-2xl font-black text-white">
                       {promo.oferta}
                     </h3>
 
-                    <p className="text-white/70">{promo.nombre}</p>
+                    <p className="relative line-clamp-1 text-white/80">
+                      {promo.nombre}
+                    </p>
                   </Link>
                 );
               })

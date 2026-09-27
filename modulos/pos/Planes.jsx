@@ -1,242 +1,297 @@
-import React, { useState } from "react";
-import { Check, Zap, Crown, Rocket, Star } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Check, Zap, Crown, Rocket } from "lucide-react";
+import { supabase } from "../../src/lib/supabaseClient";
+
+const PLAN_ICONS = {
+  inicial: Rocket,
+  pro: Zap,
+  premium: Crown,
+};
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
 
 const Planes = () => {
-  // true = 3 Meses / Trimestral, false = Mensual
-  const [isAnnual, setIsAnnual] = useState(true);
+  const [plans, setPlans] = useState([]);
+  const [periods, setPeriods] = useState([]);
+  const [features, setFeatures] = useState([]);
+  const [selectedPeriodCode, setSelectedPeriodCode] = useState("quarterly");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const plans = [
-    {
-      name: "Inicial",
-      icon: Rocket,
-      description: "Hasta 800 ticket pos / mes * pdv",
-      priceMonthly: 99500,
-      pricePeriod: 300000,
-      periodLabel: "por 3 meses",
-      isCommission: false,
-      buttonText: "Probar Gratis",
-      highlight: false,
-      features: [
-        "POS (Punto de venta)",
-        "Tienda en línea",
-        "Menú digital y QR",
-        "App móvil meseros",
-        "Fidelización de clientes",
-        "Gestión de Cajas y Mesas",
-        "Mostrador / Autoservicio",
-        "Módulo de Domicilios",
-        "Recetas y Arqueos de caja (normal/ciego)",
-        "Comandas digitales (KDS)",
-        "Reportes y Copias de seguridad en la nube",
-        "Usuarios, mesas y productos ilimitados",
-      ],
-    },
-    {
-      name: "Pro",
-      icon: Zap,
-      description: "Hasta 2,000 ticket pos / mes * pdv",
-      priceMonthly: 149500,
-      pricePeriod: 450000,
-      periodLabel: "por 3 meses",
-      isCommission: false,
-      buttonText: "Probar Gratis",
-      highlight: true,
-      features: [
-        "Todo lo de Plan Inicial +",
-        "Personalizar Tienda en Línea",
-        "Arqueos de Inventarios",
-        "Sub-recetas y Producciones",
-        "Dominio de tienda propio",
-      ],
-    },
-    {
-      name: "Premium",
-      icon: Crown,
-      description: "Sin límites de tickets",
-      priceMonthly: 249500,
-      pricePeriod: 748500,
-      isCommission: true,
-      commissionText: "0.5%",
-      subText: "de ventas netas",
-      buttonText: "Probar Gratis",
-      highlight: false,
-      features: [
-        "Todo lo de Plan Inicial + Pro",
-        "App de Domiciliarios y Logística avanzada",
-        "Tienda online en servidor dedicado",
-        "Reportes avanzados",
-      ],
-    },
-  ];
+  useEffect(() => {
+    const loadPlans = async () => {
+      const [
+        { data: planData, error: planError },
+        { data: periodData },
+        { data: featureData, error: featureError },
+      ] = await Promise.all([
+        supabase
+          .from("billing_plans")
+          .select(
+            "id,code,name,billing_type,price_amount,commission_rate,minimum_amount,display_order",
+          )
+          .eq("is_active", true)
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("billing_plan_periods")
+          .select(
+            "id,plan_id,code,label,duration_days,price_amount,commission_rate,minimum_amount,display_order",
+          )
+          .eq("is_active", true)
+          .order("display_order", { ascending: true }),
+        supabase
+          .from("billing_plan_features")
+          .select("id,plan_id,feature_text,is_section,display_order")
+          .eq("is_active", true)
+          .order("display_order", { ascending: true }),
+      ]);
+
+      if (planError) {
+        console.error("No se pudieron cargar los planes:", planError);
+        setError("No se pudieron cargar los planes.");
+      } else {
+        setPlans(planData || []);
+      }
+
+      const activePeriods = periodData || [];
+      setPeriods(activePeriods);
+      if (featureError) {
+        console.error(
+          "No se pudieron cargar las características:",
+          featureError,
+        );
+        setError("No se pudieron cargar las características de los planes.");
+      } else {
+        setFeatures(featureData || []);
+      }
+      if (!activePeriods.some((period) => period.code === "quarterly")) {
+        setSelectedPeriodCode("monthly");
+      }
+      setLoading(false);
+    };
+
+    loadPlans();
+  }, []);
+
+  const periodOptions = periods.reduce((options, period) => {
+    if (!options.some((option) => option.code === period.code)) {
+      options.push(period);
+    }
+    return options;
+  }, []);
+  const monthlyOption = periodOptions.find(
+    (period) => period.code === "monthly",
+  );
+  const quarterlyOption = periodOptions.find(
+    (period) => period.code === "quarterly",
+  );
+  const showPeriodSwitch = monthlyOption && quarterlyOption;
+  const selectedPeriod = periodOptions.find(
+    (period) => period.code === selectedPeriodCode,
+  );
+
+  const selectOtherPeriod = () => {
+    setSelectedPeriodCode(
+      selectedPeriodCode === monthlyOption?.code
+        ? quarterlyOption?.code
+        : monthlyOption?.code,
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-background text-white pt-24 pb-12 px-6 sm:px-10">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-16">
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-black uppercase tracking-tighter italic mb-4">
+    <div className="min-h-screen bg-background px-6 pb-12 pt-24 text-white sm:px-10">
+      <div className="mx-auto max-w-7xl">
+        <header className="mb-16 text-center">
+          <h1 className="mb-4 text-3xl font-black uppercase italic tracking-tighter sm:text-4xl md:text-5xl">
             Impulsa tu <span className="text-violet-500">Negocio</span>
           </h1>
-          <p className="text-neutral-400 text-sm sm:text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
-            Selecciona el plan que mejor se adapte al ritmo de tu cocina. Cambia
-            de nivel cuando lo necesites.
+          <p className="mx-auto max-w-2xl text-sm leading-relaxed text-neutral-400 sm:text-base md:text-lg">
+            Encuentra el plan ideal para tu negocio y crece a tu propio ritmo.
           </p>
 
-          {/* Selector de Periodo: Mensual vs 3 Meses */}
-          <div className="flex items-center justify-center mt-10 gap-4">
-            <span
-              className={`text-[11px] font-black uppercase tracking-widest ${!isAnnual ? "text-white" : "text-neutral-500"}`}
-            >
-              Mensual
-            </span>
-            <button
-              onClick={() => setIsAnnual(!isAnnual)}
-              className="w-12 h-6 bg-neutral-900 border border-white/10 rounded-full p-1 relative transition-all"
-            >
-              <div
-                className={`w-4 h-4 bg-violet-500 rounded-full shadow-[0_0_10px_rgba(139,92,246,0.5)] transition-all duration-300 transform ${isAnnual ? "translate-x-6" : "translate-x-0"}`}
-              />
-            </button>
-            <span
-              className={`text-[11px] font-black uppercase tracking-widest ${isAnnual ? "text-white" : "text-neutral-500"}`}
-            >
-              Trimestral (3 Meses)
-            </span>
-          </div>
-        </div>
-
-        {/* Grid de Tarjetas */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 md:grid-cols-2 gap-6 xl:gap-8 items-start">
-          {plans.map((plan, index) => (
-            <div
-              key={index}
-              className={`relative flex flex-col p-6 sm:p-8 rounded-[2rem] border transition-all duration-500 hover:scale-[1.02] ${
-                plan.highlight
-                  ? "bg-violet-600/[0.03] border-violet-500/40 shadow-[0_20px_50px_rgba(124,58,237,0.1)]"
-                  : "bg-white/[0.01] border-white/[0.06]"
-              }`}
-            >
-              {plan.highlight && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-violet-600 text-white text-[9px] font-black uppercase tracking-[0.2em] px-4 py-1.5 rounded-full whitespace-nowrap">
-                  Recomendado
-                </div>
-              )}
-
-              {/* Icono y Nombre del Plan */}
-              <div className="mb-6">
-                <div
-                  className={`w-12 h-12 rounded-2xl mb-6 flex items-center justify-center ${plan.highlight ? "bg-violet-600/20" : "bg-white/5"}`}
-                >
-                  <plan.icon
-                    className={
-                      plan.highlight ? "text-violet-400" : "text-neutral-500"
-                    }
-                    size={24}
-                  />
-                </div>
-                <h3 className="text-2xl font-black uppercase tracking-tight italic">
-                  {plan.name}
-                </h3>
-                <p className="text-neutral-400 font-medium text-xs mt-2 bg-white/5 inline-block px-2 py-1 rounded">
-                  {plan.description}
-                </p>
-              </div>
-
-              {/* Precios dinámicos */}
-              <div className="mb-8 min-h-[85px]">
-                {plan.isCommission ? (
-                  // Renderizado especial para plan Premium
-                  <div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-5xl font-black italic tracking-tighter text-violet-400">
-                        {plan.commissionText}
-                      </span>
-                      <span className="text-neutral-500 text-[10px] font-black uppercase tracking-widest ml-1">
-                        de ventas netas
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-neutral-400 uppercase font-black mt-2 tracking-widest">
-                      Mínimo $
-                      {(isAnnual
-                        ? plan.pricePeriod
-                        : plan.priceMonthly
-                      ).toLocaleString("es-CO")}{" "}
-                      x PDV
-                    </p>
-                  </div>
-                ) : (
-                  // Renderizado para planes Inicial y Pro
-                  <div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-4xl font-black italic tracking-tighter">
-                        $
-                        {isAnnual
-                          ? plan.pricePeriod.toLocaleString("es-CO")
-                          : plan.priceMonthly.toLocaleString("es-CO")}
-                      </span>
-                      <span className="text-neutral-500 text-[10px] font-bold uppercase tracking-widest ml-1">
-                        / {isAnnual ? "3 meses" : "mes"}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-neutral-500 uppercase font-black mt-2 tracking-widest">
-                      {isAnnual
-                        ? `Pago único trimestral por PDV`
-                        : `Pago mensual por PDV`}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Lista de características */}
-              <ul className="space-y-3.5 mb-10 flex-1 border-t border-white/5 pt-6">
-                {plan.features.map((feature, idx) => {
-                  const isHeaderFeature = feature.includes("Todo lo de Plan");
-                  return (
-                    <li
-                      key={idx}
-                      className={`flex items-start gap-3 text-sm ${
-                        isHeaderFeature
-                          ? "text-violet-400 font-bold mt-2"
-                          : "text-neutral-300"
-                      }`}
-                    >
-                      {!isHeaderFeature && (
-                        <Check
-                          size={16}
-                          className="text-violet-500 mt-0.5 flex-shrink-0"
-                        />
-                      )}
-                      <span>{feature}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-
-              {/* Botón de acción */}
-              <button
-                className={`w-full py-4 rounded-2xl font-black uppercase tracking-[0.15em] text-[10px] transition-all duration-300 active:scale-95 ${
-                  plan.highlight
-                    ? "bg-violet-600 hover:bg-violet-500 text-white shadow-[0_10px_25px_rgba(124,58,237,0.4)]"
-                    : "bg-white/5 hover:bg-white/10 text-white border border-white/10"
-                }`}
+          {showPeriodSwitch && (
+            <div className="mt-10 flex items-center justify-center gap-4">
+              <span
+                className={`text-[11px] font-black uppercase tracking-widest ${selectedPeriodCode === monthlyOption.code ? "text-white" : "text-neutral-500"}`}
               >
-                {plan.buttonText}
+                {monthlyOption.label}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={selectedPeriodCode === quarterlyOption.code}
+                aria-label="Cambiar periodo de facturación"
+                onClick={selectOtherPeriod}
+                className="relative h-6 w-12 rounded-full border border-white/10 bg-neutral-900 p-1 transition-all"
+              >
+                <span
+                  className={`block h-4 w-4 transform rounded-full bg-violet-500 shadow-[0_0_10px_rgba(139,92,246,0.5)] transition-all duration-300 ${selectedPeriodCode === quarterlyOption.code ? "translate-x-6" : "translate-x-0"}`}
+                />
               </button>
+              <span
+                className={`text-[11px] font-black uppercase tracking-widest ${selectedPeriodCode === quarterlyOption.code ? "text-white" : "text-neutral-500"}`}
+              >
+                {quarterlyOption.label}
+              </span>
             </div>
-          ))}
-        </div>
+          )}
+        </header>
 
-        {/* Footer info */}
-        <div className="mt-20 text-center">
-          <div className="inline-flex flex-wrap justify-center items-center gap-4 px-6 py-3 rounded-2xl bg-white/[0.02] border border-white/[0.05] text-neutral-500 text-[10px] font-black uppercase tracking-[0.1em]">
-            <div className="flex items-center gap-2">
-              <Star size={14} className="text-yellow-500" />
-              <span>Garantía de 14 días</span>
-            </div>
-            <div className="hidden sm:block w-px h-4 bg-white/10"></div>
-            <span>Encriptación SSL de 256 bits</span>
+        {loading ? (
+          <p className="py-16 text-center text-sm text-neutral-400">
+            Cargando planes...
+          </p>
+        ) : error ? (
+          <p className="py-16 text-center text-sm text-rose-300">{error}</p>
+        ) : plans.length === 0 ? (
+          <p className="py-16 text-center text-sm text-neutral-400">
+            No hay planes activos disponibles.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-2 lg:grid-cols-3 xl:gap-8">
+            {plans.map((plan) => {
+              const Icon = PLAN_ICONS[plan.code] || Rocket;
+              const highlight = plan.code === "pro";
+              const isPremium = plan.code === "premium";
+              const isCommission = plan.billing_type === "commission";
+              const isMonthly = selectedPeriodCode === "monthly";
+              const planPeriod = periods.find(
+                (period) =>
+                  period.plan_id === plan.id &&
+                  period.code === selectedPeriodCode,
+              );
+              const price = isMonthly
+                ? plan.price_amount
+                : planPeriod?.price_amount;
+              const minimum = isMonthly
+                ? plan.minimum_amount
+                : planPeriod?.minimum_amount;
+              const commissionRate =
+                plan.commission_rate ?? planPeriod?.commission_rate;
+              const periodLabel =
+                planPeriod?.label || selectedPeriod?.label || "";
+              const planFeatures = features.filter(
+                (feature) => feature.plan_id === plan.id,
+              );
+
+              return (
+                <article
+                  key={plan.id}
+                  className={`relative flex flex-col rounded-[2rem] border p-6 transition-all duration-500 hover:scale-[1.02] sm:p-8 ${
+                    isPremium
+                      ? "border-amber-300/40 bg-amber-400/[0.04] shadow-[0_20px_50px_rgba(245,158,11,0.12)]"
+                      : highlight
+                        ? "border-violet-500/40 bg-violet-600/[0.03] shadow-[0_20px_50px_rgba(124,58,237,0.1)]"
+                        : "border-white/[0.06] bg-white/[0.01]"
+                  }`}
+                >
+                  {(highlight || isPremium) && (
+                    <div
+                      className={`absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-4 py-1.5 text-[9px] font-black uppercase tracking-[0.2em] text-white ${isPremium ? "bg-amber-500 text-neutral-950" : "bg-violet-600"}`}
+                    >
+                      {isPremium ? "Más completo" : "Recomendado"}
+                    </div>
+                  )}
+
+                  <div className="mb-6">
+                    <div
+                      className={`mb-6 flex h-12 w-12 items-center justify-center rounded-2xl ${isPremium ? "bg-amber-400/15" : highlight ? "bg-violet-600/20" : "bg-white/5"}`}
+                    >
+                      <Icon
+                        className={
+                          isPremium
+                            ? "text-amber-300"
+                            : highlight
+                              ? "text-violet-400"
+                              : "text-neutral-500"
+                        }
+                        size={24}
+                      />
+                    </div>
+                    <h2
+                      className={`text-2xl font-black uppercase italic tracking-tight ${isPremium ? "text-amber-100" : ""}`}
+                    >
+                      {plan.name}
+                    </h2>
+                  </div>
+
+                  <div className="min-h-[85px] border-t border-white/5 pt-6">
+                    {isCommission ? (
+                      <div>
+                        <div className="flex items-baseline gap-1">
+                          <span
+                            className={`text-5xl font-black italic tracking-tighter ${isPremium ? "text-amber-300" : "text-violet-400"}`}
+                          >
+                            {commissionRate === null ||
+                            commissionRate === undefined
+                              ? "-"
+                              : `${Number(commissionRate).toLocaleString("es-CO")}%`}
+                          </span>
+                          <span className="ml-1 text-[10px] font-black uppercase tracking-widest text-neutral-500">
+                            de ventas netas
+                          </span>
+                        </div>
+                        <p className="mt-2 text-[10px] font-black uppercase tracking-widest text-neutral-400">
+                          {minimum === null || minimum === undefined
+                            ? "Mínimo no configurado"
+                            : `Mínimo ${formatCurrency(minimum)} ${periodLabel ? `/ ${periodLabel}` : ""}`}
+                        </p>
+                      </div>
+                    ) : price === null || price === undefined ? (
+                      <p className="text-sm text-neutral-400">
+                        Precio no configurado para este periodo.
+                      </p>
+                    ) : (
+                      <div>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-4xl font-black italic tracking-tighter">
+                            {formatCurrency(price)}
+                          </span>
+                          {periodLabel && (
+                            <span className="ml-1 text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+                              / {periodLabel}
+                            </span>
+                          )}
+                        </div>
+                        {periodLabel && (
+                          <p className="mt-2 text-[10px] font-black uppercase tracking-widest text-neutral-500">
+                            {periodLabel}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <ul className="mb-10 mt-6 flex-1 space-y-3.5 border-t border-white/5 pt-6">
+                    {planFeatures.map((feature) => (
+                      <li
+                        key={feature.id}
+                        className={`flex items-start gap-3 text-sm ${
+                          feature.is_section
+                            ? `mt-2 font-bold ${isPremium ? "text-amber-300" : "text-violet-400"}`
+                            : "text-neutral-300"
+                        }`}
+                      >
+                        {!feature.is_section && (
+                          <Check
+                            size={16}
+                            className={`mt-0.5 shrink-0 ${isPremium ? "text-amber-400" : "text-violet-500"}`}
+                          />
+                        )}
+                        <span>{feature.feature_text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              );
+            })}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

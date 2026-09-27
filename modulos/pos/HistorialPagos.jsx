@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { CheckCircle2, Clock3, FileText, XCircle } from "lucide-react";
+import { CheckCircle2, Clock3, XCircle } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 
 const formatCurrency = (value) =>
@@ -153,13 +153,6 @@ export default function HistorialPagos() {
                       >
                         <StatusIcon size={14} /> {status.label}
                       </span>
-                      {payment.support_path && (
-                        <FileText
-                          size={17}
-                          className="text-violet-300"
-                          aria-label="Tiene soporte"
-                        />
-                      )}
                     </div>
                   </article>
                 );

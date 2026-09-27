@@ -2,7 +2,6 @@ import React from "react";
 import { useLocation } from "react-router-dom";
 import ConfiguracionDatos from "./ConfiguracionDatos";
 import ConfiguracionEmpleados from "./ConfiguracionEmpleados";
-import ConfiguracionNotificaciones from "./ConfiguracionNotificaciones";
 import ConfiguracionTienda from "./ConfiguracionTienda";
 
 const sections = {
@@ -15,11 +14,6 @@ const sections = {
     title: "Datos",
     description: "Contacto, ubicación y canales públicos.",
     component: ConfiguracionDatos,
-  },
-  notificaciones: {
-    title: "Notificaciones",
-    description: "Alertas operativas para tu equipo.",
-    component: ConfiguracionNotificaciones,
   },
   empleados: {
     title: "Empleados",

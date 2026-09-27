@@ -26,7 +26,10 @@ import {
 } from "lucide-react";
 import Categorias from "./Categorias";
 import defaultImg from "../../public/default.png";
-import { supabase } from "../../src/lib/supabaseClient";
+import {
+  removeStorageObjectIfUnused,
+  supabase,
+} from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 
 const formatSentenceText = (value) => {
@@ -102,6 +105,7 @@ const Productos = ({ section = "productos" }) => {
   const [businessId, setBusinessId] = useState(null);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [savingProduct, setSavingProduct] = useState(false);
+  const [updatingStockIds, setUpdatingStockIds] = useState(new Set());
 
   const handleUpdateCategories = async (newCategories) => {
     const records = newCategories.map((category) => ({
@@ -120,7 +124,7 @@ const Productos = ({ section = "productos" }) => {
     const category = categoryRecords.find((item) => item.id === categoryId);
     const { data: categoryProducts, error: productsError } = await supabase
       .from("products")
-      .select("id")
+      .select("id,image_url")
       .eq("category_id", categoryId)
       .eq("business_id", businessId);
 
@@ -149,6 +153,20 @@ const Productos = ({ section = "productos" }) => {
         alert("No se pudieron eliminar los productos de la categoría");
         return;
       }
+
+      await Promise.all(
+        (categoryProducts || []).map((product) =>
+          removeStorageObjectIfUnused(
+            "business-assets",
+            product.image_url,
+          ).catch((cleanupError) =>
+            console.warn(
+              "No se pudo limpiar imagen de producto:",
+              cleanupError,
+            ),
+          ),
+        ),
+      );
     }
 
     const { error: categoryError } = await supabase
@@ -732,6 +750,26 @@ const Productos = ({ section = "productos" }) => {
     }
   };
 
+  const handleProductImageFile = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (
+      !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+      file.size > 5 * 1024 * 1024
+    ) {
+      alert("La imagen debe ser JPG, PNG o WEBP y pesar máximo 5 MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setFormData((current) => ({ ...current, image: event.target?.result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Guardar producto
   const handleSaveProduct = async () => {
     if (!formData.name || !formData.price) {
@@ -745,13 +783,48 @@ const Productos = ({ section = "productos" }) => {
     }
 
     setSavingProduct(true);
+    const previousProductImage = editingId
+      ? products.find((product) => product.id === editingId)?.image_url ||
+        products.find((product) => product.id === editingId)?.image ||
+        null
+      : null;
+    let imageUrl = formData.image || null;
+    let uploadedImagePath = null;
+
+    if (imageUrl?.startsWith("data:image/")) {
+      const imageBlob = await fetch(imageUrl).then((response) =>
+        response.blob(),
+      );
+      const extension =
+        imageBlob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+      uploadedImagePath = `${businessId}/productos-imagenes/${crypto.randomUUID()}.${extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from("business-assets")
+        .upload(uploadedImagePath, imageBlob, {
+          contentType: imageBlob.type,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error("Error subiendo imagen del producto:", uploadError);
+        alert("No se pudo subir la imagen del producto.");
+        setSavingProduct(false);
+        return;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from("business-assets")
+        .getPublicUrl(uploadedImagePath);
+      imageUrl = publicUrlData.publicUrl;
+    }
+
     const payload = {
       name: formatProductNameForStorage(formData.name),
       category_id: formData.categoryId,
       price: Number(formData.price),
       description: formatStoredText(formData.description),
       stock: Number(formData.stock) || 0,
-      image_url: formData.image || null,
+      image_url: imageUrl,
     };
     let query;
     if (editingId) {
@@ -787,8 +860,24 @@ const Productos = ({ section = "productos" }) => {
 
     if (error) {
       console.error("Error guardando producto:", error);
+      if (uploadedImagePath) {
+        await supabase.storage
+          .from("business-assets")
+          .remove([uploadedImagePath]);
+      }
       alert("No se pudo guardar el producto");
     } else {
+      if (previousProductImage && previousProductImage !== imageUrl) {
+        try {
+          await removeStorageObjectIfUnused(
+            "business-assets",
+            previousProductImage,
+          );
+        } catch (cleanupError) {
+          console.warn("No se pudo limpiar la imagen anterior:", cleanupError);
+        }
+      }
+
       try {
         await saveProductOptions(data.id);
         await saveProductIngredients(data.id);
@@ -860,6 +949,54 @@ const Productos = ({ section = "productos" }) => {
         item.id === id ? { ...item, isSoldOut: nextIsSoldOut } : item,
       ),
     );
+  };
+
+  const handleAdjustStock = async (id, adjustment) => {
+    const product = products.find((item) => item.id === id);
+    if (!product || !businessId || updatingStockIds.has(id)) return;
+
+    const nextStock = Math.max(0, Number(product.stock || 0) + adjustment);
+    if (nextStock === Number(product.stock || 0)) return;
+
+    setUpdatingStockIds((current) => new Set(current).add(id));
+
+    try {
+      const { data, error } = await supabase
+        .from("products")
+        .update({ stock: nextStock })
+        .eq("id", id)
+        .eq("business_id", businessId)
+        .select("id, stock")
+        .single();
+
+      if (error) throw error;
+
+      const savedStock = Number(data.stock || 0);
+      setProducts((current) =>
+        current.map((item) =>
+          item.id === id ? { ...item, stock: savedStock } : item,
+        ),
+      );
+
+      const cachedCatalog = readCatalogCache(businessId);
+      if (Array.isArray(cachedCatalog?.products)) {
+        writeCatalogCache(businessId, {
+          ...cachedCatalog,
+          products: cachedCatalog.products.map((item) =>
+            item.id === id ? { ...item, stock: savedStock } : item,
+          ),
+        });
+      }
+    } catch (error) {
+      console.error("Error actualizando stock del producto:", error);
+      alert("No se pudo actualizar el stock. Inténtalo de nuevo.");
+    } finally {
+      setUpdatingStockIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   const handleToggleArchived = async (id) => {
@@ -980,6 +1117,19 @@ const Productos = ({ section = "productos" }) => {
 
   const handleBulkPermanentDelete = async () => {
     const ids = [...selectedProducts];
+    const { data: productsToDelete, error: productsQueryError } = await supabase
+      .from("products")
+      .select("id,image_url")
+      .in("id", ids);
+    if (productsQueryError) {
+      console.error(
+        "Error consultando imágenes de productos:",
+        productsQueryError,
+      );
+      alert("No se pudieron consultar las imágenes de productos");
+      return;
+    }
+
     const { error } = await supabase.from("products").delete().in("id", ids);
     if (error) {
       console.error("Error eliminando productos permanentemente:", error);
@@ -992,6 +1142,17 @@ const Productos = ({ section = "productos" }) => {
       }
       return;
     }
+    await Promise.all(
+      (productsToDelete || []).map((product) =>
+        removeStorageObjectIfUnused("business-assets", product.image_url).catch(
+          (cleanupError) =>
+            console.warn(
+              "No se pudo limpiar imagen de producto:",
+              cleanupError,
+            ),
+        ),
+      ),
+    );
     setProducts((current) =>
       current.filter((product) => !selectedProducts.has(product.id)),
     );
@@ -1318,7 +1479,7 @@ const Productos = ({ section = "productos" }) => {
         </div>
 
         {/* CONTENIDO PRINCIPAL */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
+        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
           {loadingProducts ? (
             <div className="col-span-full flex items-center justify-center gap-2 py-20">
               {[0, 1, 2].map((dot) => (
@@ -1408,14 +1569,6 @@ const Productos = ({ section = "productos" }) => {
                       </button>
                     )}
                   </div>
-
-                  {/* Stock visible sobre la imagen, en la esquina inferior izquierda */}
-                  <div className="absolute bottom-2 left-2 rounded-full border border-white/15 bg-black/75 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white backdrop-blur-sm">
-                    Stock:{" "}
-                    {Number(item.stock || 0) > 99
-                      ? "99+"
-                      : Number(item.stock || 0)}
-                  </div>
                 </div>
 
                 {/* SECCIÓN INTERMEDIA: Datos del Producto */}
@@ -1452,6 +1605,67 @@ const Productos = ({ section = "productos" }) => {
                 {/* SECCIÓN INFERIOR: Acciones de estado */}
                 <div className="pb-2">
                   <div className="grid grid-cols-1 gap-2 pt-2.5 border-t border-white/5 px-2 sm:grid-cols-2 md:px-3">
+                    <div className="col-span-full flex justify-center">
+                      {isSelectionMode ? (
+                        <div className="rounded-full border border-white/15 bg-black/75 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white">
+                          Stock:{" "}
+                          {Number(item.stock || 0) > 99
+                            ? "99+"
+                            : Number(item.stock || 0)}
+                        </div>
+                      ) : (
+                        <div
+                          role="group"
+                          aria-label={`Stock de ${item.name}: ${item.stock}`}
+                          title={`Stock: ${item.stock}`}
+                          className="flex w-full max-w-[267px] items-center justify-center gap-1 rounded-xl bg-neutral-800/40 p-2 sm:gap-2 sm:p-3"
+                        >
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleAdjustStock(item.id, -1);
+                            }}
+                            disabled={
+                              updatingStockIds.has(item.id) ||
+                              Number(item.stock || 0) <= 0
+                            }
+                            aria-label={`Disminuir stock de ${item.name}`}
+                            title="Disminuir stock"
+                            className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 sm:p-2"
+                          >
+                            <ArrowDownRight
+                              size={16}
+                              className="sm:h-[18px] sm:w-[18px]"
+                            />
+                          </button>
+                          <span className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg border border-white/10 bg-neutral-700 px-1 py-2 text-center text-white sm:flex-col sm:gap-0 sm:px-3 sm:py-1">
+                            <span className="shrink-0 text-[8px] font-bold uppercase tracking-wider text-neutral-400 sm:text-[9px]">
+                              Stock
+                            </span>
+                            <span className="min-w-0 truncate text-base font-black leading-tight tabular-nums sm:text-lg">
+                              {Number(item.stock || 0)}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleAdjustStock(item.id, 1);
+                            }}
+                            disabled={updatingStockIds.has(item.id)}
+                            aria-label={`Aumentar stock de ${item.name}`}
+                            title="Aumentar stock"
+                            className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-emerald-400 disabled:cursor-wait disabled:opacity-40 sm:p-2"
+                          >
+                            <ArrowUpRight
+                              size={16}
+                              className="sm:h-[18px] sm:w-[18px]"
+                            />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1573,20 +1787,9 @@ const Productos = ({ section = "productos" }) => {
                               />
                               <input
                                 type="file"
-                                accept="image/*"
+                                accept="image/jpeg,image/png,image/webp"
                                 className="hidden"
-                                onChange={(e) => {
-                                  if (e.target.files?.[0]) {
-                                    const reader = new FileReader();
-                                    reader.onload = (evt) => {
-                                      setFormData({
-                                        ...formData,
-                                        image: evt.target?.result,
-                                      });
-                                    };
-                                    reader.readAsDataURL(e.target.files[0]);
-                                  }
-                                }}
+                                onChange={handleProductImageFile}
                               />
                             </label>
                             <button
@@ -1615,7 +1818,7 @@ const Productos = ({ section = "productos" }) => {
                               Subir Imagen
                             </span>
                             <span className="text-[7px] sm:text-[8px] text-neutral-400 block mb-2 font-bold">
-                              PNG • JPG • GIF • WebP
+                              PNG • JPG • WebP
                             </span>
                             <span className="text-[7px] sm:text-[8px] text-neutral-500 block font-semibold">
                               Click para seleccionar
@@ -1623,20 +1826,9 @@ const Productos = ({ section = "productos" }) => {
                           </div>
                           <input
                             type="file"
-                            accept="image/*"
+                            accept="image/jpeg,image/png,image/webp"
                             className="absolute inset-0 opacity-0 cursor-pointer"
-                            onChange={(e) => {
-                              if (e.target.files?.[0]) {
-                                const reader = new FileReader();
-                                reader.onload = (evt) => {
-                                  setFormData({
-                                    ...formData,
-                                    image: evt.target?.result,
-                                  });
-                                };
-                                reader.readAsDataURL(e.target.files[0]);
-                              }
-                            }}
+                            onChange={handleProductImageFile}
                           />
                         </>
                       )}
