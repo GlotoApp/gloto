@@ -165,9 +165,6 @@ export default function Notificaciones() {
       <div className="mx-auto max-w-4xl space-y-6">
         <header className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-5">
           <div>
-            <p className="mb-1 text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
-              Centro de avisos
-            </p>
             <h1 className="flex items-center gap-2 text-2xl font-black tracking-tight sm:text-3xl">
               <Bell size={23} className="text-violet-300" /> Notificaciones
               {unreadCount > 0 && (
