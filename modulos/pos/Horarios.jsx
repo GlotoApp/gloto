@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../src/components/AuthContext";
 import { supabase } from "../../src/lib/supabaseClient";
+import { SubLoading } from "./Loading";
 import { Plus, Trash2, Moon, Sun, CalendarClock } from "lucide-react";
 
 const DAYS = [
@@ -483,15 +484,11 @@ export default function Horarios() {
         )}
 
         {isLoading ? (
-          <div className="flex items-center justify-center gap-2 py-20">
-            {[0, 1, 2].map((dot) => (
-              <span
-                key={dot}
-                className="h-2 w-2 animate-pulse rounded-full bg-violet-400"
-                style={{ animationDelay: `${dot * 150}ms` }}
-              />
-            ))}
-          </div>
+          <SubLoading
+            label="Cargando horario"
+            className="py-20"
+            dotClassName="bg-violet-400"
+          />
         ) : !hasConfiguredSchedule ? (
           <div className="relative flex flex-col items-center justify-center overflow-hidden rounded-2xl border border-violet-500/15 bg-gradient-to-br from-violet-500/[0.08] via-neutral-900/40 to-neutral-950 px-6 py-16 text-center md:py-20">
             <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-violet-500/10 blur-3xl" />

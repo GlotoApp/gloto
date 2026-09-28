@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
+import SubLoading from "./SubLoading";
 
 const formatDateKey = (date) => {
   const year = date.getFullYear();
@@ -562,15 +563,11 @@ const Reservas = () => {
               </div>
 
               {loading ? (
-                <div className="flex items-center justify-center gap-2 py-12">
-                  {[0, 1, 2].map((dot) => (
-                    <span
-                      key={dot}
-                      className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
-                      style={{ animationDelay: `${dot * 150}ms` }}
-                    />
-                  ))}
-                </div>
+                <SubLoading
+                  label="Cargando reservas"
+                  className="py-12"
+                  dotClassName="bg-violet-400"
+                />
               ) : selectedReservations.length === 0 ? (
                 <div className="py-12 text-center text-sm text-on-surface-variant">
                   No hay reservas para este día.

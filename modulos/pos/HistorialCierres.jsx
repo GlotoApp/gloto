@@ -1,6 +1,7 @@
 import { CalendarDays, ChevronDown, History, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import SubLoading from "./SubLoading";
 
 const fmt = (value) =>
   new Intl.NumberFormat("es-CO", {
@@ -32,6 +33,12 @@ export default function HistorialCierres() {
   const [cierres] = useState(leerCierres);
   const [fechaBusqueda, setFechaBusqueda] = useState("");
   const [expandido, setExpandido] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIsLoading(false), 250);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const cierresFiltrados = useMemo(
     () =>
@@ -41,6 +48,19 @@ export default function HistorialCierres() {
       }),
     [cierres, fechaBusqueda],
   );
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-white p-4 font-sans selection:bg-violet-500/30">
+        <SubLoading
+          label="Cargando cierres"
+          className="min-h-[calc(100vh-2rem)]"
+          fullHeight
+          dotClassName="bg-violet-400"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white p-4 font-sans selection:bg-violet-500/30">

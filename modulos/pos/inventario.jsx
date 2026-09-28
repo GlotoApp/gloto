@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
+import SubLoading from "./SubLoading";
 
 const DEFAULT_UNITS = [];
 const inputClass =
@@ -386,6 +387,19 @@ export default function Inventario() {
     (item) => item.stock <= item.minStock,
   ).length;
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background p-4 font-sans text-white">
+        <SubLoading
+          label="Cargando inventario"
+          className="min-h-[calc(100vh-2rem)]"
+          fullHeight
+          dotClassName="bg-violet-400"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background p-4 font-sans text-white">
       <header className="mx-auto mb-10 max-w-7xl space-y-6">
@@ -423,17 +437,6 @@ export default function Inventario() {
         </div>
       </header>
       <main className="mx-auto max-w-7xl space-y-5 pb-20">
-        {loading && (
-          <div className="flex items-center justify-center gap-2 py-10">
-            {[0, 1, 2].map((dot) => (
-              <span
-                key={dot}
-                className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
-                style={{ animationDelay: `${dot * 150}ms` }}
-              />
-            ))}
-          </div>
-        )}
         <div className="flex flex-col gap-3 rounded-2xl border border-white/5 bg-neutral-900/30 p-4 lg:flex-row">
           <div className="relative flex-1">
             <Search

@@ -1,6 +1,7 @@
 import { Trash2, ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import SubLoading from "./SubLoading";
 
 const fmt = (n) =>
   new Intl.NumberFormat("es-CO", {
@@ -56,13 +57,33 @@ export default function CierresEliminados({
 }) {
   const [expandidoId, setExpandidoId] = useState(null);
   const [fechaBusqueda, setFechaBusqueda] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Filtrar registros por fecha
-  const registrosFiltrados = registroEliminaciones.filter((registro) => {
-    if (!fechaBusqueda) return true;
-    const fechaRegistro = registro.fechaHoraEliminacion.split(" ")[0]; // Obtener solo la fecha (YYYY-MM-DD)
-    return fechaRegistro === fechaBusqueda;
-  });
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIsLoading(false), 250);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const registrosFiltrados = useMemo(() => {
+    return registroEliminaciones.filter((registro) => {
+      if (!fechaBusqueda) return true;
+      const fechaRegistro = registro.fechaHoraEliminacion.split(" ")[0];
+      return fechaRegistro === fechaBusqueda;
+    });
+  }, [registroEliminaciones, fechaBusqueda]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background text-white p-4 font-sans selection:bg-violet-500/30">
+        <SubLoading
+          label="Cargando cierres eliminados"
+          className="min-h-[calc(100vh-2rem)]"
+          fullHeight
+          dotClassName="bg-violet-400"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-white p-4 font-sans selection:bg-violet-500/30">

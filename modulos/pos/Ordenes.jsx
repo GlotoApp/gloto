@@ -22,6 +22,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 import { useNavigate } from "react-router-dom";
+import SubLoading from "./SubLoading";
 
 // --- CONFIGURACIÓN DE CONSTANTES ---
 const ORIGEN_CONFIG = {
@@ -1396,21 +1397,11 @@ const Ordenes = () => {
       {/* Listado de Órdenes organizado por año y mes */}
       <main className="max-w-7xl mx-auto space-y-4 pb-20">
         {loadingOrders ? (
-          <div className="flex items-center justify-center gap-2 py-20">
-            {[0, 1, 2].map((dot) => (
-              <motion.span
-                key={dot}
-                className="h-2 w-2 rounded-full bg-blue-400"
-                animate={{ opacity: [0.25, 1, 0.25], scale: [0.8, 1, 0.8] }}
-                transition={{
-                  duration: 0.9,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                  delay: dot * 0.15,
-                }}
-              />
-            ))}
-          </div>
+          <SubLoading
+            label="Cargando órdenes"
+            className="py-20"
+            dotClassName="bg-violet-400"
+          />
         ) : ordersError ? (
           <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-6 py-12 text-center">
             <p className="text-sm font-black uppercase tracking-widest text-amber-300">
@@ -1516,15 +1507,11 @@ const Ordenes = () => {
               className="flex min-h-16 items-center justify-center border-t border-white/5 pt-4"
             >
               {loadingMoreOrders ? (
-                <span className="flex items-center justify-center gap-1.5 py-1">
-                  {[0, 1, 2].map((dot) => (
-                    <span
-                      key={dot}
-                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400"
-                      style={{ animationDelay: `${dot * 150}ms` }}
-                    />
-                  ))}
-                </span>
+                <SubLoading
+                  label="Cargando más"
+                  compact
+                  dotClassName="bg-violet-400"
+                />
               ) : hasMoreOrders ? (
                 <span className="text-[9px] font-mono uppercase tracking-widest text-neutral-700">
                   Desplázate para ver más

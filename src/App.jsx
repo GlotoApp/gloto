@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -8,6 +8,8 @@ import {
 import Marketplace from "../modulos/marketplace/Marketplace";
 import Layout from "../modulos/pos/Layout";
 import { Loading } from "../modulos/pos/Loading";
+import SinConexion from "../modulos/pos/SinConexion";
+import Upss from "../modulos/pos/Upss";
 import { useAuth } from "./components/AuthContext";
 import LoginSuperAdmin from "../modulos/admin/LoginSuperAdmin";
 
@@ -56,6 +58,29 @@ const RequireAuth = ({ children }) => {
 };
 
 function App() {
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== "undefined" ? navigator.onLine : true,
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  if (!isOnline) {
+    return <SinConexion />;
+  }
+
   return (
     <Router>
       <Suspense fallback={<Loading />}>
@@ -65,6 +90,7 @@ function App() {
           <Route path="/login-superadmin" element={<LoginSuperAdmin />} />
           <Route path="/marketplace/*" element={<Marketplace />} />
           <Route path="/" element={<Navigate to="/marketplace" replace />} />
+          <Route path="*" element={<Upss />} />
 
           {/* Ruta Protegida: SuperAdmin */}
           <Route

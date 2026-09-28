@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, RefreshCcw } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
+import SubLoading from "./SubLoading";
 
 const formatNumber = (value) =>
   Number(value || 0).toLocaleString("es-CO", { maximumFractionDigits: 3 });
@@ -92,6 +93,19 @@ export default function InventarioMovimientos() {
     });
   }, [movements, search, movementType, dateFilter, dateFrom, dateTo]);
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background p-4 font-sans text-white">
+        <SubLoading
+          label="Cargando historial"
+          className="min-h-[calc(100vh-2rem)]"
+          fullHeight
+          dotClassName="bg-violet-400"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background p-4 font-sans text-white">
       <div className="mx-auto max-w-7xl space-y-6 pb-20">
@@ -165,17 +179,7 @@ export default function InventarioMovimientos() {
               </label>
             </div>
           )}
-          {loading ? (
-            <div className="flex items-center justify-center gap-2 py-12">
-              {[0, 1, 2].map((dot) => (
-                <span
-                  key={dot}
-                  className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
-                  style={{ animationDelay: `${dot * 150}ms` }}
-                />
-              ))}
-            </div>
-          ) : filteredMovements.length === 0 ? (
+          {filteredMovements.length === 0 ? (
             <p className="py-12 text-center text-sm text-neutral-500">
               No hay movimientos que coincidan con los filtros.
             </p>

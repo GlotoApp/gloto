@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Edit3, Plus, Trash2, X } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
+import SubLoading from "./SubLoading";
 
 const upper = (value) =>
   String(value || "")
@@ -156,15 +157,11 @@ export default function InventarioCategorias() {
           </button>
         </form>
         {loading ? (
-          <div className="flex items-center justify-center gap-2 py-12">
-            {[0, 1, 2].map((dot) => (
-              <span
-                key={dot}
-                className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
-                style={{ animationDelay: `${dot * 150}ms` }}
-              />
-            ))}
-          </div>
+          <SubLoading
+            label="Cargando categorías"
+            className="py-12"
+            dotClassName="bg-violet-400"
+          />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {categories.map((category) => (

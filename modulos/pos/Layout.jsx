@@ -26,14 +26,47 @@ const ReadyGate = ({ children }) => {
 };
 
 const Layout = () => {
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
+  const [isSidebarPinned, setIsSidebarPinned] = useState(false);
+  const [isSidebarHovered, setIsSidebarHovered] = useState(false);
+  const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
+
+  const toggleSidebar = () => {
+    if (isSidebarPinned || isSidebarHovered) {
+      setIsSidebarPinned(false);
+      setIsSidebarHovered(false);
+    } else {
+      setIsSidebarPinned(true);
+    }
+  };
+
+  const handleSidebarMouseEnter = () => {
+    if (
+      window.matchMedia("(hover: hover) and (pointer: fine)").matches &&
+      !isSidebarPinned
+    ) {
+      setIsSidebarHovered(true);
+    }
+  };
+
+  const handleSidebarMouseLeave = () => {
+    if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      setIsSidebarHovered(false);
+    }
+  };
+
+  const closeSidebar = () => {
+    setIsSidebarPinned(false);
+    setIsSidebarHovered(false);
+  };
 
   return (
     <div className="bg-neutral-950 min-h-screen flex font-manrope selection:bg-violet-500/30 text-white relative overflow-x-hidden">
       <div className="z-50 fixed top-0 left-0 h-screen transition-all duration-300">
         <Sidebar
           isExpanded={isSidebarExpanded}
-          toggleSidebar={() => setIsSidebarExpanded((prev) => !prev)}
+          toggleSidebar={toggleSidebar}
+          onMouseEnter={handleSidebarMouseEnter}
+          onMouseLeave={handleSidebarMouseLeave}
         />
       </div>
 
@@ -47,7 +80,7 @@ const Layout = () => {
       {isSidebarExpanded && (
         <div
           className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 transition-opacity duration-300"
-          onClick={() => setIsSidebarExpanded(false)}
+          onClick={closeSidebar}
         />
       )}
     </div>

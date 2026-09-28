@@ -31,6 +31,7 @@ import {
   supabase,
 } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
+import SubLoading from "./SubLoading";
 
 const formatSentenceText = (value) => {
   const text = String(value ?? "").toLowerCase();
@@ -1486,15 +1487,11 @@ const Productos = ({ section = "productos" }) => {
         {/* CONTENIDO PRINCIPAL */}
         <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
           {loadingProducts ? (
-            <div className="col-span-full flex items-center justify-center gap-2 py-20">
-              {[0, 1, 2].map((dot) => (
-                <span
-                  key={dot}
-                  className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
-                  style={{ animationDelay: `${dot * 150}ms` }}
-                />
-              ))}
-            </div>
+            <SubLoading
+              label="Cargando productos"
+              className="col-span-full py-20"
+              dotClassName="bg-violet-400"
+            />
           ) : filteredProducts.length === 0 ? (
             <div className="col-span-full py-20 text-center">
               <Search size={48} className="mx-auto text-neutral-600 mb-2" />

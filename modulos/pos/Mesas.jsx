@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../../src/lib/supabaseClient";
+import { SubLoading } from "./Loading";
 import { useAuth } from "../../src/components/AuthContext";
 import {
   X,
@@ -1634,21 +1635,12 @@ export default function MesasPOS() {
       {/* ── Grid ── */}
       <div className="flex-1 p-4 overflow-y-auto">
         {loading ? (
-          <div className="flex items-center justify-center gap-2 py-24">
-            {[0, 1, 2].map((dot) => (
-              <motion.span
-                key={dot}
-                className="h-2 w-2 rounded-full bg-blue-400"
-                animate={{ opacity: [0.25, 1, 0.25], scale: [0.8, 1, 0.8] }}
-                transition={{
-                  duration: 0.9,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                  delay: dot * 0.15,
-                }}
-              />
-            ))}
-          </div>
+          <SubLoading
+            label="Cargando mesas"
+            className="py-24"
+            dotClassName="bg-violet-400"
+            fullHeight
+          />
         ) : visible.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-slate-700">
             <Search size={32} className="mb-3 opacity-30" />

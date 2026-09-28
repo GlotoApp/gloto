@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
+import SubLoading from "./SubLoading";
 
 const normalizeDeliveryType = (order) => {
   const metadataMethod = order.metadata?.metodoEntrega;
@@ -722,14 +723,12 @@ export default function KitchenPanel() {
 
       <main className="relative flex-1 overflow-hidden">
         {loadingOrders && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background">
-            {[0, 1, 2].map((dot) => (
-              <span
-                key={dot}
-                className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
-                style={{ animationDelay: `${dot * 150}ms` }}
-              />
-            ))}
+          <div className="absolute inset-0 z-10 bg-background">
+            <SubLoading
+              label="Cargando cocina"
+              fullHeight
+              dotClassName="bg-violet-400"
+            />
           </div>
         )}
         <div

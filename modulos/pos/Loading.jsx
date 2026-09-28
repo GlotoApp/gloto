@@ -1,6 +1,9 @@
 // ⏱️ Duración mínima del loading en milisegundos
 const LOADING_DURATION_MS = 1500;
 
+export { default as SubLoading } from "./SubLoading";
+export { default as SectionLoading } from "./SubLoading";
+
 export const Loading = () => {
   return (
     <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background">

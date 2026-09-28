@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { CheckCircle2, Clock3, XCircle } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
+import { SubLoading } from "./Loading";
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat("es-CO", {
@@ -95,9 +96,11 @@ export default function HistorialPagos() {
         )}
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-neutral-500">
-            Cargando historial...
-          </div>
+          <SubLoading
+            label="Cargando historial"
+            className="py-16"
+            dotClassName="bg-violet-400"
+          />
         ) : payments.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-white/10 py-16 text-center text-sm text-neutral-500">
             Aún no hay pagos registrados.

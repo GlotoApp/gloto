@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import SubLoading from "./SubLoading";
 import {
   Plus,
   Edit3,
@@ -255,15 +256,11 @@ const CategoriasAdmin = ({
         </div>
 
         {loading && visibleCategories.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 py-20">
-            {[0, 1, 2].map((dot) => (
-              <span
-                key={dot}
-                className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
-                style={{ animationDelay: `${dot * 150}ms` }}
-              />
-            ))}
-          </div>
+          <SubLoading
+            label="Cargando categorías"
+            className="py-20"
+            dotClassName="bg-violet-400"
+          />
         ) : (
           <div className="grid grid-cols-1 gap-3 select-none">
             {visibleCategories.map((category) => {

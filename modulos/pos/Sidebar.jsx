@@ -17,10 +17,11 @@ import {
   CreditCard,
   Banknote,
   Bell,
+  LogOut,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 
-const Sidebar = ({ isExpanded, toggleSidebar }) => {
+const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const navRef = useRef(null);
@@ -35,6 +36,11 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [businessName, setBusinessName] = useState("Gloto");
   const [businessLogo, setBusinessLogo] = useState(logoPng);
+  const [planName, setPlanName] = useState("Sin plan");
+
+  useEffect(() => {
+    if (!isExpanded) setUserMenuOpen(false);
+  }, [isExpanded]);
 
   const menuItems = [
     { name: "POS", path: "/pos", icon: Plus },
@@ -170,14 +176,31 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
 
       if (!profile?.business_id) return;
 
-      const { data: business } = await supabase
-        .from("businesses")
-        .select("name, logo_url")
-        .eq("id", profile.business_id)
-        .maybeSingle();
+      const [{ data: business }, { data: subscription }] = await Promise.all([
+        supabase
+          .from("businesses")
+          .select("name, logo_url")
+          .eq("id", profile.business_id)
+          .maybeSingle(),
+        supabase
+          .from("subscriptions")
+          .select("plan_name")
+          .eq("business_id", profile.business_id)
+          .in("status", [
+            "active",
+            "pending",
+            "suspended",
+            "expired",
+            "cancelled",
+          ])
+          .order("ends_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
 
       if (business?.name) setBusinessName(business.name);
       if (business?.logo_url) setBusinessLogo(business.logo_url);
+      if (subscription?.plan_name) setPlanName(subscription.plan_name);
     };
 
     loadBusinessBrand();
@@ -271,11 +294,6 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
     navigate("/login");
   };
 
-  const handleOpenConfig = () => {
-    setUserMenuOpen(false);
-    navigate("/pos/configuracion/tienda");
-  };
-
   const handleLogoutClick = () => {
     setUserMenuOpen(false);
     setShowLogoutConfirm(true);
@@ -327,6 +345,8 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
       />
 
       <aside
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
         className={`flex flex-col fixed border-r border-primary/30 left-0 top-0 h-full bg-background z-50 transition-all duration-500 ease-in-out ${
           isExpanded ? "w-64" : "w-20"
         }`}
@@ -388,7 +408,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
 
         <nav
           ref={navRef}
-          className="flex-1 px-3 pt-6 space-y-0.5 overflow-y-auto overflow-x-hidden custom-sidebar scrollbar-gutter-stable"
+          className="flex-1 px-3 pt-6 pb-20 space-y-0.5 overflow-y-auto overflow-x-hidden custom-sidebar scrollbar-gutter-stable"
           style={{ scrollbarGutter: isExpanded ? "stable" : "auto" }}
         >
           {menuItems.map((item) => {
@@ -452,7 +472,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                   </button>
 
                   {cajaOpen && isExpanded && (
-                    <div className="mt-1 ml-5 flex flex-col border-l border-primary-container/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
+                    <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
                       {cajaSubMenu.map((sub) => {
                         const isSubActive = location.pathname === sub.path;
                         return (
@@ -543,7 +563,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                   </button>
 
                   {catalogoOpen && isExpanded && (
-                    <div className="mt-1 ml-5 flex flex-col border-l border-primary-container/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
+                    <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
                       {catalogoSubMenu.map((sub) => {
                         const isSubActive = location.pathname === sub.path;
                         return (
@@ -634,7 +654,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                   </button>
 
                   {inventarioOpen && isExpanded && (
-                    <div className="mt-1 ml-5 flex flex-col border-l border-primary-container/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
+                    <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
                       {item.subMenu.map((sub) => {
                         const isSubActive = location.pathname === sub.path;
                         return (
@@ -784,7 +804,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
             </button>
 
             {finanzasOpen && isExpanded && (
-              <div className="mt-1 ml-5 flex flex-col border-l border-primary-container/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
+              <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
                 {finanzasSubMenu.map((sub) => {
                   const isSubActive = location.pathname === sub.path;
                   return (
@@ -872,7 +892,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
             </button>
 
             {configOpen && isExpanded && (
-              <div className="mt-1 ml-5 flex flex-col border-l border-primary-container/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
+              <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
                 {configSubMenu.map((sub) => (
                   <Link
                     key={sub.path}
@@ -892,7 +912,7 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
           </div>
         </nav>
 
-        <div className="p-3 relative">
+        <div className="relative border-t border-white/10 p-3">
           <div className="relative">
             <div className={`mb-2 ${isExpanded ? "" : "flex justify-center"}`}>
               <button
@@ -924,11 +944,17 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
 
             <button
               type="button"
-              onClick={() => setUserMenuOpen((prev) => !prev)}
+              onClick={() => {
+                if (!isExpanded) toggleSidebar();
+                setUserMenuOpen((prev) => !prev);
+              }}
+              aria-expanded={isExpanded && userMenuOpen}
               className={`flex items-center rounded-default p-2 w-full overflow-hidden transition-all duration-300 ${
                 isExpanded ? "gap-3 justify-start" : "justify-center"
               } ${
-                userMenuOpen ? "bg-surface-hover" : "hover:bg-surface-hover"
+                isExpanded && userMenuOpen
+                  ? "bg-surface-hover"
+                  : "hover:bg-surface-hover"
               }`}
             >
               <div className="w-8 h-8 rounded-full bg-surface-hover border border-outline flex items-center justify-center flex-shrink-0">
@@ -945,10 +971,10 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
                 }`}
               >
                 <p className="text-on-surface font-body-sm text-[11px] font-black uppercase tracking-tighter truncate">
-                  Admin Local
+                  Mi cuenta
                 </p>
                 <p className="text-primary font-label-caps text-[9px] uppercase font-black tracking-[0.1em]">
-                  Premium
+                  {planName}
                 </p>
               </div>
 
@@ -962,70 +988,66 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
               )}
             </button>
 
-            {userMenuOpen && (
-              <div
-                className={`absolute ${
-                  isExpanded
-                    ? "bottom-full left-0 right-0 mb-2"
-                    : "left-full top-1 -translate-y-1/2 ml-3 w-48"
-                } rounded-default border border-primary/20 bg-background shadow-lg shadow-background/60 overflow-hidden z-[60]`}
-              >
-                <button
-                  type="button"
-                  onClick={handleOpenConfig}
-                  className="w-full text-left px-3 py-2 text-[10px] font-black uppercase tracking-widest text-on-surface-variant hover:bg-surface-hover transition-colors"
-                >
-                  Configuración
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate("/pos/configuracion/tienda")}
-                  className="w-full text-left px-3 py-2 text-[10px] font-black uppercase tracking-widest text-on-surface-variant hover:bg-surface-hover transition-colors"
-                >
-                  Perfil
-                </button>
+            {isExpanded && userMenuOpen && (
+              <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2">
                 <button
                   type="button"
                   onClick={handleLogoutClick}
-                  className="w-full text-left px-3 py-2 text-[10px] font-black uppercase tracking-widest text-error hover:bg-error/10 transition-colors"
+                  className="group relative flex w-full items-center gap-2 rounded-default px-2 py-1.5 text-left font-label-caps text-[11px] font-bold uppercase tracking-tight text-error transition-colors hover:bg-error/10"
                 >
+                  <span className="absolute left-0 h-5 w-1 scale-y-0 rounded-r-full bg-error opacity-0 transition-all duration-300 group-hover:scale-y-100 group-hover:opacity-50" />
+                  <LogOut size={14} />
                   Cerrar sesión
                 </button>
-              </div>
-            )}
-
-            {showLogoutConfirm && (
-              <div
-                className={`absolute ${
-                  isExpanded
-                    ? "bottom-full left-0 right-0 mb-2"
-                    : "left-full top-1/2 -translate-y-1/2 ml-3 w-52"
-                } z-[70] rounded-default border border-error/30 bg-background shadow-2xl shadow-background/70 p-3`}
-              >
-                <p className="text-[10px] font-black uppercase tracking-widest text-on-surface mb-2">
-                  ¿Seguro que quieres cerrar sesión?
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowLogoutConfirm(false)}
-                    className="flex-1 px-2 py-2 rounded-default text-[9px] font-black uppercase tracking-widest text-on-surface-variant hover:bg-surface-hover transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="flex-1 px-2 py-2 rounded-default bg-error text-on-surface text-[9px] font-black uppercase tracking-widest hover:opacity-90 transition-opacity"
-                  >
-                    Sí, salir
-                  </button>
-                </div>
               </div>
             )}
           </div>
         </div>
       </aside>
+
+      {showLogoutConfirm && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setShowLogoutConfirm(false)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="logout-dialog-title"
+            className="w-full max-w-lg rounded-xl border border-white/10 bg-background p-6 shadow-2xl sm:p-8"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-lg bg-error/10 text-error">
+              <LogOut size={22} />
+            </div>
+            <h2
+              id="logout-dialog-title"
+              className="text-xl font-black text-white sm:text-2xl"
+            >
+              ¿Seguro que quieres cerrar sesión?
+            </h2>
+            <p className="mt-2 text-sm text-neutral-400">
+              Tendrás que volver a iniciar sesión para continuar.
+            </p>
+            <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirm(false)}
+                className="rounded-lg border border-white/10 px-4 py-3 text-sm font-bold text-neutral-200 transition hover:bg-white/[0.06]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex items-center justify-center gap-2 rounded-lg bg-error px-4 py-3 text-sm font-black text-white transition hover:opacity-90"
+              >
+                <LogOut size={16} /> Sí, cerrar sesión
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </>
   );
 };
