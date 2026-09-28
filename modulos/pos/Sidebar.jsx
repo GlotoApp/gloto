@@ -185,19 +185,28 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
 
   useEffect(() => {
     let isMounted = true;
+    let channel;
+    let refreshTimeout;
 
-    const loadNotifications = async () => {
-      const { error: refreshError } = await supabase.rpc(
-        "refresh_business_notifications",
-      );
-      if (refreshError) {
-        console.error("No se pudieron sincronizar avisos:", refreshError);
+    const loadNotifications = async ({ sync = false } = {}) => {
+      if (sync) {
+        const { error: refreshError } = await supabase.rpc(
+          "refresh_business_notifications",
+        );
+        if (refreshError) {
+          console.error("No se pudieron sincronizar avisos:", refreshError);
+        }
       }
 
       const { count, error } = await supabase
         .from("business_notifications")
         .select("id", { count: "exact", head: true })
-        .is("read_at", null);
+        .is("read_at", null)
+        .not(
+          "notification_type",
+          "in",
+          '("stock_low","product_stock_low","product_out_of_stock")',
+        );
 
       if (!isMounted) return;
       if (error) {
@@ -207,12 +216,51 @@ const Sidebar = ({ isExpanded, toggleSidebar }) => {
       }
     };
 
-    loadNotifications();
-    const intervalId = window.setInterval(loadNotifications, 5 * 60 * 1000);
+    const subscribeToBusinessNotifications = async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData?.user?.id;
+      if (!userId || !isMounted) return;
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profileError || !profile?.business_id || !isMounted) return;
+
+      channel = supabase
+        .channel(`sidebar-notification-count-${profile.business_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "business_notifications",
+            filter: `business_id=eq.${profile.business_id}`,
+          },
+          () => {
+            if (refreshTimeout) window.clearTimeout(refreshTimeout);
+            refreshTimeout = window.setTimeout(() => {
+              loadNotifications();
+            }, 150);
+          },
+        )
+        .subscribe((status) => {
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.error("Realtime del contador no disponible:", status);
+          }
+        });
+
+      await loadNotifications({ sync: true });
+    };
+
+    subscribeToBusinessNotifications();
 
     return () => {
       isMounted = false;
-      window.clearInterval(intervalId);
+      if (refreshTimeout) window.clearTimeout(refreshTimeout);
+      if (channel) supabase.removeChannel(channel);
     };
   }, []);
 

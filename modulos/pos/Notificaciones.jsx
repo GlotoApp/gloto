@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bell,
   Check,
@@ -15,11 +15,25 @@ const FILTERS = [
   { id: "all", label: "Todas" },
   { id: "unread", label: "No leídas" },
 ];
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 10;
+const LEGACY_STOCK_NOTIFICATION_TYPES =
+  '("stock_low","product_stock_low","product_out_of_stock")';
+
+const isOlderNotification = (notification, cursor) =>
+  notification.created_at < cursor.created_at ||
+  (notification.created_at === cursor.created_at &&
+    notification.id < cursor.id);
 
 const getNotificationIcon = (type) => {
   if (type.startsWith("plan_")) return CreditCard;
-  if (type === "stock_low") return Package;
+  if (
+    type === "stock_low" ||
+    type.startsWith("product_") ||
+    type.startsWith("products_") ||
+    type.startsWith("inventory_")
+  ) {
+    return Package;
+  }
   return CircleAlert;
 };
 
@@ -33,50 +47,70 @@ export default function Notificaciones() {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [filter, setFilter] = useState("all");
-  const [page, setPage] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const notificationsRef = useRef([]);
+  const cursorRef = useRef(null);
+  const hasMoreRef = useRef(false);
 
   const loadNotifications = useCallback(
-    async ({ refresh = true } = {}) => {
-      if (refresh) setRefreshing(true);
-      else setLoading(true);
+    async ({
+      refresh = true,
+      sync = true,
+      silent = false,
+      append = false,
+      excludeNotificationId = null,
+    } = {}) => {
+      if (append) setLoadingMore(true);
+      else if (refresh) setRefreshing(true);
+      else if (!silent) setLoading(true);
       setError("");
 
-      const { error: refreshError } = await supabase.rpc(
-        "refresh_business_notifications",
-      );
-      if (refreshError) {
-        console.error(
-          "No se pudieron actualizar las notificaciones:",
-          refreshError,
+      if (sync) {
+        const { error: refreshError } = await supabase.rpc(
+          "refresh_business_notifications",
         );
-        setError("No se pudieron actualizar los avisos.");
+        if (refreshError) {
+          console.error(
+            "No se pudieron actualizar las notificaciones:",
+            refreshError,
+          );
+          setError("No se pudieron actualizar los avisos.");
+        }
       }
 
+      const cursor = append ? cursorRef.current : null;
       let query = supabase
         .from("business_notifications")
         .select(
           "id,notification_type,title,message,severity,entity_type,entity_id,action_path,created_at,read_at,resolved_at",
-          { count: "exact" },
         )
         .order("created_at", { ascending: false })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+        .order("id", { ascending: false })
+        .limit(PAGE_SIZE + 1)
+        .not("notification_type", "in", LEGACY_STOCK_NOTIFICATION_TYPES);
 
+      if (cursor) {
+        query = query.or(
+          `created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`,
+        );
+      }
       if (filter === "unread") query = query.is("read_at", null);
 
       const [
-        { data, error: queryError, count },
+        { data, error: queryError },
         { count: unreadTotal, error: unreadError },
       ] = await Promise.all([
         query,
         supabase
           .from("business_notifications")
           .select("id", { count: "exact", head: true })
-          .is("read_at", null),
+          .is("read_at", null)
+          .not("notification_type", "in", LEGACY_STOCK_NOTIFICATION_TYPES),
       ]);
 
       if (queryError || unreadError) {
@@ -86,19 +120,119 @@ export default function Notificaciones() {
         );
         setError("No se pudo cargar el historial de notificaciones.");
       } else {
-        setNotifications(data || []);
-        setTotalCount(count || 0);
+        const pageItems = (data || []).slice(0, PAGE_SIZE);
+        const moreAvailable = (data || []).length > PAGE_SIZE;
+
+        if (append) {
+          const current = notificationsRef.current;
+          const currentIds = new Set(current.map((item) => item.id));
+          const combined = [
+            ...current,
+            ...pageItems.filter((item) => !currentIds.has(item.id)),
+          ];
+          notificationsRef.current = combined;
+          setNotifications(combined);
+          cursorRef.current = pageItems.at(-1) || cursor;
+          hasMoreRef.current = moreAvailable;
+          setHasMore(moreAvailable);
+        } else if (silent) {
+          const boundary = pageItems.at(-1);
+          const olderItems = boundary
+            ? notificationsRef.current.filter(
+                (item) =>
+                  item.id !== excludeNotificationId &&
+                  isOlderNotification(item, boundary),
+              )
+            : [];
+          const combined = [...pageItems, ...olderItems];
+          notificationsRef.current = combined;
+          setNotifications(combined);
+          cursorRef.current = combined.at(-1) || null;
+          const canLoadMore =
+            moreAvailable || (olderItems.length > 0 && hasMoreRef.current);
+          hasMoreRef.current = canLoadMore;
+          setHasMore(canLoadMore);
+        } else {
+          notificationsRef.current = pageItems;
+          setNotifications(pageItems);
+          cursorRef.current = pageItems.at(-1) || null;
+          hasMoreRef.current = moreAvailable;
+          setHasMore(moreAvailable);
+        }
         setUnreadCount(unreadTotal || 0);
       }
       setLoading(false);
       setRefreshing(false);
+      setLoadingMore(false);
     },
-    [filter, page],
+    [filter],
   );
 
   useEffect(() => {
     loadNotifications({ refresh: false });
   }, [loadNotifications]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let channel;
+    let refreshTimeout;
+
+    const subscribeToBusinessNotifications = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileError || !profile?.business_id || cancelled) return;
+
+      channel = supabase
+        .channel(`business-notifications-${profile.business_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "business_notifications",
+            filter: `business_id=eq.${profile.business_id}`,
+          },
+          (payload) => {
+            if (refreshTimeout) clearTimeout(refreshTimeout);
+            refreshTimeout = setTimeout(() => {
+              loadNotifications({
+                refresh: false,
+                sync: false,
+                silent: true,
+                excludeNotificationId:
+                  filter === "unread" &&
+                  payload.eventType === "UPDATE" &&
+                  payload.new?.read_at
+                    ? payload.new.id
+                    : null,
+              });
+            }, 150);
+          },
+        )
+        .subscribe((status) => {
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.error("Realtime de notificaciones no disponible:", status);
+          }
+        });
+    };
+
+    subscribeToBusinessNotifications();
+
+    return () => {
+      cancelled = true;
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [filter, loadNotifications]);
 
   const markAsRead = async (notification) => {
     if (notification.read_at) return;
@@ -114,15 +248,15 @@ export default function Notificaciones() {
       return;
     }
 
-    setNotifications((current) =>
+    const updatedNotifications =
       filter === "unread"
-        ? current.filter((item) => item.id !== notification.id)
-        : current.map((item) =>
+        ? notificationsRef.current.filter((item) => item.id !== notification.id)
+        : notificationsRef.current.map((item) =>
             item.id === notification.id ? { ...item, read_at: readAt } : item,
-          ),
-    );
+          );
+    notificationsRef.current = updatedNotifications;
+    setNotifications(updatedNotifications);
     setUnreadCount((count) => Math.max(0, count - 1));
-    if (filter === "unread") setTotalCount((count) => Math.max(0, count - 1));
   };
 
   const markAllAsRead = async () => {
@@ -132,7 +266,8 @@ export default function Notificaciones() {
     const { error: updateError } = await supabase
       .from("business_notifications")
       .update({ read_at: readAt })
-      .is("read_at", null);
+      .is("read_at", null)
+      .not("notification_type", "in", LEGACY_STOCK_NOTIFICATION_TYPES);
 
     if (updateError) {
       console.error("No se pudieron marcar los avisos:", updateError);
@@ -140,17 +275,22 @@ export default function Notificaciones() {
       return;
     }
 
-    setNotifications((current) =>
+    const updatedNotifications =
       filter === "unread"
         ? []
-        : current.map((notification) =>
+        : notificationsRef.current.map((notification) =>
             notification.read_at
               ? notification
               : { ...notification, read_at: readAt },
-          ),
-    );
+          );
+    notificationsRef.current = updatedNotifications;
+    setNotifications(updatedNotifications);
     setUnreadCount(0);
-    if (filter === "unread") setTotalCount(0);
+    if (filter === "unread") {
+      cursorRef.current = null;
+      hasMoreRef.current = false;
+      setHasMore(false);
+    }
   };
 
   const openNotification = async (notification) => {
@@ -173,9 +313,6 @@ export default function Notificaciones() {
                 </span>
               )}
             </h1>
-            <p className="mt-2 text-sm text-neutral-400">
-              Avisos de tu plan, inventario y operación del negocio.
-            </p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -207,7 +344,12 @@ export default function Notificaciones() {
               key={item.id}
               type="button"
               onClick={() => {
-                setPage(0);
+                if (filter === item.id) return;
+                notificationsRef.current = [];
+                cursorRef.current = null;
+                hasMoreRef.current = false;
+                setNotifications([]);
+                setHasMore(false);
                 setFilter(item.id);
               }}
               className={`border-b-2 px-3 py-2 text-xs font-bold transition ${filter === item.id ? "border-violet-400 text-white" : "border-transparent text-neutral-500 hover:text-neutral-200"}`}
@@ -304,30 +446,22 @@ export default function Notificaciones() {
           </div>
         )}
 
-        {!loading && totalCount > PAGE_SIZE && (
-          <footer className="flex items-center justify-between border-t border-white/10 pt-4">
-            <p className="text-xs text-neutral-500">
-              Página {page + 1} de {Math.ceil(totalCount / PAGE_SIZE)} ·{" "}
-              {totalCount} avisos
-            </p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((current) => Math.max(0, current - 1))}
-                disabled={page === 0}
-                className="rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
-              >
-                Anterior
-              </button>
-              <button
-                type="button"
-                onClick={() => setPage((current) => current + 1)}
-                disabled={(page + 1) * PAGE_SIZE >= totalCount}
-                className="rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
-              >
-                Siguiente
-              </button>
-            </div>
+        {!loading && hasMore && (
+          <footer className="flex justify-center border-t border-white/10 pt-4">
+            <button
+              type="button"
+              onClick={() =>
+                loadNotifications({
+                  refresh: false,
+                  sync: false,
+                  append: true,
+                })
+              }
+              disabled={loadingMore}
+              className="rounded-lg border border-white/10 px-4 py-2 text-xs font-bold text-white transition hover:bg-white/[0.06] disabled:opacity-40"
+            >
+              {loadingMore ? "Cargando..." : "Ver más notificaciones"}
+            </button>
           </footer>
         )}
       </div>

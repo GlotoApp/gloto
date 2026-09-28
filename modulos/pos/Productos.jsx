@@ -217,6 +217,7 @@ const Productos = ({ section = "productos" }) => {
     price: "",
     description: "",
     stock: 0,
+    minStock: 0,
     image: "",
   });
   const [optionGroups, setOptionGroups] = useState([]);
@@ -236,6 +237,7 @@ const Productos = ({ section = "productos" }) => {
     category: categoryMap[product.category_id] || "Sin categoría",
     price: Number(product.price || 0),
     stock: Number(product.stock || 0),
+    minStock: Number(product.min_stock || 0),
     orderIndex: Number(product.order_index || 0),
     isActive: product.is_active !== false && product.is_active !== "false",
     isSoldOut: product.is_sold_out === true || product.is_sold_out === "true",
@@ -434,6 +436,7 @@ const Productos = ({ section = "productos" }) => {
       price: "",
       description: "",
       stock: 0,
+      minStock: 0,
       image: "",
     });
     setOptionGroups([]);
@@ -505,6 +508,7 @@ const Productos = ({ section = "productos" }) => {
       price: product.price,
       description: formatSentenceInput(product.description),
       stock: product.stock,
+      minStock: product.minStock,
       image: product.image,
     });
     setOptionGroups([]);
@@ -824,6 +828,7 @@ const Productos = ({ section = "productos" }) => {
       price: Number(formData.price),
       description: formatStoredText(formData.description),
       stock: Number(formData.stock) || 0,
+      min_stock: Number(formData.minStock) || 0,
       image_url: imageUrl,
     };
     let query;
@@ -1974,6 +1979,29 @@ const Productos = ({ section = "productos" }) => {
                     </div>
                     <p className="text-[9px] text-neutral-500">
                       Unidades disponibles para vender.
+                    </p>
+                  </div>
+                  <div className="space-y-2 border-t border-white/10 pt-4">
+                    <label
+                      htmlFor="product-min-stock"
+                      className="text-[9px] font-black uppercase tracking-widest text-amber-300"
+                    >
+                      Avisar con stock igual o menor a
+                    </label>
+                    <input
+                      id="product-min-stock"
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={formData.minStock}
+                      onChange={(e) =>
+                        setFormData({ ...formData, minStock: e.target.value })
+                      }
+                      className="w-full rounded-lg border border-white/10 bg-neutral-700 px-3 py-2 text-sm font-bold text-white outline-none focus:border-amber-400/50"
+                      aria-label="Umbral de stock bajo del producto"
+                    />
+                    <p className="text-[9px] text-neutral-500">
+                      Usa 0 para avisar solo cuando se agote.
                     </p>
                   </div>
                 </div>
