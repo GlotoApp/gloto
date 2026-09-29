@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Check, Zap, Crown, Rocket } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
+import SubLoading from "./SubLoading";
 
 const PLAN_ICONS = {
   inicial: Rocket,
@@ -143,9 +144,12 @@ const Planes = () => {
         </header>
 
         {loading ? (
-          <p className="py-16 text-center text-sm text-neutral-400">
-            Cargando planes...
-          </p>
+          <SubLoading
+            label="Cargando planes"
+            className="py-24"
+            dotClassName="bg-violet-400"
+            fullHeight
+          />
         ) : error ? (
           <p className="py-16 text-center text-sm text-rose-300">{error}</p>
         ) : plans.length === 0 ? (

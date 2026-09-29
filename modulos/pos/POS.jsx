@@ -1,17 +1,66 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, {
+  useCallback,
+  useMemo,
+  useState,
+  useRef,
+  useEffect,
+} from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Trash2, Pencil, X } from "lucide-react";
+import { Trash2, Pencil, X, Maximize2 } from "lucide-react";
 import SplitPaymentModal from "./SplitPaymentModal";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
+import DeliveryMap from "./DeliveryMap";
 
-const pasteToField = async (setter) => {
+const pasteToField = async (setter, onPasteValue) => {
   if (!navigator?.clipboard) return;
   try {
     const text = await navigator.clipboard.readText();
-    if (text) setter(text);
+    if (text) {
+      if (onPasteValue) onPasteValue(text);
+      else setter(text);
+    }
   } catch {}
 };
+
+const parseMapCoordinates = (value) => {
+  let text = String(value ?? "").trim();
+  try {
+    text = decodeURIComponent(text);
+  } catch {}
+
+  const match =
+    text.match(/@(-?\d{1,2}(?:\.\d+)?),\s*(-?\d{1,3}(?:\.\d+)?)/) ||
+    text.match(/!3d(-?\d{1,2}(?:\.\d+)?)!4d(-?\d{1,3}(?:\.\d+)?)/i) ||
+    text.match(/(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/);
+  if (!match) return null;
+
+  const latitude = Number(match[1]);
+  const longitude = Number(match[2]);
+  if (
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  )
+    return null;
+
+  return { latitude, longitude };
+};
+
+const formatMapCoordinates = ({ latitude, longitude }) =>
+  [latitude, longitude]
+    .map((coordinate) =>
+      Number(coordinate)
+        .toFixed(7)
+        .replace(/\.?0+$/, ""),
+    )
+    .join(", ");
+
+const createGoogleMapsLink = ({ latitude, longitude }) =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
 
 const TextField = ({
   label,
@@ -21,10 +70,16 @@ const TextField = ({
   type = "text",
   inputRef,
   onChange,
+  onBlur,
+  onPaste,
+  onPasteValue,
+  onClear,
   size = "sm",
 }) => (
   <div>
-    <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">
+    <label
+      className={`block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant ${size === "compact" ? "mb-0.5" : "mb-1"}`}
+    >
       {label}
     </label>
     <div className="relative">
@@ -46,20 +101,28 @@ const TextField = ({
             }
           })
         }
+        onBlur={onBlur}
+        onPaste={onPaste}
         placeholder={placeholder}
-        className={`w-full bg-surface  border-outline rounded-lg p-2 pr-10 text-on-surface ${
-          size === "md" ? "text-base" : "text-xs"
-        } focus:outline-none focus:border-primary`}
+        className={`w-full rounded-lg bg-surface pr-10 text-on-surface border-outline focus:outline-none focus:border-primary ${
+          size === "md"
+            ? "p-2 text-base"
+            : size === "compact"
+              ? "p-1.5 text-base"
+              : "p-2 text-xs"
+        }`}
       />
       <span
         role="button"
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
-          if (value) setValue("");
-          else pasteToField(setValue);
+          if (value) {
+            setValue("");
+            onClear?.();
+          } else pasteToField(setValue, onPasteValue);
         }}
         onFocus={() => {
-          if (!value) pasteToField(setValue);
+          if (!value) pasteToField(setValue, onPasteValue);
         }}
         className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
       >
@@ -422,6 +485,11 @@ const POS = () => {
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [isProductCatalogReady, setIsProductCatalogReady] = useState(false);
   const [businessId, setBusinessId] = useState(null);
+  const [deliverySettings, setDeliverySettings] = useState(null);
+  const [deliveryBusinessLogoUrl, setDeliveryBusinessLogoUrl] = useState("");
+  const [isLoadingDeliverySettings, setIsLoadingDeliverySettings] =
+    useState(true);
+  const [deliverySettingsError, setDeliverySettingsError] = useState("");
   const toastTimers = useRef({});
   const cartScrollRef = useRef(null);
   const cartScrollRefMobile = useRef(null);
@@ -656,6 +724,9 @@ const POS = () => {
     const loadProfile = async () => {
       if (!user?.id) {
         setBusinessId(null);
+        setDeliverySettings(null);
+        setDeliveryBusinessLogoUrl("");
+        setIsLoadingDeliverySettings(false);
         setProducts([]);
         setIsProductCatalogReady(false);
         setCategories([{ id: "all", name: "Todo" }]);
@@ -673,6 +744,10 @@ const POS = () => {
 
       if (error) {
         console.error("Error cargando perfil:", error);
+        setBusinessId(null);
+        setDeliverySettings(null);
+        setDeliveryBusinessLogoUrl("");
+        setIsLoadingDeliverySettings(false);
         setProducts([]);
         setIsProductCatalogReady(false);
         setIsLoadingCategories(false);
@@ -682,6 +757,9 @@ const POS = () => {
 
       if (!profile?.business_id) {
         setBusinessId(null);
+        setDeliverySettings(null);
+        setDeliveryBusinessLogoUrl("");
+        setIsLoadingDeliverySettings(false);
         setProducts([]);
         setIsProductCatalogReady(false);
         setCategories([{ id: "all", name: "Todo" }]);
@@ -691,6 +769,10 @@ const POS = () => {
         return;
       }
 
+      setDeliverySettings(null);
+      setDeliveryBusinessLogoUrl("");
+      setDeliverySettingsError("");
+      setIsLoadingDeliverySettings(true);
       setBusinessId(profile.business_id);
       const { categoryMap: fetchedCategoryMap } =
         await fetchCategoriesForBusiness(profile.business_id);
@@ -699,6 +781,76 @@ const POS = () => {
 
     loadProfile();
   }, [user]);
+
+  useEffect(() => {
+    if (!businessId) return undefined;
+
+    let cancelled = false;
+
+    const loadDeliverySettings = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("business_info")
+          .select(
+            "latitude,longitude,delivery_fee_per_km,min_delivery_fee,max_delivery_fee",
+          )
+          .eq("business_id", businessId)
+          .maybeSingle();
+
+        if (cancelled) return;
+        if (error) {
+          console.error("Error cargando tarifas de domicilio:", error);
+          setDeliverySettingsError(
+            "No se pudo cargar la configuración de domicilio.",
+          );
+          setDeliverySettings(null);
+        } else {
+          setDeliverySettings(data || null);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Error cargando tarifas de domicilio:", error);
+        setDeliverySettingsError(
+          "No se pudo cargar la configuración de domicilio.",
+        );
+        setDeliverySettings(null);
+      } finally {
+        if (!cancelled) setIsLoadingDeliverySettings(false);
+      }
+    };
+
+    loadDeliverySettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
+  useEffect(() => {
+    if (!businessId) return undefined;
+
+    let cancelled = false;
+    supabase
+      .from("businesses")
+      .select("logo_url")
+      .eq("id", businessId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.warn("No se pudo cargar el logo del negocio:", error);
+        }
+        setDeliveryBusinessLogoUrl(data?.logo_url || "");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("No se pudo cargar el logo del negocio:", error);
+        setDeliveryBusinessLogoUrl("");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
 
   useEffect(() => {
     if (!businessId) return undefined;
@@ -759,6 +911,14 @@ const POS = () => {
   const [deliveryMethod, setDeliveryMethod] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [address, setAddress] = useState("");
+  const [deliveryDestination, setDeliveryDestination] = useState(null);
+  const deliveryDestinationRef = useRef(null);
+  const [deliveryRouteDistanceMeters, setDeliveryRouteDistanceMeters] =
+    useState(null);
+  const [isCalculatingDeliveryRoute, setIsCalculatingDeliveryRoute] =
+    useState(false);
+  const [deliveryRouteError, setDeliveryRouteError] = useState("");
+  const [isDeliveryMapFullscreen, setIsDeliveryMapFullscreen] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [customerNumber, setCustomerNumber] = useState("");
   const [selectedTable, setSelectedTable] = useState("");
@@ -798,6 +958,19 @@ const POS = () => {
         "table",
     );
     const storedAddress = editMesa.address || editMesa.delivery_address || "";
+    const storedDeliveryLocation = editMesa.deliveryLocation;
+    const storedDeliveryDestination =
+      (storedDeliveryLocation &&
+        parseMapCoordinates(
+          `${storedDeliveryLocation.latitude},${storedDeliveryLocation.longitude}`,
+        )) ||
+      parseMapCoordinates(editMesa.deliveryMapLink) ||
+      parseMapCoordinates(storedAddress);
+    const editAddress =
+      storedAddress ||
+      (storedDeliveryDestination
+        ? formatMapCoordinates(storedDeliveryDestination)
+        : "");
     const storedReferencePoint =
       editMesa.referencePoint || editMesa.delivery_instructions || "";
     const storedLocationText = editMesa.locationText || editMesa.punto || "";
@@ -853,28 +1026,47 @@ const POS = () => {
     setEditingOrder(editMesa);
     setEditingSnapshot({
       cart: (editMesa.comanda || []).map((item) => ({
-        orderItemId: item.orderItemId || item.id,
-        orderBatchId: item.orderBatchId || null,
         productId: item.productId || item.id,
         qty: Number(item.qty || 1),
         price: Number(item.price || item.precio || 0),
-        initPrice: Number(item.initPrice || item.precioInicial || 0),
         name: item.name || item.item || "Producto",
         note: item.note || item.notes || "",
         options: item.optionNames || item.options || [],
       })),
       deliveryMethod: storedDeliveryMethod,
-      address: storedAddress,
+      address: editAddress,
+      deliveryDestination:
+        storedDeliveryMethod === "delivery" ? storedDeliveryDestination : null,
       referencePoint: storedReferencePoint,
       locationText: storedLocationText,
       paymentMethod: existingPaymentMethod,
-      paymentMethods: normalizedExistingPaymentMethods,
+      moneyPaid:
+        existingPaymentMethod === "efectivo"
+          ? Number(normalizedExistingPaymentMethods[0]?.amount) || 0
+          : 0,
+      splitPayments:
+        existingPaymentMethod === "dividir"
+          ? normalizedExistingPaymentMethods.map((item) => ({
+              method: item.method || "",
+              amount: Number(item.amount) || 0,
+            }))
+          : [],
       orderNotes: orderNotesValue,
       customerName: nextCustomerName,
       customerNumber: nextCustomerNumber,
       selectedTable: storedDeliveryMethod === "table" ? nextTable : "",
     });
     setDeliveryMethod(storedDeliveryMethod);
+    deliveryDestinationRef.current =
+      storedDeliveryMethod === "delivery" ? storedDeliveryDestination : null;
+    setDeliveryDestination(
+      storedDeliveryMethod === "delivery" ? storedDeliveryDestination : null,
+    );
+    setDeliveryRouteDistanceMeters(null);
+    setIsCalculatingDeliveryRoute(
+      storedDeliveryMethod === "delivery" && Boolean(storedDeliveryDestination),
+    );
+    setDeliveryRouteError("");
     setPaymentMethod(existingPaymentMethod);
     setMoneyPaid(
       existingPaymentMethod === "efectivo"
@@ -893,7 +1085,7 @@ const POS = () => {
       );
     }
     setSelectedTable(storedDeliveryMethod === "table" ? nextTable : "");
-    setAddress(storedAddress);
+    setAddress(editAddress);
     setReferencePoint(storedReferencePoint);
     setLocationText(storedLocationText);
     setCustomerName(nextCustomerName);
@@ -1690,11 +1882,36 @@ const POS = () => {
     updateQty(cartId, Math.max(1, qty));
   };
 
+  const handleDeliveryDestinationChange = useCallback((destination) => {
+    const currentDestination = deliveryDestinationRef.current;
+    const unchanged =
+      destination &&
+      currentDestination &&
+      Math.abs(destination.latitude - currentDestination.latitude) <
+        0.0000001 &&
+      Math.abs(destination.longitude - currentDestination.longitude) <
+        0.0000001;
+
+    if (unchanged) {
+      setAddress(formatMapCoordinates(destination));
+      return;
+    }
+
+    deliveryDestinationRef.current = destination;
+    setDeliveryDestination(destination);
+    if (destination) setAddress(formatMapCoordinates(destination));
+    setDeliveryRouteDistanceMeters(null);
+    setDeliveryRouteError("");
+    setIsCalculatingDeliveryRoute(Boolean(destination));
+  }, []);
+
   const handleDeliveryChange = (method) => {
     if (deliveryMethod === method) {
       setDeliveryMethod("");
+      setIsDeliveryMapFullscreen(false);
       setSelectedTable("");
       setAddress("");
+      handleDeliveryDestinationChange(null);
       setReferencePoint("");
       setLocationText("");
       handlePaymentMethodChange("");
@@ -1702,6 +1919,7 @@ const POS = () => {
     }
 
     setDeliveryMethod(method);
+    if (method !== "delivery") setIsDeliveryMapFullscreen(false);
 
     if (method !== "table") {
       setSelectedTable("");
@@ -1711,6 +1929,7 @@ const POS = () => {
 
     if (method !== "delivery") {
       setAddress("");
+      handleDeliveryDestinationChange(null);
     }
 
     if (method !== "point") {
@@ -1755,7 +1974,64 @@ const POS = () => {
     setSplitPayments(splitPayments.filter((_, i) => i !== index));
   };
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const deliveryOrigin = useMemo(() => {
+    const latitudeText = String(deliverySettings?.latitude ?? "").trim();
+    const longitudeText = String(deliverySettings?.longitude ?? "").trim();
+    if (!latitudeText || !longitudeText) return null;
+
+    const latitude = Number(latitudeText);
+    const longitude = Number(longitudeText);
+    if (
+      !Number.isFinite(latitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      !Number.isFinite(longitude) ||
+      longitude < -180 ||
+      longitude > 180
+    )
+      return null;
+
+    return { latitude, longitude };
+  }, [deliverySettings?.latitude, deliverySettings?.longitude]);
+  const deliveryRate = Number(deliverySettings?.delivery_fee_per_km);
+  const minimumDeliveryFee = Number(deliverySettings?.min_delivery_fee);
+  const maximumDeliveryFee = Number(deliverySettings?.max_delivery_fee);
+  const deliveryPricingConfigured =
+    deliverySettings?.delivery_fee_per_km !== null &&
+    deliverySettings?.delivery_fee_per_km !== undefined &&
+    deliverySettings?.min_delivery_fee !== null &&
+    deliverySettings?.min_delivery_fee !== undefined &&
+    deliverySettings?.max_delivery_fee !== null &&
+    deliverySettings?.max_delivery_fee !== undefined &&
+    Number.isFinite(deliveryRate) &&
+    Number.isFinite(minimumDeliveryFee) &&
+    Number.isFinite(maximumDeliveryFee) &&
+    minimumDeliveryFee <= maximumDeliveryFee;
+  const deliveryDistanceKm =
+    deliveryRouteDistanceMeters === null
+      ? null
+      : Number(deliveryRouteDistanceMeters) / 1000;
+  const itemsSubtotal = cart.reduce(
+    (sum, item) => sum + item.price * item.qty,
+    0,
+  );
+  const deliveryBaseFee =
+    deliveryDistanceKm !== null && deliveryPricingConfigured
+      ? Math.round(deliveryDistanceKm * deliveryRate)
+      : null;
+  const deliveryFeeBeforeRounding =
+    deliveryBaseFee === null
+      ? null
+      : Math.max(minimumDeliveryFee, deliveryBaseFee);
+  const roundedDeliveryFee =
+    deliveryFeeBeforeRounding === null
+      ? null
+      : Math.ceil(deliveryFeeBeforeRounding / 100) * 100;
+  const deliveryFee =
+    deliveryMethod === "delivery" && roundedDeliveryFee !== null
+      ? Math.min(maximumDeliveryFee, roundedDeliveryFee)
+      : 0;
+  const total = itemsSubtotal + deliveryFee;
   const assignedTotal = splitPayments.reduce(
     (acc, curr) => acc + (parseFloat(curr.amount) || 0),
     0,
@@ -1779,26 +2055,18 @@ const POS = () => {
         })),
         deliveryMethod,
         address,
+        deliveryDestination,
         referencePoint,
         locationText,
         paymentMethod,
-        paymentMethods:
+        moneyPaid: paymentMethod === "efectivo" ? Number(moneyPaid) || 0 : 0,
+        splitPayments:
           paymentMethod === "dividir"
             ? splitPayments.map((item) => ({
                 method: item.method || "",
                 amount: Number(item.amount) || 0,
               }))
-            : paymentMethod
-              ? [
-                  {
-                    method: paymentMethod,
-                    amount:
-                      paymentMethod === "efectivo"
-                        ? Number(moneyPaid) || 0
-                        : Number(total) || 0,
-                  },
-                ]
-              : [],
+            : [],
         orderNotes,
         customerName,
         customerNumber,
@@ -1806,7 +2074,7 @@ const POS = () => {
       }
     : null;
   const hasEditChanges =
-    !editingSnapshot ||
+    Boolean(editingSnapshot) &&
     JSON.stringify(currentEditSnapshot) !== JSON.stringify(editingSnapshot);
 
   const getOrderValidationErrors = () => {
@@ -1825,6 +2093,30 @@ const POS = () => {
     }
     if (deliveryMethod === "delivery" && !address.trim()) {
       errors.push("Ingresar dirección de entrega");
+    }
+    if (deliveryMethod === "delivery" && !deliveryOrigin) {
+      errors.push(
+        "Configurar la ubicación del negocio para calcular el domicilio",
+      );
+    }
+    if (deliveryMethod === "delivery" && !deliveryPricingConfigured) {
+      errors.push(
+        "Configurar tarifa, mínimo y máximo de domicilio en la tienda",
+      );
+    }
+    if (deliveryMethod === "delivery" && !deliveryDestination) {
+      errors.push("Seleccionar el destino en el mapa");
+    }
+    if (deliveryMethod === "delivery" && isCalculatingDeliveryRoute) {
+      errors.push("Esperar a que termine el cálculo de la ruta");
+    } else if (deliveryMethod === "delivery" && deliveryRouteError) {
+      errors.push("No se pudo calcular la ruta del domicilio");
+    } else if (
+      deliveryMethod === "delivery" &&
+      deliveryDestination &&
+      deliveryRouteDistanceMeters === null
+    ) {
+      errors.push("Seleccionar un destino con ruta disponible");
     }
     if (deliveryMethod === "table" && !selectedTable.trim()) {
       errors.push("Seleccionar número de mesa");
@@ -2217,6 +2509,10 @@ const POS = () => {
 
     const paymentStatus = totalPagado >= total ? "paid" : "pending";
     const orderStatus = paymentStatus === "paid" ? "confirmed" : "pending";
+    const deliveryMapLink =
+      deliveryMethod === "delivery" && deliveryDestination
+        ? createGoogleMapsLink(deliveryDestination)
+        : null;
 
     const orderPayload = {
       business_id: businessId,
@@ -2228,7 +2524,7 @@ const POS = () => {
       delivery_address: deliveryMethod === "delivery" ? address || null : null,
       delivery_instructions:
         deliveryMethod === "delivery" ? referencePoint || null : null,
-      delivery_fee: 0,
+      delivery_fee: deliveryFee,
       tax_amount: 0,
       discount_amount: 0,
       tip_amount: 0,
@@ -2265,6 +2561,15 @@ const POS = () => {
           direccion: deliveryMethod === "delivery" ? address || null : null,
           referencia: referencePoint || null,
         },
+        delivery_location:
+          deliveryMethod === "delivery" && deliveryDestination
+            ? {
+                latitude: deliveryDestination.latitude,
+                longitude: deliveryDestination.longitude,
+                distance_meters: deliveryRouteDistanceMeters,
+              }
+            : null,
+        linkmaps: deliveryMapLink,
         puntoRetiro: deliveryMethod === "point" ? referencePoint || null : null,
       },
     };
@@ -2594,9 +2899,11 @@ const POS = () => {
     setMobilePanel("products");
     setToastItems([]);
     setDeliveryMethod("");
+    setIsDeliveryMapFullscreen(false);
     setPaymentMethod("");
     setMoneyPaid("");
     setAddress("");
+    handleDeliveryDestinationChange(null);
     setCustomerName("");
     setCustomerNumber("");
     setSelectedTable("");
@@ -2735,9 +3042,173 @@ const POS = () => {
     </div>
   );
 
+  const deliveryAddressField = (
+    <TextField
+      label="Dirección"
+      value={address}
+      setValue={setAddress}
+      placeholder="Ingresa la dirección"
+      size={isDeliveryMapFullscreen ? "md" : "compact"}
+      onChange={(event) => {
+        const value = event.target.value;
+        setAddress(value);
+        if (!parseMapCoordinates(value) && deliveryDestinationRef.current) {
+          handleDeliveryDestinationChange(null);
+        }
+      }}
+      onPaste={(event) => {
+        const coordinates = parseMapCoordinates(
+          event.clipboardData.getData("text"),
+        );
+        if (!coordinates) return;
+        event.preventDefault();
+        handleDeliveryDestinationChange(coordinates);
+      }}
+      onPasteValue={(pastedText) => {
+        const coordinates = parseMapCoordinates(pastedText);
+        if (coordinates) {
+          handleDeliveryDestinationChange(coordinates);
+        } else {
+          setAddress(pastedText);
+        }
+      }}
+      onBlur={() => {
+        const coordinates = parseMapCoordinates(address);
+        if (coordinates) handleDeliveryDestinationChange(coordinates);
+      }}
+      onClear={() => handleDeliveryDestinationChange(null)}
+    />
+  );
+
+  const deliveryMapContent =
+    isLoadingDeliverySettings ? null : deliverySettingsError ? (
+      <div className="flex h-48 items-center justify-center rounded-lg border border-red-500/20 bg-red-500/5 px-4 text-center text-xs text-red-300">
+        {deliverySettingsError}
+      </div>
+    ) : !deliveryOrigin ? (
+      <div className="flex h-48 items-center justify-center rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 text-center text-xs text-amber-200">
+        Configura la ubicación del negocio para calcular rutas de domicilio.
+      </div>
+    ) : (
+      <DeliveryMap
+        origin={deliveryOrigin}
+        destination={deliveryDestination}
+        originLogoUrl={deliveryBusinessLogoUrl}
+        onDestinationChange={handleDeliveryDestinationChange}
+        onRouteChange={setDeliveryRouteDistanceMeters}
+        onRoutingChange={setIsCalculatingDeliveryRoute}
+        onRouteErrorChange={setDeliveryRouteError}
+        fullHeight={isDeliveryMapFullscreen}
+        compact={!isDeliveryMapFullscreen}
+      />
+    );
+
+  const deliveryMapStatus = (
+    <>
+      {isCalculatingDeliveryRoute && (
+        <p className="text-center text-[10px] text-neutral-400">
+          Calculando ruta por carretera...
+        </p>
+      )}
+      {deliveryRouteError && (
+        <p className="text-center text-[10px] text-red-300">
+          {deliveryRouteError}
+        </p>
+      )}
+    </>
+  );
+
+  const deliveryCostSummary = (
+    <div className="w-full space-y-1 rounded-lg border border-primary-container/30 bg-primary-container/10 p-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-on-surface-variant">
+          COSTO FINAL
+        </span>
+        <span className="text-sm font-black text-primary">
+          {deliveryBaseFee === null ? "—" : `$ ${formatPrice(deliveryFee)}`}
+        </span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-bold text-on-surface-variant">
+          COSTO BASE
+        </span>
+        <span className="text-[10px] font-black text-on-surface">
+          {deliveryBaseFee === null ? "—" : `$ ${formatPrice(deliveryBaseFee)}`}
+        </span>
+      </div>
+      <div className="h-px bg-primary-container/20" />
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase text-on-surface-variant">
+            Distancia
+          </p>
+          <p className="text-xs font-black text-on-surface">
+            {deliveryRouteDistanceMeters === null
+              ? "—"
+              : `${Math.round(deliveryRouteDistanceMeters).toLocaleString("es-CO")} m`}
+          </p>
+        </div>
+        <div>
+          <p className="text-right text-[10px] font-bold uppercase text-on-surface-variant">
+            Kilómetros
+          </p>
+          <p className="text-right text-xs font-black text-on-surface">
+            {deliveryDistanceKm === null
+              ? "—"
+              : `${deliveryDistanceKm.toFixed(2)} km`}
+          </p>
+        </div>
+      </div>
+      {!isLoadingDeliverySettings && !deliveryPricingConfigured && (
+        <p className="pt-1 text-[9px] text-amber-200">
+          Configura tarifa por kilómetro y límites de domicilio en la tienda.
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <>
       <div className="grid grid-cols-1 lg:grid-cols-4 h-screen bg-background font-sans selection:bg-primary-container/30 pb-20 lg:pb-0">
+        {isDeliveryMapFullscreen && deliveryMethod === "delivery" && (
+          <div className="fixed inset-0 z-[100] flex flex-col gap-3 bg-background p-3 sm:p-5">
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 pb-3">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-primary">
+                  Domicilio
+                </p>
+                <h2 className="text-base font-black text-white">
+                  Seleccionar dirección
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDeliveryMapFullscreen(false)}
+                className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-[9px] font-black uppercase text-neutral-300 transition hover:bg-white/10"
+                aria-label="Cerrar mapa en pantalla completa"
+              >
+                <X size={15} /> Cerrar
+              </button>
+            </header>
+            <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
+              <div className="flex min-h-[220px] flex-[3] md:min-h-0 md:flex-1">
+                {deliveryMapContent}
+              </div>
+              <aside className="flex min-h-0 w-full flex-[2] flex-col gap-3 overflow-y-auto pr-1 md:w-[340px] md:flex-none">
+                {deliveryAddressField}
+                <TextField
+                  label="Punto de Referencia"
+                  value={referencePoint}
+                  setValue={setReferencePoint}
+                  placeholder="Ingresa el punto de referencia"
+                  size="md"
+                />
+                {deliveryMapStatus}
+                {deliveryCostSummary}
+              </aside>
+            </div>
+          </div>
+        )}
         {isEditingTableOrder && (
           <div className="fixed top-0 left-20 right-0 z-40 flex items-center justify-between gap-3 border-b border-amber-400/20 bg-amber-500/10 px-4 py-2 backdrop-blur-md">
             <button
@@ -3018,21 +3489,21 @@ const POS = () => {
 
         {/* Barra de Método de Entrega Vertical */}
         <div
-          className={`${mobilePanel !== "datos" ? "hidden" : "block"} lg:block bg-background border-l border-outline p-4 w-full h-full overflow-y-auto custom-sidebar`}
+          className={`${mobilePanel !== "datos" ? "hidden" : "block"} lg:block bg-background border-l border-outline p-3 w-full h-full overflow-y-auto custom-sidebar`}
         >
-          <h2 className="text-xl font-black uppercase tracking-tighter mb-4 ml-1 text-on-surface">
+          <h2 className="text-lg font-black uppercase tracking-tighter mb-3 ml-1 text-on-surface">
             Método de Entrega
           </h2>
 
           {/* Botones en Grid Indestructible */}
-          <div className="grid grid-cols-2 gap-2 w-full">
+          <div className="grid grid-cols-2 gap-1.5 w-full">
             {Object.entries(deliveryLabels).map(([key, { label, icon }]) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => handleDeliveryChange(key)}
-                className={`group relative p-2 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all duration-300 
-      flex flex-col items-center justify-center gap-1  w-full overflow-hidden min-h-[50px] ${
+                className={`group relative p-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all duration-300 
+      flex flex-col items-center justify-center gap-0.5 w-full overflow-hidden min-h-11 ${
         deliveryMethod === key
           ? "bg-primary-container text-on-surface border-primary shadow-lg shadow-primary-container/20"
           : "bg-surface/100 border-outline text-on-surface-variant hover:border-outline hover:text-on-surface"
@@ -3045,7 +3516,7 @@ const POS = () => {
 
                 {/* Icono */}
                 <span
-                  className={`material-symbols-outlined text-lg transition-transform duration-300 flex-shrink-0 ${
+                  className={`material-symbols-outlined text-base transition-transform duration-300 flex-shrink-0 ${
                     deliveryMethod === key
                       ? "scale-110"
                       : "group-hover:scale-110"
@@ -3062,10 +3533,10 @@ const POS = () => {
 
           {/* Inputs adicionales según método de entrega */}
           {deliveryMethod === "pickup" && (
-            <div className="mt-3 space-y-2">
+            <div className="mt-2 space-y-1.5">
               <button
                 onClick={autoFillDeliveryFields}
-                className="w-full py-2 px-3 rounded-lg border-2 border-dashed border-primary/50 hover:border-primary text-primary font-bold text-xs uppercase tracking-wider transition-all hover:bg-primary/10 flex items-center justify-center gap-2"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
               >
                 <span className="material-symbols-outlined text-sm">
                   auto_fix_high
@@ -3077,7 +3548,7 @@ const POS = () => {
                 value={customerName}
                 setValue={setCustomerName}
                 placeholder="Ingresa el nombre"
-                size="md"
+                size="compact"
               />
               <TextField
                 label="Número"
@@ -3085,7 +3556,7 @@ const POS = () => {
                 setValue={setCustomerNumber}
                 placeholder="Ingresa el número"
                 type="number"
-                size="md"
+                size="compact"
                 onChange={(e) =>
                   setCustomerNumber(normalizePhoneNumber(e.target.value))
                 }
@@ -3094,10 +3565,10 @@ const POS = () => {
           )}
 
           {deliveryMethod === "table" && (
-            <div className="mt-3 space-y-2">
+            <div className="mt-2 space-y-1.5">
               <button
                 onClick={autoFillDeliveryFields}
-                className="w-full py-2 px-3 rounded-lg border-2 border-dashed border-primary/50 hover:border-primary text-primary font-bold text-xs uppercase tracking-wider transition-all hover:bg-primary/10 flex items-center justify-center gap-2"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
               >
                 <span className="material-symbols-outlined text-sm">
                   auto_fix_high
@@ -3109,7 +3580,7 @@ const POS = () => {
                 value={customerName}
                 setValue={setCustomerName}
                 placeholder="Ingresa el nombre"
-                size="md"
+                size="compact"
               />
               <TextField
                 label="Número"
@@ -3117,7 +3588,7 @@ const POS = () => {
                 setValue={setCustomerNumber}
                 placeholder="Ingresa el número"
                 type="number"
-                size="md"
+                size="compact"
                 onChange={(e) =>
                   setCustomerNumber(normalizePhoneNumber(e.target.value))
                 }
@@ -3129,7 +3600,7 @@ const POS = () => {
                   setValue={setSelectedTable}
                   placeholder="Número de mesa"
                   type="number"
-                  size="md"
+                  size="compact"
                   inputRef={tableInputRef}
                 />
                 {tableOccupancyWarning?.occupied && (
@@ -3168,10 +3639,10 @@ const POS = () => {
           )}
 
           {deliveryMethod === "delivery" && (
-            <div className="mt-3 space-y-2">
+            <div className="mt-2 space-y-1.5">
               <button
                 onClick={autoFillDeliveryFields}
-                className="w-full py-2 px-3 rounded-lg border-2 border-dashed border-primary/50 hover:border-primary text-primary font-bold text-xs uppercase tracking-wider transition-all hover:bg-primary/10 flex items-center justify-center gap-2"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
               >
                 <span className="material-symbols-outlined text-sm">
                   auto_fix_high
@@ -3183,7 +3654,7 @@ const POS = () => {
                 value={customerName}
                 setValue={setCustomerName}
                 placeholder="Ingresa el nombre"
-                size="md"
+                size="compact"
               />
               <TextField
                 label="Número"
@@ -3191,88 +3662,46 @@ const POS = () => {
                 setValue={setCustomerNumber}
                 placeholder="Ingresa el número"
                 type="number"
-                size="md"
+                size="compact"
                 onChange={(e) =>
                   setCustomerNumber(normalizePhoneNumber(e.target.value))
                 }
               />
-              <TextField
-                label="Dirección"
-                value={address}
-                setValue={setAddress}
-                placeholder="Ingresa la dirección"
-                size="md"
-              />
+              {deliveryAddressField}
               <TextField
                 label="Punto de Referencia"
                 value={referencePoint}
                 setValue={setReferencePoint}
                 placeholder="Ingresa el punto de referencia"
-                size="md"
+                size={isDeliveryMapFullscreen ? "md" : "compact"}
               />
 
-              {/* Mapa Ilustrativo */}
-              <div className="w-full h-48 rounded-lg bg-gradient-to-br from-neutral-700 to-neutral-800 border border-outline flex items-center justify-center overflow-hidden relative">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg width=%22100%22 height=%22100%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Crect fill=%22%23262626%22 width=%22100%22 height=%22100%22/%3E%3Cpath d=%22M0 0h100M0 50h100M0 100h100M0 0v100M50 0v100M100 0v100%22 stroke=%22%23404040%22 stroke-width=%220.5%22/%3E%3C/svg%3E')] opacity-10"></div>
-                <div className="flex flex-col items-center gap-2 z-10">
-                  <span className="material-symbols-outlined text-4xl text-neutral-400">
-                    location_on
-                  </span>
-                  <p className="text-xs text-neutral-400 font-medium">
-                    Mapa (próximamente)
-                  </p>
-                  <p className="text-[10px] text-neutral-500">
-                    Google Maps o Leaflet
-                  </p>
-                </div>
-              </div>
-
-              {/* Tarjeta de Información de Envío */}
-              <div className="w-full bg-primary-container/10 border border-primary-container/30 rounded-lg p-3 space-y-1">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-on-surface-variant">
-                    COSTO FINAL
-                  </span>
-                  <span className="text-sm font-black text-primary">
-                    $5.000
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-on-surface-variant">
-                    COSTO BASE
-                  </span>
-                  <span className="text-[10px] font-black text-on-surface">
-                    $4.850
-                  </span>
-                </div>
-                <div className="h-px bg-primary-container/20"></div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-[10px] font-bold text-on-surface-variant uppercase">
-                      Distancia
-                    </p>
-                    <p className="text-xs font-black text-on-surface">
-                      1.850 m
-                    </p>
+              {!isDeliveryMapFullscreen &&
+                !isLoadingDeliverySettings &&
+                deliveryOrigin && (
+                  <div className="relative">
+                    {deliveryMapContent}
+                    <button
+                      type="button"
+                      onClick={() => setIsDeliveryMapFullscreen(true)}
+                      className="absolute bottom-2 right-2 z-20 flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 bg-neutral-950/90 text-white shadow-lg transition hover:bg-neutral-800"
+                      aria-label="Mostrar mapa en pantalla completa"
+                      title="Mostrar mapa en pantalla completa"
+                    >
+                      <Maximize2 size={15} />
+                    </button>
                   </div>
-                  <div>
-                    <p className="text-[10px] text-right font-bold text-on-surface-variant uppercase">
-                      Kilómetros
-                    </p>
-                    <p className="text-xs text-right font-black text-on-surface">
-                      1.85 km
-                    </p>
-                  </div>
-                </div>
-              </div>
+                )}
+              {!isDeliveryMapFullscreen && deliveryMapStatus}
+              {!isDeliveryMapFullscreen && deliveryCostSummary}
             </div>
           )}
 
           {deliveryMethod === "point" && (
-            <div className="mt-3 space-y-2">
+            <div className="mt-2 space-y-1.5">
               <button
                 onClick={autoFillDeliveryFields}
-                className="w-full py-2 px-3 rounded-lg border-2 border-dashed border-primary/50 hover:border-primary text-primary font-bold text-xs uppercase tracking-wider transition-all hover:bg-primary/10 flex items-center justify-center gap-2"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
               >
                 <span className="material-symbols-outlined text-sm">
                   auto_fix_high
@@ -3284,7 +3713,7 @@ const POS = () => {
                 value={customerName}
                 setValue={setCustomerName}
                 placeholder="Ingresa el nombre"
-                size="md"
+                size="compact"
               />
               <TextField
                 label="Número"
@@ -3292,7 +3721,7 @@ const POS = () => {
                 setValue={setCustomerNumber}
                 placeholder="Ingresa el número"
                 type="number"
-                size="md"
+                size="compact"
                 onChange={(e) =>
                   setCustomerNumber(normalizePhoneNumber(e.target.value))
                 }
@@ -3302,7 +3731,7 @@ const POS = () => {
                 value={locationText}
                 setValue={setLocationText}
                 placeholder="Ingresa la ubicación"
-                size="md"
+                size="compact"
               />
             </div>
           )}
@@ -3487,9 +3916,19 @@ const POS = () => {
                   Subtotal
                 </span>
                 <span className="text-sm font-bold">
-                  $ {formatPrice(total)}
+                  $ {formatPrice(itemsSubtotal)}
                 </span>
               </div>
+              {deliveryMethod === "delivery" && deliveryBaseFee !== null && (
+                <div className="flex justify-between items-center opacity-70">
+                  <span className="text-[10px] font-bold uppercase tracking-widest">
+                    Domicilio
+                  </span>
+                  <span className="text-sm font-bold">
+                    $ {formatPrice(deliveryFee)}
+                  </span>
+                </div>
+              )}
 
               {(paymentMethod === "efectivo" || paymentMethod === "dividir") &&
                 (paidAmount > 0 || assignedTotal > 0) && (
@@ -3747,9 +4186,19 @@ const POS = () => {
                   Subtotal
                 </span>
                 <span className="text-sm font-bold">
-                  $ {formatPrice(total)}
+                  $ {formatPrice(itemsSubtotal)}
                 </span>
               </div>
+              {deliveryMethod === "delivery" && deliveryBaseFee !== null && (
+                <div className="flex justify-between items-center opacity-70">
+                  <span className="text-[10px] font-bold uppercase tracking-widest">
+                    Domicilio
+                  </span>
+                  <span className="text-sm font-bold">
+                    $ {formatPrice(deliveryFee)}
+                  </span>
+                </div>
+              )}
 
               {(paymentMethod === "efectivo" || paymentMethod === "dividir") &&
                 (paidAmount > 0 || assignedTotal > 0) && (

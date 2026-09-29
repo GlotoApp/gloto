@@ -15,6 +15,7 @@ import {
   supabase,
 } from "../../src/lib/supabaseClient";
 import ConfiguracionField from "./ConfiguracionField";
+import SubLoading from "./SubLoading";
 
 const EMPTY_DATA = {
   name: "",
@@ -133,19 +134,21 @@ const ConfiguracionTienda = () => {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
     return [latitude, longitude];
   }, [data.latitude, data.longitude]);
-
-  const updateCoordinates = (latitude, longitude) => {
-    update("latitude", Number(latitude).toFixed(6));
-    update("longitude", Number(longitude).toFixed(6));
-  };
+  const coordinatesRef = useRef(coordinates);
 
   useEffect(() => {
+    coordinatesRef.current = coordinates;
+  }, [coordinates]);
+
+  useEffect(() => {
+    if (loading) return undefined;
+
     let isMounted = true;
 
     import("leaflet").then((L) => {
       if (!isMounted || !mapElement.current || mapInstance.current) return;
 
-      const initialCenter = coordinates || [10.373842, -75.473796];
+      const initialCenter = coordinatesRef.current || [10.373842, -75.473796];
       const map = L.default
         .map(mapElement.current, { zoomControl: true })
         .setView(initialCenter, coordinates ? 15 : 12);
@@ -159,7 +162,11 @@ const ConfiguracionTienda = () => {
 
       map.on("moveend", () => {
         const center = map.getCenter();
-        updateCoordinates(center.lat, center.lng);
+        setData((current) => ({
+          ...current,
+          latitude: Number(center.lat).toFixed(6),
+          longitude: Number(center.lng).toFixed(6),
+        }));
       });
       mapInstance.current = map;
     });
@@ -171,7 +178,7 @@ const ConfiguracionTienda = () => {
         mapInstance.current = null;
       }
     };
-  }, []);
+  }, [loading]);
 
   useEffect(() => {
     const map = mapInstance.current;
@@ -379,264 +386,277 @@ const ConfiguracionTienda = () => {
           </p>
         </div>
       </header>
-      {loading && (
-        <p className="text-xs text-neutral-500">
-          Cargando información de la tienda...
-        </p>
-      )}
-      <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-4">
-          <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-neutral-500">
-            Logo
-          </p>
-          <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-dashed border-neutral-700 bg-neutral-950">
-            {logoUrl ? (
-              <img
-                src={logoUrl}
-                alt="Logo de la tienda"
-                className="h-full w-full object-contain p-2"
-              />
-            ) : (
-              <Store className="text-neutral-700" size={36} />
-            )}
-            <button
-              type="button"
-              onClick={() => logoInput.current?.click()}
-              className="absolute bottom-1 right-1 rounded-lg bg-violet-600 p-2"
-            >
-              <Camera size={14} />
-            </button>
-            <input
-              ref={logoInput}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="hidden"
-              onChange={(event) => uploadImage(event, "logo")}
-            />
-          </div>
-        </div>
-        <div className="overflow-hidden rounded-2xl border border-white/[0.07] bg-neutral-900/45">
-          <div className="relative h-48">
-            {coverUrl ? (
-              <img
-                src={coverUrl}
-                alt="Portada de la tienda"
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-xs uppercase tracking-widest text-neutral-600">
-                Sin portada
+      {loading ? (
+        <SubLoading
+          label="Cargando información de la tienda"
+          className="py-24"
+          dotClassName="bg-violet-400"
+          fullHeight
+        />
+      ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-4">
+              <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-neutral-500">
+                Logo
+              </p>
+              <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-dashed border-neutral-700 bg-neutral-950">
+                {logoUrl ? (
+                  <img
+                    src={logoUrl}
+                    alt="Logo de la tienda"
+                    className="h-full w-full object-contain p-2"
+                  />
+                ) : (
+                  <Store className="text-neutral-700" size={36} />
+                )}
+                <button
+                  type="button"
+                  onClick={() => logoInput.current?.click()}
+                  className="absolute bottom-1 right-1 rounded-lg bg-violet-600 p-2"
+                >
+                  <Camera size={14} />
+                </button>
+                <input
+                  ref={logoInput}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(event) => uploadImage(event, "logo")}
+                />
               </div>
-            )}
-            <button
-              type="button"
-              onClick={() => coverInput.current?.click()}
-              className="absolute bottom-3 right-3 flex items-center gap-2 rounded-xl bg-black/75 px-3 py-2 text-[10px] font-black uppercase"
-            >
-              <Image size={14} /> Cambiar portada
-            </button>
-            <input
-              ref={coverInput}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="hidden"
-              onChange={(event) => uploadImage(event, "cover")}
-            />
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-white/[0.07] bg-neutral-900/45">
+              <div className="relative h-48">
+                {coverUrl ? (
+                  <img
+                    src={coverUrl}
+                    alt="Portada de la tienda"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-xs uppercase tracking-widest text-neutral-600">
+                    Sin portada
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => coverInput.current?.click()}
+                  className="absolute bottom-3 right-3 flex items-center gap-2 rounded-xl bg-black/75 px-3 py-2 text-[10px] font-black uppercase"
+                >
+                  <Image size={14} /> Cambiar portada
+                </button>
+                <input
+                  ref={coverInput}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(event) => uploadImage(event, "cover")}
+                />
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-      <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
-        <h3 className="mb-5 text-sm font-black uppercase tracking-wider text-neutral-300">
-          Identidad y contacto
-        </h3>
-        <div className="grid gap-5 md:grid-cols-2">
-          <ConfiguracionField
-            showError={saveAttempted}
-            label="Nombre del negocio"
-            value={data.name}
-            onChange={(e) => update("name", e.target.value)}
-          />
-          <label className="flex flex-col gap-2">
-            <span className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-500">
-              Categoría
-            </span>
-            <select
-              value={data.category}
-              onChange={(e) => update("category", e.target.value)}
-              className={`w-full rounded-xl border bg-neutral-950/60 px-4 py-3 text-sm text-white outline-none transition ${saveAttempted && !data.category.trim() ? "border-red-500 focus:border-red-400" : "border-white/[0.1] focus:border-violet-500/60"}`}
-            >
-              <option value="">Selecciona una categoría</option>
-              {data.category &&
-                !categories.some(
-                  (category) => category.name === data.category,
-                ) && <option value={data.category}>{data.category}</option>}
-              {categories.map((category) => (
-                <option key={category.id} value={category.name}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-            <span className="text-[10px] leading-4 text-neutral-600">
-              Clasifica la tienda dentro del marketplace.
-            </span>
-          </label>
-          <ConfiguracionField
-            showError={saveAttempted}
-            label="Dirección física"
-            value={data.address}
-            onChange={(e) => update("address", e.target.value)}
-            placeholder="Calle 78 #3"
-          />
-          <ConfiguracionField
-            showError={saveAttempted}
-            label="Número de WhatsApp"
-            value={data.whatsapp_phone}
-            onChange={(e) => update("whatsapp_phone", e.target.value)}
-            placeholder="573001234567"
-          />
-        </div>
-      </div>
-      <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-black uppercase tracking-wider text-neutral-300">
-              Ubicación en el mapa
+          <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
+            <h3 className="mb-5 text-sm font-black uppercase tracking-wider text-neutral-300">
+              Identidad y contacto
             </h3>
-            <p className="mt-1 text-xs text-neutral-500">
-              Mueve el mapa debajo del puntero fijo para elegir la ubicación.
-            </p>
+            <div className="grid gap-5 md:grid-cols-2">
+              <ConfiguracionField
+                showError={saveAttempted}
+                label="Nombre del negocio"
+                value={data.name}
+                onChange={(e) => update("name", e.target.value)}
+              />
+              <label className="flex flex-col gap-2">
+                <span className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-500">
+                  Categoría
+                </span>
+                <select
+                  value={data.category}
+                  onChange={(e) => update("category", e.target.value)}
+                  className={`w-full rounded-xl border bg-neutral-950/60 px-4 py-3 text-sm text-white outline-none transition ${saveAttempted && !data.category.trim() ? "border-red-500 focus:border-red-400" : "border-white/[0.1] focus:border-violet-500/60"}`}
+                >
+                  <option value="">Selecciona una categoría</option>
+                  {data.category &&
+                    !categories.some(
+                      (category) => category.name === data.category,
+                    ) && <option value={data.category}>{data.category}</option>}
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.name}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[10px] leading-4 text-neutral-600">
+                  Clasifica la tienda dentro del marketplace.
+                </span>
+              </label>
+              <ConfiguracionField
+                showError={saveAttempted}
+                label="Dirección física"
+                value={data.address}
+                onChange={(e) => update("address", e.target.value)}
+                placeholder="Calle 78 #3"
+              />
+              <ConfiguracionField
+                showError={saveAttempted}
+                label="Número de WhatsApp"
+                value={data.whatsapp_phone}
+                onChange={(e) => update("whatsapp_phone", e.target.value)}
+                placeholder="573001234567"
+              />
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-wider text-neutral-300">
+                  Ubicación en el mapa
+                </h3>
+                <p className="mt-1 text-xs text-neutral-500">
+                  Mueve el mapa debajo del puntero fijo para elegir la
+                  ubicación.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={useCurrentLocation}
+                  disabled={locating}
+                  className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-[10px] font-black uppercase text-violet-300 disabled:opacity-50"
+                >
+                  <LocateFixed size={14} />{" "}
+                  {locating ? "Localizando..." : "Usar mi ubicación"}
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleMapFullscreen}
+                  className="rounded-xl border border-white/10 bg-white/[0.05] p-2 text-neutral-300 hover:bg-white/10"
+                  aria-label={
+                    isMapFullscreen
+                      ? "Salir de pantalla completa"
+                      : "Abrir pantalla completa"
+                  }
+                  title={
+                    isMapFullscreen
+                      ? "Salir de pantalla completa"
+                      : "Abrir pantalla completa"
+                  }
+                >
+                  {isMapFullscreen ? (
+                    <Minimize2 size={16} />
+                  ) : (
+                    <Maximize2 size={16} />
+                  )}
+                </button>
+              </div>
+            </div>
+            <div
+              ref={mapElement}
+              className="relative mb-5 h-72 overflow-hidden rounded-2xl border border-white/[0.08] bg-neutral-950 [&:fullscreen]:mb-0 [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0"
+              aria-label="Mapa interactivo de ubicación de la tienda"
+            >
+              <button
+                type="button"
+                onClick={toggleMapFullscreen}
+                className="absolute right-4 top-4 z-[600] rounded-xl border border-white/20 bg-neutral-950/85 p-2 text-white shadow-lg backdrop-blur-md"
+                aria-label={
+                  isMapFullscreen
+                    ? "Salir de pantalla completa"
+                    : "Abrir pantalla completa"
+                }
+                title={
+                  isMapFullscreen
+                    ? "Salir de pantalla completa"
+                    : "Abrir pantalla completa"
+                }
+              >
+                {isMapFullscreen ? (
+                  <Minimize2 size={18} />
+                ) : (
+                  <Maximize2 size={18} />
+                )}
+              </button>
+              <div className="pointer-events-none absolute left-1/2 top-1/2 z-[500] -translate-x-1/2 -translate-y-full text-violet-600 drop-shadow-[0_3px_4px_rgba(0,0,0,0.65)]">
+                <MapPin
+                  size={42}
+                  fill="currentColor"
+                  stroke="white"
+                  strokeWidth={1.5}
+                />
+              </div>
+            </div>
+            <div className="grid gap-5 md:grid-cols-2">
+              <ConfiguracionField
+                label="Latitud"
+                value={data.latitude}
+                onChange={(e) => update("latitude", e.target.value)}
+                placeholder="Ej. 10.3910"
+              />
+              <ConfiguracionField
+                label="Longitud"
+                value={data.longitude}
+                onChange={(e) => update("longitude", e.target.value)}
+                placeholder="Ej. -75.4794"
+              />
+            </div>
+          </div>
+          <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
+            <h3 className="mb-5 text-sm font-black uppercase tracking-wider text-neutral-300">
+              Entrega y domicilio
+            </h3>
+            <div className="grid gap-5 md:grid-cols-2">
+              <ConfiguracionField
+                label="Tiempo mínimo (minutos)"
+                type="number"
+                value={data.delivery_time_min}
+                onChange={(e) => update("delivery_time_min", e.target.value)}
+              />
+              <ConfiguracionField
+                label="Tiempo máximo (minutos)"
+                type="number"
+                value={data.delivery_time_max}
+                onChange={(e) => update("delivery_time_max", e.target.value)}
+              />
+              <ConfiguracionField
+                label="Tarifa por kilómetro"
+                inputMode="numeric"
+                value={formatThousands(data.delivery_fee_per_km)}
+                onChange={(e) =>
+                  updateMoney("delivery_fee_per_km", e.target.value)
+                }
+              />
+              <ConfiguracionField
+                label="Costo mínimo de domicilio"
+                inputMode="numeric"
+                value={formatThousands(data.min_delivery_fee)}
+                onChange={(e) =>
+                  updateMoney("min_delivery_fee", e.target.value)
+                }
+              />
+              <ConfiguracionField
+                label="Costo máximo de domicilio"
+                inputMode="numeric"
+                value={formatThousands(data.max_delivery_fee)}
+                onChange={(e) =>
+                  updateMoney("max_delivery_fee", e.target.value)
+                }
+              />
+            </div>
+          </div>
+          <footer className="sticky bottom-4 z-10 flex items-center justify-between gap-4 rounded-2xl border border-violet-400/20 bg-neutral-950/95 p-4 shadow-xl backdrop-blur-md">
+            <span className="text-xs text-emerald-300">{message}</span>
             <button
               type="button"
-              onClick={useCurrentLocation}
-              disabled={locating}
-              className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-[10px] font-black uppercase text-violet-300 disabled:opacity-50"
+              onClick={save}
+              disabled={saving || loading}
+              className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
             >
-              <LocateFixed size={14} />{" "}
-              {locating ? "Localizando..." : "Usar mi ubicación"}
+              <Save size={14} /> {saving ? "Guardando..." : "Guardar tienda"}
             </button>
-            <button
-              type="button"
-              onClick={toggleMapFullscreen}
-              className="rounded-xl border border-white/10 bg-white/[0.05] p-2 text-neutral-300 hover:bg-white/10"
-              aria-label={
-                isMapFullscreen
-                  ? "Salir de pantalla completa"
-                  : "Abrir pantalla completa"
-              }
-              title={
-                isMapFullscreen
-                  ? "Salir de pantalla completa"
-                  : "Abrir pantalla completa"
-              }
-            >
-              {isMapFullscreen ? (
-                <Minimize2 size={16} />
-              ) : (
-                <Maximize2 size={16} />
-              )}
-            </button>
-          </div>
-        </div>
-        <div
-          ref={mapElement}
-          className="relative mb-5 h-72 overflow-hidden rounded-2xl border border-white/[0.08] bg-neutral-950 [&:fullscreen]:mb-0 [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0"
-          aria-label="Mapa interactivo de ubicación de la tienda"
-        >
-          <button
-            type="button"
-            onClick={toggleMapFullscreen}
-            className="absolute right-4 top-4 z-[600] rounded-xl border border-white/20 bg-neutral-950/85 p-2 text-white shadow-lg backdrop-blur-md"
-            aria-label={
-              isMapFullscreen
-                ? "Salir de pantalla completa"
-                : "Abrir pantalla completa"
-            }
-            title={
-              isMapFullscreen
-                ? "Salir de pantalla completa"
-                : "Abrir pantalla completa"
-            }
-          >
-            {isMapFullscreen ? (
-              <Minimize2 size={18} />
-            ) : (
-              <Maximize2 size={18} />
-            )}
-          </button>
-          <div className="pointer-events-none absolute left-1/2 top-1/2 z-[500] -translate-x-1/2 -translate-y-full text-violet-600 drop-shadow-[0_3px_4px_rgba(0,0,0,0.65)]">
-            <MapPin
-              size={42}
-              fill="currentColor"
-              stroke="white"
-              strokeWidth={1.5}
-            />
-          </div>
-        </div>
-        <div className="grid gap-5 md:grid-cols-2">
-          <ConfiguracionField
-            label="Latitud"
-            value={data.latitude}
-            onChange={(e) => update("latitude", e.target.value)}
-            placeholder="Ej. 10.3910"
-          />
-          <ConfiguracionField
-            label="Longitud"
-            value={data.longitude}
-            onChange={(e) => update("longitude", e.target.value)}
-            placeholder="Ej. -75.4794"
-          />
-        </div>
-      </div>
-      <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
-        <h3 className="mb-5 text-sm font-black uppercase tracking-wider text-neutral-300">
-          Entrega y domicilio
-        </h3>
-        <div className="grid gap-5 md:grid-cols-2">
-          <ConfiguracionField
-            label="Tiempo mínimo (minutos)"
-            type="number"
-            value={data.delivery_time_min}
-            onChange={(e) => update("delivery_time_min", e.target.value)}
-          />
-          <ConfiguracionField
-            label="Tiempo máximo (minutos)"
-            type="number"
-            value={data.delivery_time_max}
-            onChange={(e) => update("delivery_time_max", e.target.value)}
-          />
-          <ConfiguracionField
-            label="Tarifa por kilómetro"
-            inputMode="numeric"
-            value={formatThousands(data.delivery_fee_per_km)}
-            onChange={(e) => updateMoney("delivery_fee_per_km", e.target.value)}
-          />
-          <ConfiguracionField
-            label="Costo mínimo de domicilio"
-            inputMode="numeric"
-            value={formatThousands(data.min_delivery_fee)}
-            onChange={(e) => updateMoney("min_delivery_fee", e.target.value)}
-          />
-          <ConfiguracionField
-            label="Costo máximo de domicilio"
-            inputMode="numeric"
-            value={formatThousands(data.max_delivery_fee)}
-            onChange={(e) => updateMoney("max_delivery_fee", e.target.value)}
-          />
-        </div>
-      </div>
-      <footer className="sticky bottom-4 z-10 flex items-center justify-between gap-4 rounded-2xl border border-violet-400/20 bg-neutral-950/95 p-4 shadow-xl backdrop-blur-md">
-        <span className="text-xs text-emerald-300">{message}</span>
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving || loading}
-          className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
-        >
-          <Save size={14} /> {saving ? "Guardando..." : "Guardar tienda"}
-        </button>
-      </footer>
+          </footer>
+        </>
+      )}
     </section>
   );
 };

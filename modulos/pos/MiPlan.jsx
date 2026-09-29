@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "../../src/lib/supabaseClient";
+import SubLoading from "./SubLoading";
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat("es-CO", {
@@ -271,12 +272,6 @@ export default function MiPlan() {
     setPaymentFile(file);
   };
 
-  if (loading) {
-    return (
-      <div className="p-8 text-sm text-neutral-400">Cargando tu plan...</div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-background px-4 py-6 text-white sm:px-6 lg:px-8 lg:py-8">
       <div className="mx-auto max-w-4xl space-y-4 lg:space-y-5">
@@ -294,253 +289,281 @@ export default function MiPlan() {
           </p>
         </header>
 
-        {message && (
-          <div className="rounded-lg border border-violet-500/20 bg-violet-500/10 px-3 py-2.5 text-xs text-violet-200">
-            {message}
-          </div>
-        )}
-
-        {latestPayment && latestPayment.status !== "paid" && (
-          <div
-            className={`rounded-lg px-3 py-2.5 text-xs ${
-              latestPayment.status === "pending"
-                ? "bg-amber-500/10 text-amber-200"
-                : "bg-rose-500/10 text-rose-200"
-            }`}
-          >
-            <strong className="font-black uppercase">
-              {latestPayment.status === "pending"
-                ? "Soporte en revisión"
-                : "Soporte rechazado:"}
-            </strong>
-            <span className="ml-2 uppercase tracking-widest">
-              {latestPayment.status === "pending"
-                ? "Estamos validando tu comprobante. No envíes otro mientras recibes respuesta."
-                : latestPayment.notes ||
-                  "Revisa el comprobante y envía uno nuevo."}
-            </span>
-          </div>
-        )}
-
-        {!subscription ? (
-          <section className="rounded-xl border border-dashed border-white/10 px-5 py-12 text-center text-sm text-neutral-400">
-            No tienes un plan activo o pendiente asociado a este negocio.
-          </section>
+        {loading ? (
+          <SubLoading
+            label="Cargando tu plan"
+            className="py-24"
+            dotClassName="bg-violet-400"
+            fullHeight
+          />
         ) : (
           <>
-            <section className="rounded-xl bg-white/[0.02] p-5 sm:p-6">
-              <div className="mx-auto max-w-sm text-center">
-                <div className="flex items-center justify-between gap-3 text-left">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
-                    Plan {subscription.plan_name}
-                  </p>
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${
-                      validity.isActive
-                        ? "bg-emerald-500/10 text-emerald-300"
-                        : "bg-rose-500/10 text-rose-300"
-                    }`}
-                  >
-                    <CheckCircle2 size={11} />{" "}
-                    {getStatusLabel(subscription.status)}
-                  </span>
-                </div>
-                <div className="relative mx-auto mt-3 w-full max-w-[280px]">
-                  <svg
-                    viewBox="0 0 220 140"
-                    className="block w-full"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M 20 112 A 90 90 0 0 1 200 112"
-                      fill="none"
-                      stroke="rgba(255,255,255,0.2)"
-                      strokeWidth="19"
-                      strokeLinecap="round"
-                      pathLength="100"
-                    />
-                    {validity.percent > 0 ? (
-                      <path
-                        d="M 20 112 A 90 90 0 0 1 200 112"
-                        fill="none"
-                        stroke={validity.color}
-                        strokeWidth="19"
-                        strokeLinecap="round"
-                        pathLength="100"
-                        strokeDasharray="100"
-                        strokeDashoffset={100 - validity.percent}
-                      />
-                    ) : (
-                      <circle cx="20" cy="112" r="9.5" fill={validity.color} />
-                    )}
-                  </svg>
-                  <div className="absolute inset-x-0 top-[27%] flex flex-col items-center justify-center px-8 text-center">
-                    <p
-                      className="text-4xl font-black sm:text-5xl"
-                      style={{ color: validity.color }}
-                    >
-                      {daysRemaining === null ? "-" : validity.remainingDays}
-                    </p>
-                    <p className="mt-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                      Días restantes
-                    </p>
-                    <p className="mt-1 text-[10px] text-neutral-500">
-                      {validity.totalDays} días ·{" "}
-                      {subscription.billing_period || "periodo"}
+            {message && (
+              <div className="rounded-lg border border-violet-500/20 bg-violet-500/10 px-3 py-2.5 text-xs text-violet-200">
+                {message}
+              </div>
+            )}
+
+            {latestPayment && latestPayment.status !== "paid" && (
+              <div
+                className={`rounded-lg px-3 py-2.5 text-xs ${
+                  latestPayment.status === "pending"
+                    ? "bg-amber-500/10 text-amber-200"
+                    : "bg-rose-500/10 text-rose-200"
+                }`}
+              >
+                <strong className="font-black uppercase">
+                  {latestPayment.status === "pending"
+                    ? "Soporte en revisión"
+                    : "Soporte rechazado:"}
+                </strong>
+                <span className="ml-2 uppercase tracking-widest">
+                  {latestPayment.status === "pending"
+                    ? "Estamos validando tu comprobante. No envíes otro mientras recibes respuesta."
+                    : latestPayment.notes ||
+                      "Revisa el comprobante y envía uno nuevo."}
+                </span>
+              </div>
+            )}
+
+            {!subscription ? (
+              <section className="rounded-xl border border-dashed border-white/10 px-5 py-12 text-center text-sm text-neutral-400">
+                No tienes un plan activo o pendiente asociado a este negocio.
+              </section>
+            ) : (
+              <>
+                <section className="rounded-xl bg-white/[0.02] p-5 sm:p-6">
+                  <div className="mx-auto max-w-sm text-center">
+                    <div className="flex items-center justify-between gap-3 text-left">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+                        Plan {subscription.plan_name}
+                      </p>
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${
+                          validity.isActive
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : "bg-rose-500/10 text-rose-300"
+                        }`}
+                      >
+                        <CheckCircle2 size={11} />{" "}
+                        {getStatusLabel(subscription.status)}
+                      </span>
+                    </div>
+                    <div className="relative mx-auto mt-3 w-full max-w-[280px]">
+                      <svg
+                        viewBox="0 0 220 140"
+                        className="block w-full"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M 20 112 A 90 90 0 0 1 200 112"
+                          fill="none"
+                          stroke="rgba(255,255,255,0.2)"
+                          strokeWidth="19"
+                          strokeLinecap="round"
+                          pathLength="100"
+                        />
+                        {validity.percent > 0 ? (
+                          <path
+                            d="M 20 112 A 90 90 0 0 1 200 112"
+                            fill="none"
+                            stroke={validity.color}
+                            strokeWidth="19"
+                            strokeLinecap="round"
+                            pathLength="100"
+                            strokeDasharray="100"
+                            strokeDashoffset={100 - validity.percent}
+                          />
+                        ) : (
+                          <circle
+                            cx="20"
+                            cy="112"
+                            r="9.5"
+                            fill={validity.color}
+                          />
+                        )}
+                      </svg>
+                      <div className="absolute inset-x-0 top-[27%] flex flex-col items-center justify-center px-8 text-center">
+                        <p
+                          className="text-4xl font-black sm:text-5xl"
+                          style={{ color: validity.color }}
+                        >
+                          {daysRemaining === null
+                            ? "-"
+                            : validity.remainingDays}
+                        </p>
+                        <p className="mt-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+                          Días restantes
+                        </p>
+                        <p className="mt-1 text-[10px] text-neutral-500">
+                          {validity.totalDays} días ·{" "}
+                          {subscription.billing_period || "periodo"}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-4 text-xs text-neutral-500">
+                      Vence el{" "}
+                      <strong className="font-bold text-neutral-300">
+                        {formatDate(planEndDate)}
+                      </strong>
                     </p>
                   </div>
-                </div>
-                <p className="mt-4 text-xs text-neutral-500">
-                  Vence el{" "}
-                  <strong className="font-bold text-neutral-300">
-                    {formatDate(planEndDate)}
-                  </strong>
-                </p>
-              </div>
-            </section>
+                </section>
 
-            {showPaymentPanel && (
-              <>
-                <div className="flex flex-col gap-3 rounded-xl bg-white/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                  <div className="flex items-center gap-3">
-                    <CreditCard
-                      className={
-                        showPaymentPanel ? "text-rose-300" : "text-violet-300"
-                      }
-                      size={22}
-                    />
-                    <div>
-                      <h2 className="text-base font-black">Monto a pagar</h2>
-                      <p className="mt-1 text-sm text-neutral-400">
-                        Ciclo facturado:{" "}
-                        {formatShortDate(subscription.starts_at)}
-                        {" - "}
-                        {formatShortDate(subscription.ends_at)}
+                {showPaymentPanel && (
+                  <>
+                    <div className="flex flex-col gap-3 rounded-xl bg-white/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                      <div className="flex items-center gap-3">
+                        <CreditCard
+                          className={
+                            showPaymentPanel
+                              ? "text-rose-300"
+                              : "text-violet-300"
+                          }
+                          size={22}
+                        />
+                        <div>
+                          <h2 className="text-base font-black">
+                            Monto a pagar
+                          </h2>
+                          <p className="mt-1 text-sm text-neutral-400">
+                            Ciclo facturado:{" "}
+                            {formatShortDate(subscription.starts_at)}
+                            {" - "}
+                            {formatShortDate(subscription.ends_at)}
+                          </p>
+                        </div>
+                      </div>
+                      <p
+                        className={`text-3xl font-black sm:text-right ${
+                          showPaymentPanel ? "text-rose-300" : "text-violet-300"
+                        }`}
+                      >
+                        {formatCurrency(subscription.amount)}
                       </p>
                     </div>
-                  </div>
-                  <p
-                    className={`text-3xl font-black sm:text-right ${
-                      showPaymentPanel ? "text-rose-300" : "text-violet-300"
-                    }`}
-                  >
-                    {formatCurrency(subscription.amount)}
-                  </p>
-                </div>
-                <section className="grid gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-                  <div className="flex flex-col justify-center rounded-xl bg-white/[0.035] p-5 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <h2 className="text-base font-black">QR de pago</h2>
-                      <CreditCard className="text-violet-300" size={18} />
-                    </div>
-                    <div className="mx-auto mt-4 flex aspect-square w-full max-w-[220px] items-center justify-center rounded-lg bg-white p-3">
-                      {paymentQr?.publicUrl ? (
-                        <img
-                          src={paymentQr.publicUrl}
-                          alt={paymentQr.label || "QR de pago"}
-                          className="h-full w-full object-contain"
-                        />
-                      ) : (
-                        <QRCodeSVG
-                          value={`Entidad bancaria genérica | Referencia GLOTO-${businessId} | Monto ${subscription.amount} COP`}
-                          size={156}
-                          bgColor="#ffffff"
-                          fgColor="#111111"
-                          level="M"
-                        />
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowQrModal(true)}
-                      className="mx-auto mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-[10px] font-black uppercase tracking-wider text-neutral-400 transition hover:bg-white/[0.06] hover:text-white"
-                      aria-label="Ver QR en pantalla grande"
-                    >
-                      <Maximize2 size={14} />
-                      Ver en pantalla grande
-                    </button>
-                  </div>
-                  <form
-                    onSubmit={handleUpload}
-                    className="min-w-0 rounded-xl bg-white/[0.035] p-5"
-                  >
-                    <h2 className="text-lg font-black">Soporte de pago</h2>
-                    <p className="mt-1 text-xs text-neutral-500">
-                      JPG, PNG o PDF. Máximo 5 MB.
-                    </p>
-                    {latestPayment?.status === "pending" ? (
-                      <div className="mt-4 rounded-lg bg-amber-500/10 px-3 py-3 text-xs text-amber-200">
-                        Tu soporte fue enviado y permanece pendiente de
-                        revisión.
-                      </div>
-                    ) : (
-                      <>
-                        <div className="relative mt-4 min-w-0">
-                          <label className="flex min-w-0 w-full cursor-pointer items-center gap-3 rounded-xl border border-dashed border-white/15 px-4 py-3 pr-12 text-sm text-neutral-300 hover:border-violet-400">
-                            <FileUp
-                              size={18}
-                              className="shrink-0 text-violet-300"
+                    <section className="grid gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+                      <div className="flex flex-col justify-center rounded-xl bg-white/[0.035] p-5 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <h2 className="text-base font-black">QR de pago</h2>
+                          <CreditCard className="text-violet-300" size={18} />
+                        </div>
+                        <div className="mx-auto mt-4 flex aspect-square w-full max-w-[220px] items-center justify-center rounded-lg bg-white p-3">
+                          {paymentQr?.publicUrl ? (
+                            <img
+                              src={paymentQr.publicUrl}
+                              alt={paymentQr.label || "QR de pago"}
+                              className="h-full w-full object-contain"
                             />
-                            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-                              {paymentFile?.name || "Seleccionar archivo"}
-                            </span>
-                            <input
-                              key={fileInputKey}
-                              type="file"
-                              accept="application/pdf,image/jpeg,image/png"
-                              className="sr-only"
-                              onChange={handleFileChange}
+                          ) : (
+                            <QRCodeSVG
+                              value={`Entidad bancaria genérica | Referencia GLOTO-${businessId} | Monto ${subscription.amount} COP`}
+                              size={156}
+                              bgColor="#ffffff"
+                              fgColor="#111111"
+                              level="M"
                             />
-                          </label>
-                          {paymentFile && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPaymentFile(null);
-                                setFileInputKey((current) => current + 1);
-                              }}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-neutral-500 transition hover:bg-white/10 hover:text-white"
-                              aria-label="Cancelar archivo seleccionado"
-                            >
-                              <X size={16} />
-                            </button>
                           )}
                         </div>
-                        {paymentPreviewUrl && paymentFile && (
-                          <div className="mt-3 overflow-hidden rounded-lg bg-black/30 p-3">
-                            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-neutral-500">
-                              Vista previa
-                            </p>
-                            {paymentFile?.type.startsWith("image/") ? (
-                              <img
-                                src={paymentPreviewUrl}
-                                alt="Vista previa del soporte de pago"
-                                className="max-h-64 w-full rounded-lg object-contain"
-                              />
-                            ) : (
-                              <div className="flex items-center gap-2 text-sm text-neutral-300">
-                                <FileUp size={18} className="text-violet-300" />
-                                {paymentFile.name}
+                        <button
+                          type="button"
+                          onClick={() => setShowQrModal(true)}
+                          className="mx-auto mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-[10px] font-black uppercase tracking-wider text-neutral-400 transition hover:bg-white/[0.06] hover:text-white"
+                          aria-label="Ver QR en pantalla grande"
+                        >
+                          <Maximize2 size={14} />
+                          Ver en pantalla grande
+                        </button>
+                      </div>
+                      <form
+                        onSubmit={handleUpload}
+                        className="min-w-0 rounded-xl bg-white/[0.035] p-5"
+                      >
+                        <h2 className="text-lg font-black">Soporte de pago</h2>
+                        <p className="mt-1 text-xs text-neutral-500">
+                          JPG, PNG o PDF. Máximo 5 MB.
+                        </p>
+                        {latestPayment?.status === "pending" ? (
+                          <div className="mt-4 rounded-lg bg-amber-500/10 px-3 py-3 text-xs text-amber-200">
+                            Tu soporte fue enviado y permanece pendiente de
+                            revisión.
+                          </div>
+                        ) : (
+                          <>
+                            <div className="relative mt-4 min-w-0">
+                              <label className="flex min-w-0 w-full cursor-pointer items-center gap-3 rounded-xl border border-dashed border-white/15 px-4 py-3 pr-12 text-sm text-neutral-300 hover:border-violet-400">
+                                <FileUp
+                                  size={18}
+                                  className="shrink-0 text-violet-300"
+                                />
+                                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                                  {paymentFile?.name || "Seleccionar archivo"}
+                                </span>
+                                <input
+                                  key={fileInputKey}
+                                  type="file"
+                                  accept="application/pdf,image/jpeg,image/png"
+                                  className="sr-only"
+                                  onChange={handleFileChange}
+                                />
+                              </label>
+                              {paymentFile && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPaymentFile(null);
+                                    setFileInputKey((current) => current + 1);
+                                  }}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-neutral-500 transition hover:bg-white/10 hover:text-white"
+                                  aria-label="Cancelar archivo seleccionado"
+                                >
+                                  <X size={16} />
+                                </button>
+                              )}
+                            </div>
+                            {paymentPreviewUrl && paymentFile && (
+                              <div className="mt-3 overflow-hidden rounded-lg bg-black/30 p-3">
+                                <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-neutral-500">
+                                  Vista previa
+                                </p>
+                                {paymentFile?.type.startsWith("image/") ? (
+                                  <img
+                                    src={paymentPreviewUrl}
+                                    alt="Vista previa del soporte de pago"
+                                    className="max-h-64 w-full rounded-lg object-contain"
+                                  />
+                                ) : (
+                                  <div className="flex items-center gap-2 text-sm text-neutral-300">
+                                    <FileUp
+                                      size={18}
+                                      className="text-violet-300"
+                                    />
+                                    {paymentFile.name}
+                                  </div>
+                                )}
                               </div>
                             )}
-                          </div>
+                            <button
+                              type="submit"
+                              disabled={saving || !paymentFile}
+                              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-wider transition hover:bg-violet-500 disabled:opacity-50"
+                            >
+                              {saving ? (
+                                <LoaderCircle
+                                  className="animate-spin"
+                                  size={15}
+                                />
+                              ) : (
+                                <Upload size={15} />
+                              )}{" "}
+                              Enviar soporte y solicitar pago
+                            </button>
+                          </>
                         )}
-                        <button
-                          type="submit"
-                          disabled={saving || !paymentFile}
-                          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-wider transition hover:bg-violet-500 disabled:opacity-50"
-                        >
-                          {saving ? (
-                            <LoaderCircle className="animate-spin" size={15} />
-                          ) : (
-                            <Upload size={15} />
-                          )}{" "}
-                          Enviar soporte y solicitar pago
-                        </button>
-                      </>
-                    )}
-                  </form>
-                </section>
+                      </form>
+                    </section>
+                  </>
+                )}
               </>
             )}
           </>

@@ -15,6 +15,7 @@ import {
   removeStorageObjectIfUnused,
   supabase,
 } from "../../src/lib/supabaseClient";
+import SubLoading from "./SubLoading";
 
 const MAX_SUPPORT_SIZE = 5 * 1024 * 1024;
 const ALLOWED_SUPPORT_TYPES = ["application/pdf", "image/jpeg", "image/png"];
@@ -481,13 +482,13 @@ const Promociones = () => {
           </button>
         </header>
 
-        {message && (
+        {!loading && message && (
           <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 px-4 py-3 text-sm text-violet-200">
             {message}
           </div>
         )}
 
-        {isFormOpen && (
+        {!loading && isFormOpen && (
           <form
             onSubmit={handleSubmit}
             className="space-y-5 rounded-2xl border border-white/10 bg-neutral-900/60 p-5"
@@ -732,9 +733,12 @@ const Promociones = () => {
         )}
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-neutral-500">
-            Cargando promociones...
-          </div>
+          <SubLoading
+            label="Cargando promociones"
+            className="py-24"
+            dotClassName="bg-violet-400"
+            fullHeight
+          />
         ) : promotions.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-white/10 py-16 text-center text-sm text-neutral-500">
             Aún no tienes promociones creadas.

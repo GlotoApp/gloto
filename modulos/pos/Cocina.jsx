@@ -183,14 +183,20 @@ export default function KitchenPanel() {
     const oscillator = audioContext.createOscillator();
     const gain = audioContext.createGain();
     oscillator.type = "sine";
-    oscillator.frequency.value = 820;
+    oscillator.frequency.setValueAtTime(660, ahora);
     gain.gain.setValueAtTime(0.0001, ahora);
-    gain.gain.exponentialRampToValueAtTime(1, ahora + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ahora + 0.2);
+    gain.gain.exponentialRampToValueAtTime(1, ahora + 0.03);
+    gain.gain.setValueAtTime(1, ahora + 0.15);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ahora + 0.22);
+    oscillator.frequency.setValueAtTime(784, ahora + 0.3);
+    gain.gain.setValueAtTime(0.0001, ahora + 0.3);
+    gain.gain.exponentialRampToValueAtTime(1, ahora + 0.33);
+    gain.gain.setValueAtTime(1, ahora + 0.45);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ahora + 0.52);
     oscillator.connect(gain);
     gain.connect(audioContext.destination);
     oscillator.start(ahora);
-    oscillator.stop(ahora + 0.21);
+    oscillator.stop(ahora + 0.53);
   };
 
   const probarSonido = () => {

@@ -22,6 +22,7 @@ import {
 import { QRCodeCanvas } from "qrcode.react";
 import logo from "../../public/logogloto.png"; // <-- AJUSTA ESTA RUTA A DONDE ESTÉ TU LOGO
 import { supabase } from "../../src/lib/supabaseClient";
+import SubLoading from "./SubLoading";
 
 const Utilidades = () => {
   const [activeTab, setActiveTab] = useState("qr");
@@ -793,8 +794,16 @@ const Utilidades = () => {
           ))}
         </div>
 
+        {storeLoading && (
+          <SubLoading
+            label="Cargando utilidades"
+            className="py-24"
+            dotClassName="bg-violet-400"
+            fullHeight
+          />
+        )}
         {/* ─── QR Tab ─── */}
-        {activeTab === "qr" && (
+        {!storeLoading && activeTab === "qr" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* QR del Menú */}
             <div className="p-6 md:p-8 bg-neutral-900/40 border border-white/5 rounded-2xl">
@@ -929,7 +938,7 @@ const Utilidades = () => {
         )}
 
         {/* ─── HABLADORES DE MESA Tab ─── */}
-        {activeTab === "tables" && (
+        {!storeLoading && activeTab === "tables" && (
           <div className="space-y-6">
             <div className="grid md:grid-cols-2 gap-6">
               {/* ── Panel de configuración ── */}

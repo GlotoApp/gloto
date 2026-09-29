@@ -204,7 +204,16 @@ const formatDateTime = (value) => {
 };
 
 const OrderCard = memo(
-  ({ orden, onDelete, onInvoice, onPrint, onShare, onEdit, canDelete }) => {
+  ({
+    orden,
+    onDelete,
+    onInvoice,
+    onPrint,
+    onShare,
+    onEdit,
+    onOpenMap,
+    canDelete,
+  }) => {
     const [isOpen, setIsOpen] = useState(false);
     const config = ORIGEN_CONFIG[orden.origen || "pos"];
     const Icon = config.icon;
@@ -359,7 +368,7 @@ const OrderCard = memo(
                       icon={Globe}
                       label="Ver en mapa"
                       color="border-sky-500/20 bg-sky-500/5 text-sky-400 hover:bg-sky-500 hover:text-white"
-                      onClick={() => handleOpenMap(orden)}
+                      onClick={() => onOpenMap(orden)}
                     />
                   </div>
                 )}
@@ -815,6 +824,8 @@ const mapDatabaseOrderToUi = (order) => {
     mesa: order.mesa || "",
     deliveryAddress: order.delivery_address || "",
     deliveryInstructions: order.delivery_instructions || "",
+    deliveryMapLink: order.linkmaps || metadata.linkmaps || "",
+    deliveryLocation: metadata.delivery_location || null,
     punto: order.punto || "",
     paymentMethods: Array.isArray(metadata.payment_methods)
       ? metadata.payment_methods
@@ -823,7 +834,7 @@ const mapDatabaseOrderToUi = (order) => {
     metodoPago: normalizePaymentMethod(order.payment_method),
     horaIngreso: formatDateTime(order.created_at),
     fecha: createdAt.toISOString().slice(0, 10),
-    observaciones: order.notes || order.delivery_instructions || "",
+    observaciones: order.notes || "",
     items: items.map((item) => ({
       id: item.id,
       product_id: item.product_id,
@@ -1195,6 +1206,8 @@ const Ordenes = () => {
           paymentMethods: orden.paymentMethods,
           total: orden.total,
           address: orden.deliveryAddress,
+          deliveryMapLink: orden.deliveryMapLink,
+          deliveryLocation: orden.deliveryLocation,
           referencePoint: orden.deliveryInstructions,
           locationText: orden.punto,
           notes: orden.observaciones,
@@ -1215,13 +1228,69 @@ const Ordenes = () => {
   };
 
   const handleOpenMap = (orden) => {
-    const lat = orden.latitude ?? orden.lat ?? orden.location_lat ?? null;
-    const lng = orden.longitude ?? orden.lng ?? orden.location_lng ?? null;
+    const openCoordinates = (latitude, longitude) => {
+      const mapsUrl = new URL("https://www.google.com/maps/search/");
+      mapsUrl.searchParams.set("api", "1");
+      mapsUrl.searchParams.set(
+        "query",
+        `${Number(latitude)},${Number(longitude)}`,
+      );
+      window.open(mapsUrl.href, "_blank", "noopener,noreferrer");
+    };
 
-    if (lat !== null && lng !== null) {
-      const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}&z=16`;
-      window.open(mapsUrl, "_blank", "noopener,noreferrer");
+    const savedLocation = orden.deliveryLocation || {};
+    const lat =
+      savedLocation.latitude ??
+      orden.latitude ??
+      orden.lat ??
+      orden.location_lat ??
+      null;
+    const lng =
+      savedLocation.longitude ??
+      orden.longitude ??
+      orden.lng ??
+      orden.location_lng ??
+      null;
+    if (
+      lat !== null &&
+      lng !== null &&
+      Number.isFinite(Number(lat)) &&
+      Number.isFinite(Number(lng))
+    ) {
+      openCoordinates(lat, lng);
       return;
+    }
+
+    const savedMapLink = String(orden.deliveryMapLink || "").trim();
+    if (savedMapLink) {
+      try {
+        const parsedLink = new URL(savedMapLink);
+        const isGoogleMapsLink =
+          parsedLink.protocol === "https:" &&
+          [
+            "google.com",
+            "www.google.com",
+            "maps.google.com",
+            "maps.app.goo.gl",
+          ].includes(parsedLink.hostname.toLowerCase());
+        if (isGoogleMapsLink) {
+          const linkCoordinates =
+            parsedLink.href.match(
+              /@(-?\d{1,2}(?:\.\d+)?),\s*(-?\d{1,3}(?:\.\d+)?)/,
+            ) ||
+            parsedLink.href.match(
+              /!3d(-?\d{1,2}(?:\.\d+)?)!4d(-?\d{1,3}(?:\.\d+)?)/i,
+            );
+          if (linkCoordinates) {
+            openCoordinates(linkCoordinates[1], linkCoordinates[2]);
+            return;
+          }
+          window.open(parsedLink.href, "_blank", "noopener,noreferrer");
+          return;
+        }
+      } catch {
+        // Use stored coordinates or address when the saved link is invalid.
+      }
     }
 
     if (orden.delivery_address) {
@@ -1489,6 +1558,7 @@ const Ordenes = () => {
                                     onPrint={handlePrint}
                                     onShare={handleShare}
                                     onEdit={handleEdit}
+                                    onOpenMap={handleOpenMap}
                                     canDelete={canDelete}
                                   />
                                 ))}
