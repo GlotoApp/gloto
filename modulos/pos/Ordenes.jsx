@@ -870,7 +870,6 @@ const Ordenes = () => {
   const [hasMoreOrders, setHasMoreOrders] = useState(true);
   const [loadingMoreOrders, setLoadingMoreOrders] = useState(false);
   const [invoiceOrder, setInvoiceOrder] = useState(null);
-  const ordersEndRef = useRef(null);
   const businessIdRef = useRef(null);
 
   const loadBusinessOrders = async () => {
@@ -983,19 +982,6 @@ const Ordenes = () => {
     }
     setLoadingMoreOrders(false);
   };
-
-  useEffect(() => {
-    const target = ordersEndRef.current;
-    if (!target) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) loadMoreOrders();
-      },
-      { rootMargin: "240px" },
-    );
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [ordersPage, hasMoreOrders, loadingMoreOrders, refreshing]);
 
   // Estado dinámico: se abre automáticamente el año-mes actual (ej: "2026-05")
   const [openMonths, setOpenMonths] = useState(() => {
@@ -1572,20 +1558,23 @@ const Ordenes = () => {
                 );
               })}
 
-            <div
-              ref={ordersEndRef}
-              className="flex min-h-16 items-center justify-center border-t border-white/5 pt-4"
-            >
-              {loadingMoreOrders ? (
-                <SubLoading
-                  label="Cargando más"
-                  compact
-                  dotClassName="bg-violet-400"
-                />
-              ) : hasMoreOrders ? (
-                <span className="text-[9px] font-mono uppercase tracking-widest text-neutral-700">
-                  Desplázate para ver más
-                </span>
+            <div className="flex min-h-16 items-center justify-center border-t border-white/5 pt-4">
+              {hasMoreOrders ? (
+                <button
+                  type="button"
+                  onClick={loadMoreOrders}
+                  disabled={loadingMoreOrders || refreshing}
+                  className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-neutral-300 transition-colors hover:border-violet-500/40 hover:bg-violet-500/10 hover:text-white disabled:cursor-wait disabled:opacity-50"
+                >
+                  {loadingMoreOrders ? (
+                    <LoaderCircle size={14} className="animate-spin" />
+                  ) : (
+                    <ChevronDown size={14} />
+                  )}
+                  {loadingMoreOrders
+                    ? "Cargando órdenes..."
+                    : "Cargar más órdenes"}
+                </button>
               ) : (
                 <span className="text-[9px] font-mono uppercase tracking-widest text-neutral-700">
                   No hay más órdenes

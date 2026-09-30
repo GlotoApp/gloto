@@ -31,6 +31,7 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
   const [inventarioOpen, setInventarioOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [finanzasOpen, setFinanzasOpen] = useState(false);
+  const [selectedMenuGroup, setSelectedMenuGroup] = useState(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -94,19 +95,23 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
 
   useEffect(() => {
     if (isExpanded) {
-      setCajaOpen(true);
-      setCatalogoOpen(true);
-      setInventarioOpen(true);
-      setConfigOpen(true);
-      setFinanzasOpen(true);
       navRef.current?.scrollTo({ top: 0 });
-    } else {
-      setCajaOpen(false);
-      setCatalogoOpen(false);
-      setInventarioOpen(false);
-      setConfigOpen(false);
-      setFinanzasOpen(false);
+      if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+        setCajaOpen(true);
+        setCatalogoOpen(true);
+        setInventarioOpen(true);
+        setConfigOpen(true);
+        setFinanzasOpen(true);
+      }
+      return;
     }
+
+    setCajaOpen(false);
+    setCatalogoOpen(false);
+    setInventarioOpen(false);
+    setConfigOpen(false);
+    setFinanzasOpen(false);
+    setSelectedMenuGroup(null);
   }, [isExpanded]);
 
   useEffect(() => {
@@ -303,34 +308,40 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
     if (isExpanded) toggleSidebar();
   };
 
-  const handleToggleClickCaja = (e) => {
-    e.preventDefault();
+  const setOpenMenuGroup = (group) => {
+    setCajaOpen(group === "caja");
+    setCatalogoOpen(group === "catalogo");
+    setInventarioOpen(group === "inventario");
+    setConfigOpen(group === "configuracion");
+    setFinanzasOpen(group === "finanzas");
+  };
+
+  const handleSubmenuToggle = (event, group, isOpen) => {
+    event.preventDefault();
+    const shouldOpen = !isExpanded || !isOpen;
+    setSelectedMenuGroup(group);
+    setOpenMenuGroup(shouldOpen ? group : null);
     if (!isExpanded) toggleSidebar();
-    setCajaOpen((prev) => !prev);
+  };
+
+  const handleToggleClickCaja = (e) => {
+    handleSubmenuToggle(e, "caja", cajaOpen);
   };
 
   const handleToggleClickCatalogo = (e) => {
-    e.preventDefault();
-    if (!isExpanded) toggleSidebar();
-    setCatalogoOpen((prev) => !prev);
+    handleSubmenuToggle(e, "catalogo", catalogoOpen);
   };
 
   const handleToggleClickInventario = (e) => {
-    e.preventDefault();
-    if (!isExpanded) toggleSidebar();
-    setInventarioOpen((prev) => !prev);
+    handleSubmenuToggle(e, "inventario", inventarioOpen);
   };
 
   const handleToggleClickConfig = (e) => {
-    e.preventDefault();
-    if (!isExpanded) toggleSidebar();
-    setConfigOpen((prev) => !prev);
+    handleSubmenuToggle(e, "configuracion", configOpen);
   };
 
   const handleToggleClickFinanzas = (e) => {
-    e.preventDefault();
-    if (!isExpanded) toggleSidebar();
-    setFinanzasOpen((prev) => !prev);
+    handleSubmenuToggle(e, "finanzas", finanzasOpen);
   };
 
   return (

@@ -413,6 +413,13 @@ const generarNumeroPedido = (telefono = "") => {
   return `${year}${month}${day}${hours}${minutes}${seconds}${ultimosTres}`;
 };
 
+const getLocalDateKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const normalizeWhatsappNumber = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
   if (!digits) return "";
@@ -1223,6 +1230,7 @@ const POS = () => {
       }
 
       const activeStatuses = ["pending", "confirmed", "preparing", "ready"];
+      const today = getLocalDateKey();
       const activeOrder = (data || []).find((order) => {
         const hasExplicitTableStatus =
           order.table_status !== null && order.table_status !== undefined;
@@ -1234,7 +1242,9 @@ const POS = () => {
           .toLowerCase();
 
         return (
-          (Boolean(order.is_reservation) && tableStatus === "reserva") ||
+          (Boolean(order.is_reservation) &&
+            tableStatus === "reserva" &&
+            (!order.fecha_reserva || order.fecha_reserva === today)) ||
           (!order.is_reservation &&
             (tableStatus === "ocupada" ||
               (!hasExplicitTableStatus &&
@@ -3270,7 +3280,7 @@ const POS = () => {
         >
           {/* Buscador Inteligente */}
           <div className="p-4 pb-0 sticky top-0 bg-background/90 backdrop-blur-md z-20">
-            <h2 className="text-xl font-black uppercase tracking-tighter mb-2 ml-2 text-on-surface">
+            <h2 className="text-base font-black uppercase tracking-tighter mb-2 ml-2 text-on-surface">
               Productos
             </h2>
             <div className="relative group">
@@ -3491,7 +3501,7 @@ const POS = () => {
         <div
           className={`${mobilePanel !== "datos" ? "hidden" : "block"} lg:block bg-background border-l border-outline p-3 w-full h-full overflow-y-auto custom-sidebar`}
         >
-          <h2 className="text-lg font-black uppercase tracking-tighter mb-3 ml-1 text-on-surface">
+          <h2 className="text-base font-black uppercase tracking-tighter mb-3 ml-1 text-on-surface">
             Método de Entrega
           </h2>
 
@@ -3741,7 +3751,7 @@ const POS = () => {
         <div className="bg-background border-l border-outline hidden lg:flex flex-col h-screen overflow-hidden">
           {/* Header: Título y Acción de Limpiar */}
           <div className="p-4 pb-2 flex justify-between items-center flex-shrink-0">
-            <h2 className="text-xl font-black uppercase tracking-tighter text-on-surface">
+            <h2 className="text-base font-black uppercase tracking-tighter text-on-surface">
               Resumen
             </h2>
             {cart.length > 0 && (
@@ -4000,7 +4010,7 @@ const POS = () => {
         >
           {/* Header: Título y Acción de Limpiar */}
           <div className="p-4 pb-2 flex justify-between items-center flex-shrink-0">
-            <h2 className="text-xl font-black uppercase tracking-tighter text-on-surface">
+            <h2 className="text-base font-black uppercase tracking-tighter text-on-surface">
               Resumen
             </h2>
             {cart.length > 0 && (
