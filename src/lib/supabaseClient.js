@@ -9,6 +9,21 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+export async function resolveCategoryIconUrl(iconPath) {
+  if (!iconPath) return null;
+  if (/^https?:\/\//i.test(iconPath)) return iconPath;
+
+  const bucket = iconPath.startsWith("sistema/categories generales iconos/")
+    ? "system"
+    : "business-assets";
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(iconPath, 86400);
+
+  if (error) throw error;
+  return data.signedUrl;
+}
+
 const getStorageObjectPath = (bucket, pathOrUrl) => {
   if (!pathOrUrl) return null;
   const publicObjectPrefix = `/storage/v1/object/public/${bucket}/`;
@@ -69,6 +84,10 @@ export async function removeStorageObjectIfUnused(bucket, pathOrUrl) {
         .select("id")
         .eq("icon_url", publicUrl)
         .limit(1),
+      supabase.from("categories").select("id").eq("icon_url", path).limit(1),
+    );
+  } else if (bucket === "system") {
+    referenceQueries.push(
       supabase.from("categories").select("id").eq("icon_url", path).limit(1),
     );
   } else if (bucket === "payment-supports") {

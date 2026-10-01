@@ -25,7 +25,7 @@ const TIENDA_INFO = {
   nombre: "",
   tipo: "",
   horario: "",
-  rating: 0,
+  rating: null,
   reviews: 0,
   tiempo: "",
   domicilio: "",
@@ -426,7 +426,7 @@ const Shop = () => {
         const businessInfoQuery = supabase
           .from("business_info")
           .select(
-            "rating,rating_count,delivery_time_min,delivery_time_max,delivery_fee,free_delivery_min_order,categoria,whatsapp_phone,address",
+            "rating,rating_count,delivery_time_min,delivery_time_max,min_delivery_fee,category_id,categoria,category:categories!business_info_category_id_fkey(name),whatsapp_phone,address",
           )
           .eq("business_id", data.id)
           .single();
@@ -467,14 +467,37 @@ const Shop = () => {
         ]);
 
         const info = businessInfoRes.error ? {} : businessInfoRes.data || {};
-        const rating = info?.rating ? parseFloat(info.rating) : 4.5;
-        const reviews = info?.rating_count || 0;
-        const deliveryMin = info?.delivery_time_min || 20;
-        const deliveryMax = info?.delivery_time_max || 35;
-        const deliveryFee = info?.delivery_fee
-          ? parseFloat(info.delivery_fee)
-          : 2500;
-        const categoria = info?.categoria || "Restaurante";
+        const reviews = Number(info?.rating_count ?? 0);
+        const ratingValue = info?.rating;
+        const ratingNumber =
+          ratingValue == null || ratingValue === ""
+            ? null
+            : Number(ratingValue);
+        const rating =
+          reviews > 0 && Number.isFinite(ratingNumber)
+            ? ratingNumber.toFixed(1)
+            : null;
+        const deliveryMinValue = info?.delivery_time_min;
+        const deliveryMaxValue = info?.delivery_time_max;
+        const deliveryMin =
+          deliveryMinValue == null || deliveryMinValue === ""
+            ? null
+            : Number(deliveryMinValue);
+        const deliveryMax =
+          deliveryMaxValue == null || deliveryMaxValue === ""
+            ? null
+            : Number(deliveryMaxValue);
+        const tiempo =
+          Number.isFinite(deliveryMin) && Number.isFinite(deliveryMax)
+            ? `${deliveryMin}–${deliveryMax} min`
+            : null;
+        const deliveryFeeValue = info?.min_delivery_fee;
+        const deliveryFee =
+          deliveryFeeValue == null || deliveryFeeValue === ""
+            ? null
+            : Number(deliveryFeeValue);
+        const categoria =
+          info?.category?.name || info?.categoria || "Restaurante";
         const direccion = info?.address || "";
 
         if (categoriasRes.error) {
@@ -721,11 +744,13 @@ const Shop = () => {
               : "Cerrado",
           rating,
           reviews,
-          tiempo: `${deliveryMin}–${deliveryMax} min`,
+          tiempo,
           domicilio:
-            deliveryFee === 0
-              ? "Gratis"
-              : `$${deliveryFee.toLocaleString("es-CO")}`,
+            deliveryFee == null || !Number.isFinite(deliveryFee)
+              ? null
+              : deliveryFee === 0
+                ? "Gratis"
+                : `$${deliveryFee.toLocaleString("es-CO")}`,
           direccion,
           descripcion: "",
           logo: data.logo_url || "/default.png",
@@ -1388,63 +1413,95 @@ const Shop = () => {
                 </span>
               </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  gap: "14px",
-                  marginBottom: "16px",
-                  justifyContent: "center",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                }}
-              >
+              {(tiendaData.rating ||
+                tiendaData.tiempo ||
+                tiendaData.domicilio) && (
                 <div
-                  style={{ display: "flex", alignItems: "center", gap: "5px" }}
+                  style={{
+                    display: "flex",
+                    gap: "14px",
+                    marginBottom: "16px",
+                    justifyContent: "center",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
                 >
-                  <Star size={13} fill="#FFD166" style={{ color: "#FFD166" }} />
-                  <span style={{ fontSize: "13px", fontWeight: 700 }}>
-                    {tiendaData.rating}
-                  </span>
-                  <span
-                    style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)" }}
-                  >
-                    ({tiendaData.reviews})
-                  </span>
-                </div>
+                  {tiendaData.rating && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "5px",
+                      }}
+                    >
+                      <Star
+                        size={13}
+                        fill="#FFD166"
+                        style={{ color: "#FFD166" }}
+                      />
+                      <span style={{ fontSize: "13px", fontWeight: 700 }}>
+                        {tiendaData.rating}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "12px",
+                          color: "rgba(255,255,255,0.4)",
+                        }}
+                      >
+                        ({tiendaData.reviews})
+                      </span>
+                    </div>
+                  )}
 
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: "5px" }}
-                >
-                  <Clock3
-                    size={13}
-                    style={{ color: "rgba(255,255,255,0.5)" }}
-                  />
-                  <span
-                    style={{
-                      fontSize: "13px",
-                      color: "rgba(255,255,255,0.7)",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {tiendaData.tiempo}
-                  </span>
-                </div>
+                  {tiendaData.tiempo && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "5px",
+                      }}
+                    >
+                      <Clock3
+                        size={13}
+                        style={{ color: "rgba(255,255,255,0.5)" }}
+                      />
+                      <span
+                        style={{
+                          fontSize: "13px",
+                          color: "rgba(255,255,255,0.7)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {tiendaData.tiempo}
+                      </span>
+                    </div>
+                  )}
 
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: "5px" }}
-                >
-                  <Bike size={13} style={{ color: "rgba(255,255,255,0.5)" }} />
-                  <span
-                    style={{
-                      fontSize: "13px",
-                      color: "rgba(255,255,255,0.7)",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {tiendaData.domicilio}
-                  </span>
+                  {tiendaData.domicilio && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "5px",
+                      }}
+                    >
+                      <Bike
+                        size={13}
+                        style={{ color: "rgba(255,255,255,0.5)" }}
+                      />
+                      <span
+                        style={{
+                          fontSize: "13px",
+                          color: "rgba(255,255,255,0.7)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {tiendaData.domicilio}
+                      </span>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
 
               {tiendaData.direccion && (
                 <div

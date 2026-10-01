@@ -25,7 +25,12 @@ import {
   ClockFading,
   Star,
 } from "lucide-react";
-import { supabase, resolveImageUrl } from "../../../src/lib/supabaseClient";
+import {
+  resolveCategoryIconUrl,
+  resolveImageUrl,
+  supabase,
+} from "../../../src/lib/supabaseClient";
+import FRASES_FALLBACK_MARKETPLACE from "../FrasesInicioMarketplace";
 
 // ─── Datos ──────────────────────────────────
 
@@ -53,29 +58,13 @@ const ICONOS_CATEGORIA = {
   Mariscos: Fish,
 };
 
-// Relaciona cada categoría con el/los tipos de cocina de las tiendas (campo "tipo")
-const CATEGORIA_TIPOS = {
-  Burgers: ["Americana"],
-  Café: ["Cafetería"],
-  Pizza: ["Italiana"],
-  Helados: ["Heladería"],
-  Sushi: ["Japonesa"],
-  Tacos: ["Mexicana"],
-  Postres: ["Postres", "Repostería"],
-  Saludable: ["Saludable", "Vegetariana", "Vegana"],
-};
-
-const FILTROS = ["Relevancia", "Más cerca", "Calificación", "Precio", "Rápido"];
-
-const FRASES = [
-  "¿Qué vas a pedir?",
-  "Antojos de hoy",
-  "¿Qué comeremos hoy?",
-  "¿Qué buscas?",
-  "¿Algo rico para ordenar?",
+const FILTROS = [
+  "Todas",
+  "Mejor calificadas",
+  "Entrega rápida",
+  "Menor domicilio",
+  "Con promociones",
 ];
-
-const FRASES_LOOP = [...FRASES, ...FRASES];
 
 const SkeletonBlock = ({ className = "", rounded = "rounded-2xl" }) => (
   <div
@@ -87,7 +76,7 @@ const Home = () => {
   const navigate = useNavigate();
 
   const [busqueda, setBusqueda] = useState("");
-  const [filtroActivo, setFiltroActivo] = useState("Relevancia");
+  const [filtroActivo, setFiltroActivo] = useState("Todas");
   const [categoriaActiva, setCategoriaActiva] = useState(null);
   const [textoIndex, setTextoIndex] = useState(0);
   const [animando, setAnimando] = useState(true);
@@ -97,6 +86,37 @@ const Home = () => {
   const [categorias, setCategorias] = useState([]);
   const [promociones, setPromociones] = useState([]);
   const [cargando, setCargando] = useState(true);
+  const [frasesInicio, setFrasesInicio] = useState(FRASES_FALLBACK_MARKETPLACE);
+  const frasesLoop = [...frasesInicio, ...frasesInicio];
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const obtenerFrases = async () => {
+      const { data, error } = await supabase
+        .from("frases")
+        .select("texto")
+        .eq("is_active", true)
+        .order("order_index", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      if (!isMounted) return;
+      if (error) {
+        console.error(
+          "No se pudieron cargar las frases del Marketplace:",
+          error,
+        );
+        return;
+      }
+
+      setFrasesInicio((data || []).map((frase) => frase.texto));
+    };
+
+    obtenerFrases();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Obtener negocios de Supabase
   useEffect(() => {
@@ -114,11 +134,13 @@ const Home = () => {
             is_active,
             created_at,
             business_info (
+              category_id,
+              categoria,
               rating,
               rating_count,
               delivery_time_min,
               delivery_time_max,
-              delivery_fee,
+              min_delivery_fee,
               free_delivery_min_order,
               categoria
             )
@@ -131,7 +153,8 @@ const Home = () => {
 
         const { data: categoriasData, error: categoriasError } = await supabase
           .from("categories")
-          .select("id,name,icon_url")
+          .select("id,name,icon_url,order_index")
+          .order("order_index", { ascending: true })
           .order("name", { ascending: true });
 
         if (categoriasError) throw categoriasError;
@@ -150,7 +173,23 @@ const Home = () => {
               ]),
           ).values(),
         );
-        setCategorias(categoriasUnicas);
+        const categoriasConIconos = await Promise.all(
+          categoriasUnicas.map(async (categoria) => {
+            try {
+              return {
+                ...categoria,
+                iconUrl: await resolveCategoryIconUrl(categoria.iconUrl),
+              };
+            } catch (iconError) {
+              console.warn(
+                "No se pudo resolver el icono de categoría:",
+                iconError,
+              );
+              return { ...categoria, iconUrl: null };
+            }
+          }),
+        );
+        setCategorias(categoriasConIconos);
 
         const { data: promocionesData, error: promocionesError } =
           await supabase
@@ -192,29 +231,65 @@ const Home = () => {
             ? negocio.business_info[0]
             : negocio.business_info || {};
 
-          const rating = info?.rating ? parseFloat(info.rating) : 4.5;
-          const reviews = info?.rating_count || 0;
-          const deliveryMin = info?.delivery_time_min || 20;
-          const deliveryMax = info?.delivery_time_max || 35;
-          const deliveryFee = info?.delivery_fee
-            ? parseFloat(info.delivery_fee)
-            : 2500;
+          const businessCategory =
+            (categoriasData || []).find(
+              (category) => category.id === info?.category_id,
+            ) ||
+            (categoriasData || []).find(
+              (category) =>
+                normalizarTexto(category.name) ===
+                normalizarTexto(info?.categoria),
+            );
+          const ratingValue = info?.rating;
+          const reviews = Number(info?.rating_count ?? 0);
+          const ratingNumber =
+            ratingValue == null || ratingValue === ""
+              ? null
+              : Number(ratingValue);
+          const rating =
+            reviews > 0 && Number.isFinite(ratingNumber)
+              ? ratingNumber.toFixed(1)
+              : null;
+          const deliveryMinValue = info?.delivery_time_min;
+          const deliveryMaxValue = info?.delivery_time_max;
+          const deliveryMin =
+            deliveryMinValue == null || deliveryMinValue === ""
+              ? null
+              : Number(deliveryMinValue);
+          const deliveryMax =
+            deliveryMaxValue == null || deliveryMaxValue === ""
+              ? null
+              : Number(deliveryMaxValue);
+          const tiempo =
+            Number.isFinite(deliveryMin) && Number.isFinite(deliveryMax)
+              ? `${deliveryMin}–${deliveryMax} min`
+              : null;
+          const deliveryFeeValue = info?.min_delivery_fee;
+          const deliveryFee =
+            deliveryFeeValue == null || deliveryFeeValue === ""
+              ? null
+              : Number(deliveryFeeValue);
 
           return {
             id: negocio.id,
             slug: negocio.slug,
             nombre: negocio.name,
-            tipo: info?.categoria || "Tienda",
+            tipo: businessCategory?.name || info?.categoria || "Tienda",
+            categoryId: businessCategory?.id || null,
             // guardamos la ruta original en `logo` y la resolveremos abajo
             logo: negocio.logo_url || null,
             cover: negocio.cover_url || null,
-            rating: rating.toFixed(1),
+            rating,
             reviews,
-            tiempo: `${deliveryMin}–${deliveryMax} min`,
+            tiempo,
+            deliveryMin: Number.isFinite(deliveryMin) ? deliveryMin : null,
+            deliveryFee: Number.isFinite(deliveryFee) ? deliveryFee : null,
             domicilio:
-              deliveryFee === 0
-                ? "Gratis"
-                : `$${deliveryFee.toLocaleString("es-CO")}`,
+              deliveryFee == null || !Number.isFinite(deliveryFee)
+                ? null
+                : deliveryFee === 0
+                  ? "Gratis"
+                  : `$${deliveryFee.toLocaleString("es-CO")}`,
             distancia: "—",
             badge: null,
           };
@@ -268,15 +343,19 @@ const Home = () => {
   }, []);
 
   useEffect(() => {
+    if (frasesInicio.length === 0) return undefined;
+
     const interval = setInterval(() => {
       setTextoIndex((prev) => prev + 1);
     }, 2500);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [frasesInicio.length]);
 
   useEffect(() => {
-    if (textoIndex === FRASES.length) {
+    if (!frasesInicio.length || textoIndex < frasesInicio.length) return;
+
+    if (textoIndex >= frasesInicio.length) {
       const timeout = setTimeout(() => {
         setAnimando(false);
         setTextoIndex(0);
@@ -290,7 +369,7 @@ const Home = () => {
 
       return () => clearTimeout(timeout);
     }
-  }, [textoIndex]);
+  }, [textoIndex, frasesInicio.length]);
 
   // Normaliza texto para comparar sin tildes/mayúsculas
   const normalizar = (str) =>
@@ -317,12 +396,7 @@ const Home = () => {
         );
       })();
 
-    const pasaCategoria =
-      !categoriaActiva ||
-      normalizar(t.tipo) === normalizar(categoriaActiva) ||
-      (CATEGORIA_TIPOS[categoriaActiva] || []).some(
-        (tipo) => normalizar(t.tipo) === normalizar(tipo),
-      );
+    const pasaCategoria = !categoriaActiva || t.categoryId === categoriaActiva;
 
     return pasaBusqueda && pasaCategoria;
   });
@@ -342,43 +416,42 @@ const Home = () => {
   const buscando = busqueda.trim().length > 0;
 
   const modoCategoria = categoriaActiva !== null && !buscando;
+  const categoriaActivaData = categorias.find(
+    (categoria) => categoria.id === categoriaActiva,
+  );
+
+  const slugsConPromocion = new Set(
+    promociones.map((promocion) => promocion.slug).filter(Boolean),
+  );
 
   // Aplicar ordenamiento según el filtro activo
   const tiendasOrdenadas = (() => {
-    const copia = [...tiendasFiltradas];
+    const tiendasDisponibles =
+      filtroActivo === "Con promociones"
+        ? tiendasFiltradas.filter((tienda) =>
+            slugsConPromocion.has(tienda.slug),
+          )
+        : tiendasFiltradas;
+    const copia = [...tiendasDisponibles];
 
     switch (filtroActivo) {
-      case "Relevancia":
-        return copia.sort(
-          (a, b) => parseFloat(b.rating) - parseFloat(a.rating),
-        );
-      case "Más cerca":
+      case "Mejor calificadas":
         return copia.sort((a, b) => {
-          const minA = parseInt(a.tiempo.split("–")[0]);
-          const minB = parseInt(b.tiempo.split("–")[0]);
-          return minA - minB;
+          const ratingA = a.rating == null ? -Infinity : Number(a.rating);
+          const ratingB = b.rating == null ? -Infinity : Number(b.rating);
+          return ratingB - ratingA || b.reviews - a.reviews;
         });
-      case "Calificación":
-        return copia.sort(
-          (a, b) => parseFloat(b.rating) - parseFloat(a.rating),
-        );
-      case "Precio":
+      case "Entrega rápida":
         return copia.sort((a, b) => {
-          const precioA =
-            a.domicilio === "Gratis"
-              ? 0
-              : parseFloat(a.domicilio.replace("$", "").replace(/\./g, ""));
-          const precioB =
-            b.domicilio === "Gratis"
-              ? 0
-              : parseFloat(b.domicilio.replace("$", "").replace(/\./g, ""));
-          return precioA - precioB;
+          const entregaA = a.deliveryMin ?? Infinity;
+          const entregaB = b.deliveryMin ?? Infinity;
+          return entregaA - entregaB;
         });
-      case "Rápido":
+      case "Menor domicilio":
         return copia.sort((a, b) => {
-          const minA = parseInt(a.tiempo.split("–")[0]);
-          const minB = parseInt(b.tiempo.split("–")[0]);
-          return minA - minB;
+          const tarifaA = a.deliveryFee ?? Infinity;
+          const tarifaB = b.deliveryFee ?? Infinity;
+          return tarifaA - tarifaB;
         });
       default:
         return copia;
@@ -386,10 +459,8 @@ const Home = () => {
   })();
 
   // Selecciona/deselecciona una categoría (toggle)
-  const toggleCategoria = (nombreCategoria) => {
-    setCategoriaActiva((prev) =>
-      prev === nombreCategoria ? null : nombreCategoria,
-    );
+  const toggleCategoria = (idCategoria) => {
+    setCategoriaActiva((prev) => (prev === idCategoria ? null : idCategoria));
   };
 
   const renderLoadingState = () => (
@@ -471,46 +542,53 @@ const Home = () => {
   return (
     <div className="max-w-6xl mx-auto bg-background min-h-screen">
       {/* HERO */}
-      <section className="px-4 pt-4 pb-4">
-        {!buscando && !modoCategoria && !verTodasPromos && (
-          <div className="h-[72px] overflow-hidden mb-5">
-            <div
-              className={
-                animando ? "transition-transform duration-700 ease-in-out" : ""
-              }
-              style={{
-                transform: `translateY(-${textoIndex * 72}px)`,
-              }}
-            >
-              {FRASES_LOOP.map((frase, index) => (
-                <h1
-                  key={index}
-                  className="h-[72px] flex items-center font-black leading-none tracking-tighter text-[clamp(2rem,8vw,2.75rem)] text-on-surface"
-                >
-                  <span className="text-primary">{frase}</span>
-                </h1>
-              ))}
+      <section className="px-3 pt-3 pb-3 sm:px-4 sm:pt-4 sm:pb-4">
+        {!buscando &&
+          !modoCategoria &&
+          !verTodasPromos &&
+          frasesInicio.length > 0 && (
+            <div className="mb-4 h-16 overflow-hidden sm:mb-5">
+              <div
+                className={
+                  animando
+                    ? "transition-transform duration-700 ease-in-out"
+                    : ""
+                }
+                style={{
+                  transform: `translateY(-${textoIndex * 64}px)`,
+                }}
+              >
+                {frasesLoop.map((frase, index) => (
+                  <h1
+                    key={index}
+                    className="flex h-16 min-w-0 w-full items-center font-black leading-none tracking-normal text-on-surface text-3xl sm:text-4xl"
+                  >
+                    <span className="block w-full truncate text-primary">
+                      {frase}
+                    </span>
+                  </h1>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {/* BUSCADOR SIEMPRE VISIBLE */}
         {!verTodasPromos && !modoCategoria && (
-          <div className="flex items-center rounded-3xl bg-surface px-4 h-10">
-            <Search size={18} className="opacity-50" />
+          <div className="flex h-12 items-center rounded-2xl border border-white/5 bg-surface/80 px-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)] sm:h-12 sm:rounded-3xl sm:px-4">
+            <Search size={18} className="opacity-60" />
 
             <input
               type="text"
               placeholder="Buscar..."
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              className="flex-1 bg-transparent px-3 text-base outline-none text-on-surface caret-primary-container"
+              className="flex-1 bg-transparent px-3 text-sm outline-none text-on-surface caret-primary-container sm:text-base"
             />
 
             {busqueda.length > 0 && (
               <button
                 onClick={() => setBusqueda("")}
-                className="p-1 rounded-full hover:bg-black/5 transition-colors"
+                className="rounded-full p-1 transition-colors hover:bg-white/5"
               >
                 <X size={16} className="opacity-50" />
               </button>
@@ -525,7 +603,7 @@ const Home = () => {
           <div className="flex items-center justify-between rounded-3xl border border-primary-container/20 bg-primary-container/10 px-5 py-4 transition-all duration-300">
             <div>
               <h2 className="text-2xl font-black text-on-surface">
-                {categoriaActiva}
+                {categoriaActivaData?.n}
               </h2>
             </div>
 
@@ -541,33 +619,44 @@ const Home = () => {
 
       {/* CATEGORÍAS (se ocultan mientras se busca) */}
       {!buscando && !verTodasPromos && (
-        <section className="px-2 mb-4">
-          <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+        <section className="px-2 pb-3 sm:mb-4 sm:pb-2">
+          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar sm:gap-3">
             {categorias.map((cat) => {
               const Icon = ICONOS_CATEGORIA[cat.n] || Utensils;
-              const activa = categoriaActiva === cat.n;
+              const activa = categoriaActiva === cat.id;
               return (
                 <button
-                  key={cat.n}
-                  onClick={() => toggleCategoria(cat.n)}
-                  className={`flex-shrink-0 flex flex-col items-center gap-2 px-4 py-3 rounded-2xl min-w-[72px] transition-all ${
-                    activa
-                      ? "bg-primary-container text-white"
-                      : "bg-surface/60 text-on-surface-variant"
-                  }`}
+                  key={cat.id}
+                  onClick={() => toggleCategoria(cat.id)}
+                  aria-label={`Filtrar por ${cat.n}`}
+                  title={cat.n}
+                  className="group flex h-[92px] w-[88px] flex-shrink-0 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 py-2 transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary sm:h-[100px] sm:w-[96px]"
                 >
                   {cat.iconUrl ? (
                     <img
                       src={cat.iconUrl}
                       alt=""
-                      className="h-[22px] w-[22px] object-contain"
+                      className={`h-12 w-12 flex-shrink-0 object-contain transition-all sm:h-14 sm:w-14 ${
+                        activa
+                          ? "scale-110 drop-shadow-[0_0_14px_rgba(168,85,247,0.7)]"
+                          : "opacity-80 group-hover:scale-105 group-hover:opacity-100"
+                      }`}
                     />
                   ) : (
-                    <Icon size={22} />
+                    <Icon
+                      size={40}
+                      className={`flex-shrink-0 transition-all sm:h-11 sm:w-11 ${
+                        activa
+                          ? "scale-110 text-primary drop-shadow-[0_0_12px_rgba(168,85,247,0.7)]"
+                          : "text-on-surface-variant group-hover:scale-105 group-hover:text-on-surface"
+                      }`}
+                    />
                   )}
                   <span
-                    className={`text-[10px] font-bold uppercase tracking-wide ${
-                      activa ? "text-white" : "text-on-surface-variant"
+                    className={`w-full truncate text-center text-[9px] font-bold uppercase leading-tight tracking-[0.08em] transition-colors sm:text-[10px] ${
+                      activa
+                        ? "text-primary"
+                        : "text-on-surface-variant group-hover:text-on-surface"
                     }`}
                   >
                     {cat.n}
@@ -580,57 +669,60 @@ const Home = () => {
       )}
 
       {/* PROMOCIONES (se ocultan mientras se busca) */}
-      {!buscando && !modoCategoria && !verTodasPromos && (
-        <div className="flex gap-3 overflow-x-auto px-2 no-scrollbar pb-4">
-          {promocionesFiltradas.map((promo) => {
-            return (
-              <Link
-                key={promo.id}
-                to={`/marketplace/tienda/${promo.slug}`}
-                className="relative flex-shrink-0 w-[140px] sm:w-[160px] md:w-[190px] h-[105px] rounded-3xl bg-primary-container/80 overflow-hidden"
-              >
-                {promo.coverUrl && (
-                  <img
-                    src={promo.coverUrl}
-                    alt=""
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                )}
-                <div className="absolute inset-0 bg-black/45" />
-                <div className="absolute top-3 left-3 px-2 py-1 rounded-full text-[8px] font-bold bg-white/10 text-white/70">
-                  {promo.tag}
-                </div>
-                <div className="absolute inset-x-3 bottom-3 min-w-0 text-white">
-                  <p className="line-clamp-1 font-black text-base">
-                    {promo.oferta}
-                  </p>
-                  <p className="line-clamp-1 text-[11px] opacity-80">
-                    {promo.nombre}
-                  </p>
-                </div>
-              </Link>
-            );
-          })}
+      {!buscando &&
+        !modoCategoria &&
+        !verTodasPromos &&
+        promocionesFiltradas.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto px-2 pb-4 no-scrollbar sm:gap-3">
+            {promocionesFiltradas.map((promo) => {
+              return (
+                <Link
+                  key={promo.id}
+                  to={`/marketplace/tienda/${promo.slug}`}
+                  className="relative h-[96px] w-[130px] flex-shrink-0 overflow-hidden rounded-3xl bg-primary-container/80 sm:h-[105px] sm:w-[150px] md:w-[190px]"
+                >
+                  {promo.coverUrl && (
+                    <img
+                      src={promo.coverUrl}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  )}
+                  <div className="absolute inset-0 bg-black/45" />
+                  <div className="absolute left-3 top-3 rounded-full bg-white/10 px-2 py-1 text-[8px] font-bold text-white/70">
+                    {promo.tag}
+                  </div>
+                  <div className="absolute inset-x-3 bottom-3 min-w-0 text-white">
+                    <p className="line-clamp-1 text-sm font-black sm:text-base">
+                      {promo.oferta}
+                    </p>
+                    <p className="line-clamp-1 text-[10px] opacity-80 sm:text-[11px]">
+                      {promo.nombre}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
 
-          <button
-            onClick={() => setVerTodasPromos(true)}
-            className="flex-shrink-0 w-[110px] sm:w-[120px] h-[105px] rounded-3xl bg-surface flex flex-col items-center justify-center gap-2 hover:border-primary-container hover:text-primary-container transition-all"
-          >
-            <ArrowRight size={24} />
-            <span className="text-xs font-bold">Ver más</span>
-          </button>
-        </div>
-      )}
+            <button
+              onClick={() => setVerTodasPromos(true)}
+              className="flex h-[96px] w-[90px] flex-shrink-0 flex-col items-center justify-center gap-2 rounded-3xl bg-surface transition-all hover:border-primary-container hover:text-primary-container sm:h-[105px] sm:w-[110px]"
+            >
+              <ArrowRight size={22} />
+              <span className="text-[10px] font-bold sm:text-xs">Ver más</span>
+            </button>
+          </div>
+        )}
 
       {/* FILTROS (STICKY SE COMPORTA COMO PARTE DEL HEADER, se oculta mientras se busca) */}
       {!buscando && !modoCategoria && !verTodasPromos && (
-        <section className="sticky top-14 sm:top-[54px] bg-background z-40 px-2 pt-2">
-          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar mb-2">
+        <section className="sticky top-14 z-40 bg-background px-2 pt-2 sm:top-[54px]">
+          <div className="mb-2 flex gap-1.5 overflow-x-auto pb-2 no-scrollbar sm:gap-2">
             {FILTROS.map((f) => (
               <button
                 key={f}
                 onClick={() => setFiltroActivo(f)}
-                className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold transition-all ${
+                className={`flex-shrink-0 rounded-full px-3 py-2 text-[10px] font-bold transition-all sm:px-4 sm:py-2 sm:text-xs ${
                   filtroActivo === f
                     ? "bg-primary-container text-white"
                     : "bg-surface text-on-surface-variant/60"
@@ -734,8 +826,8 @@ const Home = () => {
               <p className="text-lg font-black text-on-surface">
                 {buscando
                   ? "No encontramos esa tienda"
-                  : categoriaActiva
-                    ? `Aún no hay tiendas de ${categoriaActiva}`
+                  : categoriaActivaData
+                    ? `Aún no hay tiendas de ${categoriaActivaData.n}`
                     : "Aún no hay tiendas disponibles"}
               </p>
               <p className="mt-2 max-w-xs text-sm leading-6">
@@ -802,29 +894,37 @@ const Home = () => {
                       {t.tipo}
                     </p>
 
-                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                      <div className="px-2 py-0.5 rounded-md bg-background border border-outline/10 text-[10px] font-bold text-on-surface flex items-center gap-1">
-                        <span className="text-yellow-500">★</span> {t.rating}
+                    {(t.rating || t.tiempo) && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {t.rating && (
+                          <div className="flex items-center gap-1 rounded-md border border-outline/10 bg-background px-2 py-0.5 text-[10px] font-bold text-on-surface">
+                            <span className="text-yellow-500">★</span>{" "}
+                            {t.rating}
+                          </div>
+                        )}
+                        {t.tiempo && (
+                          <div className="rounded-md border border-outline/10 bg-background px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
+                            {t.tiempo}
+                          </div>
+                        )}
                       </div>
-                      <div className="px-2 py-0.5 rounded-md bg-background border border-outline/10 text-[10px] font-medium text-on-surface-variant">
-                        {t.tiempo}
-                      </div>
-                    </div>
+                    )}
 
-                    <div className="mt-1.5 text-[11px] font-bold flex items-center gap-1">
-                      <span
-                        className={
-                          t.domicilio === "Gratis"
-                            ? "text-success"
-                            : "text-on-surface-variant"
-                        }
-                      >
-                        {" "}
-                        {t.domicilio === "Gratis"
-                          ? "Envío Gratis"
-                          : t.domicilio}
-                      </span>
-                    </div>
+                    {t.domicilio && (
+                      <div className="mt-1.5 flex items-center gap-1 text-[11px] font-bold">
+                        <span
+                          className={
+                            t.domicilio === "Gratis"
+                              ? "text-success"
+                              : "text-on-surface-variant"
+                          }
+                        >
+                          {t.domicilio === "Gratis"
+                            ? "Envío Gratis"
+                            : t.domicilio}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <ArrowRight
@@ -835,30 +935,30 @@ const Home = () => {
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-8">
+            <div className="grid grid-cols-1 gap-4 pb-8 sm:grid-cols-2 lg:grid-cols-3">
               {tiendasOrdenadas.map((t) => (
                 <Link
                   key={t.slug}
                   to={`/marketplace/tienda/${t.slug}`}
-                  className="group relative flex flex-col rounded-3xl bg-surface  p-3 transition-all duration-300 hover:shadow-lg hover:translate-y-0.5 "
+                  className="group relative flex flex-row items-center gap-3 rounded-3xl bg-surface p-2.5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_10px_30px_rgba(0,0,0,0.18)] sm:flex-col sm:items-stretch sm:gap-0 sm:p-3"
                 >
                   {/* Contenedor de portada con logo superpuesto */}
-                  <div className="relative flex items-center justify-center h-20 sm:h-24 rounded-2xl bg-background border border-outline/10 mb-3 overflow-hidden">
+                  <div className="relative h-24 w-28 flex-shrink-0 overflow-hidden rounded-2xl border border-outline/10 bg-background sm:mb-3 sm:h-28 sm:w-full">
                     <img
                       src={t.cover || t.logo}
                       alt={t.nombre}
-                      className="w-full h-full object-cover"
+                      className="h-full w-full object-cover"
                       onError={(e) => {
                         e.currentTarget.onerror = null;
                         e.currentTarget.src = t.logo || "/default.png";
                       }}
                     />
 
-                    <div className="absolute bottom-2 right-2 w-8 h-8 overflow-hidden shadow-md">
+                    <div className="absolute bottom-2 right-2 h-8 w-8 overflow-hidden shadow-md">
                       <img
                         src={t.logo || t.cover}
                         alt={t.nombre}
-                        className="w-full h-full object-cover rounded-[9px]"
+                        className="h-full w-full rounded-[9px] object-cover"
                         onError={(e) => {
                           e.currentTarget.onerror = null;
                           e.currentTarget.src = "/default.png";
@@ -875,33 +975,45 @@ const Home = () => {
                   </div>
 
                   {/* Información de la tienda */}
-                  <div className="flex-1">
-                    <h4 className="font-extrabold text-base text-on-surface truncate pr-2">
+                  <div className="min-w-0 flex-1 sm:flex-auto">
+                    <h4 className="truncate pr-2 text-base font-extrabold text-on-surface">
                       {t.nombre}
                     </h4>
-                    <p className="text-[11px] text-on-surface-variant font-medium mt-0.5">
+                    <p className="mt-0.5 text-[11px] font-medium text-on-surface-variant">
                       {t.tipo}
                     </p>
-                  </div>
-
-                  {/* Métricas: Compactas estilo Didi Food */}
-                  <div className="mt-2 flex items-center gap-1 text-[8px] sm:text-[9px] text-white/50">
-                    <div className="flex items-center gap-0.5">
-                      <Star size={10} />
-                      <span>{t.rating}</span>
-                    </div>
-                    <span className="text-white/30">•</span>
-                    <div className="flex items-center gap-0.5">
-                      <ClockFading size={10} />
-                      <span>{t.tiempo}</span>
-                    </div>
-                    <span className="text-white/30">•</span>
-                    <div className="flex items-center gap-0.5">
-                      <Motorbike size={10} />
-                      <span>
-                        {t.domicilio === "Gratis" ? "Gratis" : t.domicilio}
-                      </span>
-                    </div>
+                    {(t.rating || t.tiempo || t.domicilio) && (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[8px] text-white/50 sm:text-[9px]">
+                        {t.rating && (
+                          <div className="flex items-center gap-0.5">
+                            <Star size={10} />
+                            <span>{t.rating}</span>
+                          </div>
+                        )}
+                        {t.rating && t.tiempo && (
+                          <span className="text-white/30">•</span>
+                        )}
+                        {t.tiempo && (
+                          <div className="flex items-center gap-0.5">
+                            <ClockFading size={10} />
+                            <span>{t.tiempo}</span>
+                          </div>
+                        )}
+                        {(t.rating || t.tiempo) && t.domicilio && (
+                          <span className="text-white/30">•</span>
+                        )}
+                        {t.domicilio && (
+                          <div className="flex items-center gap-0.5">
+                            <Motorbike size={10} />
+                            <span>
+                              {t.domicilio === "Gratis"
+                                ? "Gratis"
+                                : t.domicilio}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </Link>
               ))}

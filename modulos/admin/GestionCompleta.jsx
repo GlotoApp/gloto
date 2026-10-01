@@ -8,20 +8,12 @@
 // solo hay que reemplazar las funciones `cargarTiendas` / `guardarTiendas`
 // por llamadas a tu API — el resto del componente no debería cambiar.
 
-import React, { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   ChevronLeft,
-  Store,
   Search,
   Plus,
-  Pencil,
-  Trash2,
   X,
-  Power,
-  Building2,
-  CheckCircle2,
-  XCircle,
-  Phone,
   Tag,
   CreditCard,
   Rocket,
@@ -31,11 +23,12 @@ import {
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
-import CrearTiendaWizard from "./CrearTiendaWizard";
-import SuperAdminSidebar from "./SuperAdminSidebar";
-import SuperAdminStatCard from "./SuperAdminStatCard";
-import SuperAdminToggle from "./SuperAdminToggle";
-import SuperAdminStorageCleanup from "./SuperAdminStorageCleanup";
+import CrearTiendaWizard from "./CrearTienda";
+import SuperAdminSidebar from "./MenuLateral";
+import SuperAdminToggle from "./ControlEstado";
+import SuperAdminStorageCleanup from "./LimpiarArchivos";
+import SuperAdminTiendasPanel from "./Tiendas";
+import SuperAdminDashboardOverview from "./Resumen";
 
 const STORAGE_KEY = "superadmin_tiendas";
 
@@ -1209,35 +1202,11 @@ const SuperAdmin = ({ onVolver }) => {
         </div>
 
         <div style={{ padding: "20px", maxWidth: "920px", margin: "0 auto" }}>
-          {/* Stats */}
-          <div
-            id="resumen"
-            style={{
-              display: "flex",
-              gap: "10px",
-              marginBottom: "20px",
-              scrollMarginTop: "24px",
-            }}
-          >
-            <SuperAdminStatCard
-              icon={Building2}
-              label="Total"
-              value={tiendas.length}
-              color="#a78bfa"
-            />
-            <SuperAdminStatCard
-              icon={CheckCircle2}
-              label="Activas"
-              value={totalActivas}
-              color="#34d399"
-            />
-            <SuperAdminStatCard
-              icon={XCircle}
-              label="Inactivas"
-              value={totalInactivas}
-              color="#f87171"
-            />
-          </div>
+          <SuperAdminDashboardOverview
+            total={tiendas.length}
+            active={totalActivas}
+            inactive={totalInactivas}
+          />
 
           {mensajeEstado.texto && (
             <div
@@ -2305,213 +2274,14 @@ const SuperAdmin = ({ onVolver }) => {
             )}
           </section>
 
-          {/* Lista de tiendas */}
-          <div id="tiendas" style={{ scrollMarginTop: "24px" }}>
-            {tiendasFiltradas.length === 0 ? (
-              <div
-                style={{
-                  textAlign: "center",
-                  padding: "56px 24px",
-                  color: "rgba(255,255,255,0.4)",
-                }}
-              >
-                <Store
-                  size={32}
-                  style={{ marginBottom: "10px", opacity: 0.5 }}
-                />
-                <p style={{ fontSize: "13px", margin: 0 }}>
-                  {tiendas.length === 0
-                    ? "Aún no has creado ninguna tienda."
-                    : "No hay tiendas que coincidan con ese filtro."}
-                </p>
-              </div>
-            ) : (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                }}
-              >
-                {tiendasFiltradas.map((tienda) => (
-                  <div
-                    key={tienda.id}
-                    style={{
-                      background: "#131313",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      borderRadius: "16px",
-                      padding: "16px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "14px",
-                      opacity: tienda.activo ? 1 : 0.55,
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: "44px",
-                        height: "44px",
-                        borderRadius: "12px",
-                        background: "rgba(124,58,237,0.15)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <Store size={20} color="#a78bfa" />
-                    </div>
-
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          marginBottom: "4px",
-                        }}
-                      >
-                        <h3
-                          style={{
-                            fontSize: "14px",
-                            fontWeight: 800,
-                            margin: 0,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {tienda.nombre}
-                        </h3>
-                        <span
-                          style={{
-                            fontSize: "10px",
-                            fontWeight: 700,
-                            color: tienda.activo ? "#34d399" : "#f87171",
-                            background: tienda.activo
-                              ? "rgba(52,211,153,0.12)"
-                              : "rgba(248,113,113,0.12)",
-                            padding: "2px 8px",
-                            borderRadius: "100px",
-                            flexShrink: 0,
-                          }}
-                        >
-                          {tienda.activo ? "Activa" : "Inactiva"}
-                        </span>
-                        {(() => {
-                          const plan = planPorId(tienda.plan);
-                          const PlanIcon = plan.icon;
-                          return (
-                            <span
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "3px",
-                                fontSize: "10px",
-                                fontWeight: 700,
-                                color: plan.color,
-                                background: `${plan.color}1f`,
-                                padding: "2px 8px",
-                                borderRadius: "100px",
-                                flexShrink: 0,
-                              }}
-                            >
-                              <PlanIcon size={10} />
-                              {plan.name}
-                            </span>
-                          );
-                        })()}
-                      </div>
-                      <p
-                        style={{
-                          fontSize: "11.5px",
-                          color: "rgba(255,255,255,0.45)",
-                          margin: 0,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <span
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "4px",
-                          }}
-                        >
-                          <Tag size={11} /> {tienda.categoria}
-                        </span>
-                        <span>/{tienda.slug}</span>
-                        {tienda.telefono && (
-                          <span
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "4px",
-                            }}
-                          >
-                            <Phone size={11} /> {tienda.telefono}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                      }}
-                    >
-                      <SuperAdminToggle
-                        activo={tienda.activo}
-                        onClick={() => toggleActivo(tienda.id)}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => abrirEditar(tienda)}
-                        style={{
-                          width: "34px",
-                          height: "34px",
-                          borderRadius: "10px",
-                          background: "rgba(255,255,255,0.06)",
-                          border: "none",
-                          color: "#fff",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                        aria-label="Editar tienda"
-                      >
-                        <Pencil size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setTiendaAEliminar(tienda)}
-                        style={{
-                          width: "34px",
-                          height: "34px",
-                          borderRadius: "10px",
-                          background: "rgba(248,113,113,0.1)",
-                          border: "none",
-                          color: "#f87171",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                        aria-label="Eliminar tienda"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <SuperAdminTiendasPanel
+            tiendas={tiendasFiltradas}
+            totalTiendas={tiendas.length}
+            onToggleActivo={toggleActivo}
+            onEdit={abrirEditar}
+            onDelete={setTiendaAEliminar}
+            getPlan={planPorId}
+          />
         </div>
 
         {/* Modal crear/editar tienda */}

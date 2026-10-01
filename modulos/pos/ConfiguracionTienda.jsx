@@ -82,7 +82,7 @@ const ConfiguracionTienda = () => {
         supabase
           .from("business_info")
           .select(
-            "address,whatsapp_phone,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,categoria,latitude,longitude",
+            "address,whatsapp_phone,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,category_id,categoria,latitude,longitude",
           )
           .eq("business_id", profile.business_id)
           .maybeSingle(),
@@ -102,7 +102,11 @@ const ConfiguracionTienda = () => {
       setData((current) => ({
         ...current,
         name: business?.name || "",
-        category: info?.categoria || "",
+        category:
+          info?.category_id ||
+          categoryData?.find((category) => category.name === info?.categoria)
+            ?.id ||
+          "",
         address: info?.address || "",
         whatsapp_phone: info?.whatsapp_phone || "",
         delivery_time_min: info?.delivery_time_min ?? "",
@@ -282,6 +286,9 @@ const ConfiguracionTienda = () => {
 
     setSaving(true);
     setMessage("");
+    const selectedCategory = categories.find(
+      (category) => category.id === data.category,
+    );
     const [{ error: businessError }, { error: infoError }] = await Promise.all([
       supabase
         .from("businesses")
@@ -297,7 +304,8 @@ const ConfiguracionTienda = () => {
           delivery_fee_per_km: parseThousands(data.delivery_fee_per_km),
           min_delivery_fee: parseThousands(data.min_delivery_fee),
           max_delivery_fee: parseThousands(data.max_delivery_fee),
-          categoria: data.category.trim(),
+          category_id: selectedCategory?.id || null,
+          categoria: selectedCategory?.name || "",
           latitude: data.latitude ? Number(data.latitude) : null,
           longitude: data.longitude ? Number(data.longitude) : null,
         },
@@ -474,15 +482,11 @@ const ConfiguracionTienda = () => {
                 <select
                   value={data.category}
                   onChange={(e) => update("category", e.target.value)}
-                  className={`w-full rounded-xl border bg-neutral-950/60 px-4 py-3 text-sm text-white outline-none transition ${saveAttempted && !data.category.trim() ? "border-red-500 focus:border-red-400" : "border-white/[0.1] focus:border-violet-500/60"}`}
+                  className={`w-full rounded-xl border bg-neutral-950/60 px-4 py-3 text-sm text-white outline-none transition ${saveAttempted && !data.category ? "border-red-500 focus:border-red-400" : "border-white/[0.1] focus:border-violet-500/60"}`}
                 >
                   <option value="">Selecciona una categoría</option>
-                  {data.category &&
-                    !categories.some(
-                      (category) => category.name === data.category,
-                    ) && <option value={data.category}>{data.category}</option>}
                   {categories.map((category) => (
-                    <option key={category.id} value={category.name}>
+                    <option key={category.id} value={category.id}>
                       {category.name}
                     </option>
                   ))}

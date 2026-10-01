@@ -11,7 +11,7 @@ import { Loading } from "../modulos/pos/Loading";
 import SinConexion from "../modulos/pos/SinConexion";
 import Upss from "../modulos/pos/Upss";
 import { useAuth } from "./components/AuthContext";
-import LoginSuperAdmin from "../modulos/admin/LoginSuperAdmin";
+import Acceso from "../modulos/admin/Acceso";
 
 // Lazy imports
 const POS = lazy(() => import("../modulos/pos/POS"));
@@ -41,7 +41,14 @@ const MiPlan = lazy(() => import("../modulos/pos/MiPlan"));
 const HistorialPagos = lazy(() => import("../modulos/pos/HistorialPagos"));
 const Notificaciones = lazy(() => import("../modulos/pos/Notificaciones"));
 const Configuracion = lazy(() => import("../modulos/pos/Configuracion"));
-const SuperAdmin = lazy(() => import("../modulos/admin/SuperAdmin"));
+const GestionCompleta = lazy(() => import("../modulos/admin/GestionCompleta"));
+const EstructuraAdmin = lazy(() => import("../modulos/admin/Estructura"));
+const Resumen = lazy(() => import("../modulos/admin/Resumen"));
+const Tiendas = lazy(() => import("../modulos/admin/Tiendas"));
+const TiendaArchivo = lazy(() => import("../modulos/admin/TiendaArchivo"));
+const Mercado = lazy(() => import("../modulos/admin/Mercado"));
+const Finanzas = lazy(() => import("../modulos/admin/Finanzas"));
+const Sistema = lazy(() => import("../modulos/admin/Sistema"));
 const Login = lazy(() => import("../modulos/pos/Login"));
 
 // Componentes protectores
@@ -87,7 +94,7 @@ function App() {
         <Routes>
           {/* Rutas Públicas */}
           <Route path="/login" element={<Login />} />
-          <Route path="/login-superadmin" element={<LoginSuperAdmin />} />
+          <Route path="/login-superadmin" element={<Acceso />} />
           <Route path="/marketplace/*" element={<Marketplace />} />
           <Route path="/" element={<Navigate to="/marketplace" replace />} />
           <Route path="*" element={<Upss />} />
@@ -97,7 +104,48 @@ function App() {
             path="/superadmin"
             element={
               <RequireAdmin>
-                <SuperAdmin />
+                <EstructuraAdmin />
+              </RequireAdmin>
+            }
+          >
+            <Route index element={<Navigate to="resumen" replace />} />
+            <Route path="resumen" element={<Resumen />} />
+            <Route path="tiendas" element={<Tiendas />} />
+            <Route path="tiendas/:id" element={<TiendaArchivo />} />
+            <Route path="marketplace" element={<Mercado />} />
+            <Route
+              path="finanzas"
+              element={<Navigate to="finanzas/suscripciones" replace />}
+            />
+            <Route
+              path="finanzas/suscripciones"
+              element={
+                <Finanzas
+                  initialTypeFilter="subscription"
+                  title="Suscripciones"
+                  subtitle="Pagos y renovaciones de suscripciones de todas las tiendas."
+                  badge="Suscripciones"
+                />
+              }
+            />
+            <Route
+              path="finanzas/promociones"
+              element={
+                <Finanzas
+                  initialTypeFilter="promotion"
+                  title="Promociones"
+                  subtitle="Pagos y aprobaciones de promociones de todas las tiendas."
+                  badge="Promociones"
+                />
+              }
+            />
+            <Route path="sistema" element={<Sistema />} />
+          </Route>
+          <Route
+            path="/superadmin-actual"
+            element={
+              <RequireAdmin>
+                <GestionCompleta />
               </RequireAdmin>
             }
           />
