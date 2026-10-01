@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Banknote,
+  Ban,
   Camera,
   Check,
   Clock3,
@@ -13,6 +14,7 @@ import {
   PencilLine,
   Plus,
   Store,
+  ShieldCheck,
   Trash2,
   X,
 } from "lucide-react";
@@ -123,6 +125,10 @@ const TiendaArchivo = () => {
   const [editMode, setEditMode] = useState(false);
   const [locationEditMode, setLocationEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [suspensionDialogOpen, setSuspensionDialogOpen] = useState(false);
+  const [suspensionReason, setSuspensionReason] = useState("");
+  const [suspensionError, setSuspensionError] = useState("");
+  const [suspensionSaving, setSuspensionSaving] = useState(false);
   const [logoUrl, setLogoUrl] = useState("");
   const [coverUrl, setCoverUrl] = useState("");
   const logoInputRef = useRef(null);
@@ -263,7 +269,9 @@ const TiendaArchivo = () => {
       ] = await Promise.all([
         supabase
           .from("businesses")
-          .select("id,name,slug,logo_url,cover_url,is_active,created_at")
+          .select(
+            "id,name,slug,logo_url,cover_url,is_active,admin_suspended,admin_suspension_reason,admin_suspended_at,created_at",
+          )
           .eq("id", id)
           .single(),
         supabase
@@ -1031,6 +1039,52 @@ const TiendaArchivo = () => {
     }
   };
 
+  const handleSuspendBusiness = async (event) => {
+    event.preventDefault();
+    if (!id || !suspensionReason.trim()) {
+      setSuspensionError("Escribe el motivo de la suspensión.");
+      return;
+    }
+
+    setSuspensionSaving(true);
+    setSuspensionError("");
+    try {
+      const { error } = await supabase.rpc("admin_suspend_business", {
+        p_business_id: id,
+        p_reason: suspensionReason.trim(),
+      });
+      if (error) throw error;
+
+      setSuspensionDialogOpen(false);
+      setSuspensionReason("");
+      await loadStoreData();
+    } catch (error) {
+      console.error("No se pudo suspender la tienda:", error);
+      setSuspensionError(error.message || "No se pudo suspender la tienda.");
+    } finally {
+      setSuspensionSaving(false);
+    }
+  };
+
+  const handleReactivateBusiness = async () => {
+    if (!id || !window.confirm(`¿Reactivar la tienda ${store?.name}?`)) return;
+
+    setSuspensionSaving(true);
+    try {
+      const { error } = await supabase.rpc("admin_reactivate_business", {
+        p_business_id: id,
+      });
+      if (error) throw error;
+
+      await loadStoreData();
+    } catch (error) {
+      console.error("No se pudo reactivar la tienda:", error);
+      window.alert(error.message || "No se pudo reactivar la tienda.");
+    } finally {
+      setSuspensionSaving(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 px-4 py-5 text-white md:px-8 md:py-8">
       <div className="mx-auto max-w-7xl">
@@ -1044,7 +1098,33 @@ const TiendaArchivo = () => {
             Volver a tiendas
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {store &&
+              !loading &&
+              (store.admin_suspended ? (
+                <button
+                  type="button"
+                  onClick={handleReactivateBusiness}
+                  disabled={suspensionSaving}
+                  className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <ShieldCheck size={16} />
+                  {suspensionSaving ? "Procesando..." : "Reactivar tienda"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSuspensionError("");
+                    setSuspensionDialogOpen(true);
+                  }}
+                  disabled={suspensionSaving}
+                  className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500/20 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <Ban size={16} />
+                  Suspender tienda
+                </button>
+              ))}
             {!editMode ? (
               <button
                 type="button"
@@ -1830,10 +1910,14 @@ const TiendaArchivo = () => {
             <div className="flex items-center justify-between rounded-xl border border-white/10 bg-neutral-950/60 p-3">
               <div>
                 <p className="text-sm font-medium text-white">
-                  Estado de la tienda
+                  Estado normal (is_active)
                 </p>
                 <p className="text-xs text-neutral-400">
-                  Activa o inactiva para clientes.
+                  {formData.is_active
+                    ? "Activa para clientes."
+                    : "Inactiva para clientes."}
+                  {store.admin_suspended &&
+                    " La suspensión administrativa es independiente."}
                 </p>
               </div>
 
@@ -1845,7 +1929,8 @@ const TiendaArchivo = () => {
                 className={`relative inline-flex h-7 w-14 items-center rounded-full transition ${
                   formData.is_active ? "bg-emerald-500" : "bg-neutral-700"
                 }`}
-                aria-label="Cambiar estado de la tienda"
+                aria-label="Cambiar estado normal de la tienda"
+                aria-pressed={formData.is_active}
               >
                 <span
                   className={`inline-block h-5 w-5 rounded-full bg-white transition ${
@@ -1854,11 +1939,82 @@ const TiendaArchivo = () => {
                 />
               </button>
             </div>
+            {store.admin_suspended && store.admin_suspension_reason && (
+              <p className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-200">
+                Suspendida por superadmin. Motivo:{" "}
+                {store.admin_suspension_reason}
+              </p>
+            )}
           </div>
         ) : (
           <TiendaDetalle store={store} detail={detail} />
         )}
       </div>
+      {suspensionDialogOpen && store && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => {
+            if (!suspensionSaving) setSuspensionDialogOpen(false);
+          }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="suspend-store-title"
+            onSubmit={handleSuspendBusiness}
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-lg space-y-4 rounded-2xl border border-white/10 bg-neutral-900 p-5 shadow-2xl"
+          >
+            <div>
+              <h2 id="suspend-store-title" className="text-lg font-black">
+                Suspender {store.name}
+              </h2>
+              <p className="mt-1 text-sm text-neutral-400">
+                La tienda dejará de aparecer en el Marketplace y el acceso al
+                POS quedará bloqueado hasta reactivarla manualmente.
+              </p>
+            </div>
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-neutral-200">
+                Motivo de suspensión
+              </span>
+              <textarea
+                autoFocus
+                required
+                maxLength={1000}
+                value={suspensionReason}
+                onChange={(event) => setSuspensionReason(event.target.value)}
+                rows={4}
+                className="w-full resize-y rounded-xl border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-red-400"
+                placeholder="Describe el motivo para dejarlo registrado"
+              />
+            </label>
+            {suspensionError && (
+              <p role="alert" className="text-sm text-red-300">
+                {suspensionError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={suspensionSaving}
+                onClick={() => setSuspensionDialogOpen(false)}
+                className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-neutral-300 hover:bg-white/5 disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={suspensionSaving || !suspensionReason.trim()}
+                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Ban size={16} />
+                {suspensionSaving ? "Suspendiendo..." : "Suspender tienda"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };

@@ -48,6 +48,9 @@ const EstructuraAdmin = lazy(() => import("../modulos/admin/Estructura"));
 const Resumen = lazy(() => import("../modulos/admin/Resumen"));
 const Tiendas = lazy(() => import("../modulos/admin/Tiendas"));
 const TiendaArchivo = lazy(() => import("../modulos/admin/TiendaArchivo"));
+const PlanesFacturacion = lazy(
+  () => import("../modulos/admin/PlanesFacturacion"),
+);
 const Mercado = lazy(() => import("../modulos/admin/Mercado"));
 const Finanzas = lazy(() => import("../modulos/admin/Finanzas"));
 const Sistema = lazy(() => import("../modulos/admin/Sistema"));
@@ -162,12 +165,14 @@ const PlanAccessGate = ({ children }) => {
           className="mx-auto mb-5 flex max-w-4xl flex-wrap items-center justify-between gap-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-5"
         >
           <div className="min-w-0 flex-1">
-            <h1 className="text-lg font-black text-rose-200">Plan suspendido</h1>
+            <h1 className="text-lg font-black text-rose-200">
+              Acceso suspendido
+            </h1>
             <p className="mt-2 text-sm leading-6 text-rose-100/80">
-              Ya transcurrieron 3 días desde el vencimiento de tu plan y tu
-              tienda ya no aparece en el Marketplace. El POS está bloqueado.
-              Para reactivar tu tienda y recuperar el acceso, completa el pago
-              desde esta sección de Mi plan.
+              Tu tienda no aparece en el Marketplace y el acceso al POS está
+              bloqueado. Si la suspensión se debe al vencimiento del plan,
+              puedes consultar y pagar desde Mi plan. Si fue aplicada por el
+              equipo de soporte, comunícate con nosotros para conocer el motivo.
             </p>
             {signOutError && (
               <p role="alert" className="mt-2 text-sm text-rose-200">
@@ -250,6 +255,7 @@ function App() {
             <Route path="tiendas" element={<Tiendas />} />
             <Route path="tiendas/:id" element={<TiendaArchivo />} />
             <Route path="marketplace" element={<Mercado />} />
+            <Route path="planes" element={<PlanesFacturacion />} />
             <Route
               path="finanzas"
               element={<Navigate to="finanzas/suscripciones" replace />}

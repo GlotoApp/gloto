@@ -409,11 +409,13 @@ const Shop = () => {
               name,
               slug,
               logo_url,
-              cover_url
+              cover_url,
+              admin_suspended
             `,
             )
             .eq(campo, valor)
             .eq("is_active", true)
+            .eq("admin_suspended", false)
             .maybeSingle();
 
         let tiendaQuery = await obtenerNegocioPorId("slug", slug);

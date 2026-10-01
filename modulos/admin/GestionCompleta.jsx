@@ -564,16 +564,6 @@ const SuperAdmin = ({ onVolver }) => {
       .from("billing_plans")
       .update({
         name: plan.name,
-        billing_type: plan.billing_type,
-        price_amount: Number(plan.price_amount) || 0,
-        commission_rate:
-          plan.billing_type === "commission"
-            ? Number(plan.commission_rate) || 0
-            : null,
-        minimum_amount:
-          plan.billing_type === "commission"
-            ? Number(plan.minimum_amount) || 0
-            : null,
         is_active: plan.is_active,
       })
       .eq("id", plan.id);
@@ -1353,10 +1343,7 @@ const SuperAdmin = ({ onVolver }) => {
                     key={plan.id}
                     style={{
                       display: "grid",
-                      gridTemplateColumns:
-                        plan.billing_type === "commission"
-                          ? "minmax(120px, 0.7fr) minmax(130px, 1fr) minmax(130px, 1fr) auto"
-                          : "minmax(120px, 0.7fr) minmax(130px, 1fr) auto",
+                      gridTemplateColumns: "minmax(120px, 1fr) auto",
                       gap: "10px",
                       alignItems: "end",
                       padding: "12px 0",
@@ -1379,65 +1366,6 @@ const SuperAdmin = ({ onVolver }) => {
                         style={inputStyle}
                       />
                     </div>
-                    <div>
-                      <label style={labelStyle}>
-                        {plan.billing_type === "commission"
-                          ? "Comisión (%)"
-                          : "Precio mensual"}
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={
-                          plan.billing_type === "commission"
-                            ? plan.commission_rate || 0
-                            : plan.price_amount || 0
-                        }
-                        onChange={(event) =>
-                          setPlanesFacturacion((current) =>
-                            current.map((item) =>
-                              item.id === plan.id
-                                ? plan.billing_type === "commission"
-                                  ? {
-                                      ...item,
-                                      commission_rate: event.target.value,
-                                    }
-                                  : {
-                                      ...item,
-                                      price_amount: event.target.value,
-                                    }
-                                : item,
-                            ),
-                          )
-                        }
-                        style={inputStyle}
-                      />
-                    </div>
-                    {plan.billing_type === "commission" && (
-                      <div>
-                        <label style={labelStyle}>Mínimo mensual</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="500"
-                          value={plan.minimum_amount || 0}
-                          onChange={(event) =>
-                            setPlanesFacturacion((current) =>
-                              current.map((item) =>
-                                item.id === plan.id
-                                  ? {
-                                      ...item,
-                                      minimum_amount: event.target.value,
-                                    }
-                                  : item,
-                              ),
-                            )
-                          }
-                          style={inputStyle}
-                        />
-                      </div>
-                    )}
                     <button
                       type="button"
                       onClick={() => guardarPlanFacturacion(plan)}

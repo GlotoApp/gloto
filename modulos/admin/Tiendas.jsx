@@ -81,7 +81,9 @@ const SuperAdminTiendasPanel = ({}) => {
         ] = await Promise.all([
           supabase
             .from("businesses")
-            .select("id,name,slug,logo_url,cover_url,is_active,created_at")
+            .select(
+              "id,name,slug,logo_url,cover_url,is_active,admin_suspended,admin_suspension_reason,created_at",
+            )
             .order("created_at", { ascending: false }),
           supabase
             .from("business_info")
@@ -157,8 +159,11 @@ const SuperAdminTiendasPanel = ({}) => {
         tienda.address?.toLowerCase().includes(query);
       const coincideEstado =
         filtroEstado === "todas" ||
-        (filtroEstado === "activas" && tienda.is_active) ||
-        (filtroEstado === "inactivas" && !tienda.is_active);
+        (filtroEstado === "activas" &&
+          tienda.is_active &&
+          !tienda.admin_suspended) ||
+        (filtroEstado === "inactivas" &&
+          (!tienda.is_active || tienda.admin_suspended));
       const coincidePlan =
         filtroPlan === "todos" || tienda.planName === filtroPlan;
       const coincideCategoria =
@@ -333,12 +338,18 @@ const SuperAdminTiendasPanel = ({}) => {
                         </h3>
                         <span
                           className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] ${
-                            tienda.is_active
+                            tienda.admin_suspended
+                              ? "bg-red-500/10 text-red-300"
+                              : tienda.is_active
                               ? "bg-emerald-500/10 text-emerald-300"
                               : "bg-red-500/10 text-red-300"
                           }`}
                         >
-                          {tienda.is_active ? "Activa" : "Inactiva"}
+                          {tienda.admin_suspended
+                            ? "Suspendida"
+                            : tienda.is_active
+                              ? "Activa"
+                              : "Inactiva"}
                         </span>
                       </div>
 
@@ -374,6 +385,12 @@ const SuperAdminTiendasPanel = ({}) => {
                           </span>
                         )}
                       </div>
+                      {tienda.admin_suspended &&
+                        tienda.admin_suspension_reason && (
+                          <p className="mt-2 line-clamp-2 text-xs text-red-200">
+                            Motivo: {tienda.admin_suspension_reason}
+                          </p>
+                        )}
                     </div>
 
                     <span className="ml-auto mt-2 inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold text-neutral-300">

@@ -173,7 +173,12 @@ const TiendaDetalle = ({ store, detail }) => {
     },
     {
       label: "Estado",
-      value: store.is_active ? "Activa" : "Inactiva",
+      value: store.admin_suspended
+        ? "Suspendida por superadmin"
+        : store.is_active
+          ? "Activa"
+          : "Inactiva",
+      detail: store.admin_suspended ? store.admin_suspension_reason : null,
       icon: store.is_active ? CheckCircle2 : XCircle,
       accent: store.is_active ? "text-emerald-200" : "text-red-200",
     },
@@ -247,7 +252,11 @@ const TiendaDetalle = ({ store, detail }) => {
                     : "bg-red-500/10 text-red-300"
                 }`}
               >
-                {store.is_active ? "Disponible" : "Cerrada"}
+                {store.admin_suspended
+                  ? "Suspendida"
+                  : store.is_active
+                    ? "Disponible"
+                    : "Cerrada"}
               </span>
             </div>
           </div>

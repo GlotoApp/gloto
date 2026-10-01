@@ -3,6 +3,7 @@ import { Link, NavLink } from "react-router-dom";
 import {
   ArrowLeft,
   Crown,
+  CreditCard,
   LayoutDashboard,
   Menu,
   Megaphone,
@@ -21,6 +22,11 @@ const navItems = [
     label: "Suscripciones",
     path: "/superadmin/finanzas/suscripciones",
     icon: WalletCards,
+  },
+  {
+    label: "Planes",
+    path: "/superadmin/planes",
+    icon: CreditCard,
   },
   {
     label: "Promociones",

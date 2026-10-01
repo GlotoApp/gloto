@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Zap, Crown, Rocket } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import SubLoading from "./SubLoading";
@@ -163,20 +163,21 @@ const Planes = () => {
               const highlight = plan.code === "pro";
               const isPremium = plan.code === "premium";
               const isCommission = plan.billing_type === "commission";
-              const isMonthly = selectedPeriodCode === "monthly";
               const planPeriod = periods.find(
                 (period) =>
                   period.plan_id === plan.id &&
                   period.code === selectedPeriodCode,
               );
+              const isMonthly = selectedPeriodCode === "monthly";
               const price = isMonthly
                 ? plan.price_amount
                 : planPeriod?.price_amount;
               const minimum = isMonthly
                 ? plan.minimum_amount
                 : planPeriod?.minimum_amount;
-              const commissionRate =
-                plan.commission_rate ?? planPeriod?.commission_rate;
+              const commissionRate = isMonthly
+                ? plan.commission_rate
+                : planPeriod?.commission_rate;
               const periodLabel =
                 planPeriod?.label || selectedPeriod?.label || "";
               const planFeatures = features.filter(

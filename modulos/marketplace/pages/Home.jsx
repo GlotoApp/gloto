@@ -132,6 +132,7 @@ const Home = () => {
             logo_url,
             cover_url,
             is_active,
+            admin_suspended,
             created_at,
             business_info (
               category_id,
@@ -147,6 +148,7 @@ const Home = () => {
           `,
           )
           .eq("is_active", true)
+          .eq("admin_suspended", false)
           .order("created_at", { ascending: true });
 
         if (error) throw error;
@@ -195,7 +197,7 @@ const Home = () => {
           await supabase
             .from("promotions")
             .select(
-              "id,tag,offer_text,title,cover_path,order_index,business_id,businesses(slug,name,is_active)",
+              "id,tag,offer_text,title,cover_path,order_index,business_id,businesses(slug,name,is_active,admin_suspended)",
             )
             .eq("is_active", true)
             .eq("payment_status", "paid")
@@ -210,7 +212,11 @@ const Home = () => {
         } else {
           setPromociones(
             (promocionesData || [])
-              .filter((promocion) => promocion.businesses?.is_active)
+              .filter(
+                (promocion) =>
+                  promocion.businesses?.is_active &&
+                  !promocion.businesses?.admin_suspended,
+              )
               .map((promocion) => ({
                 id: promocion.id,
                 slug: promocion.businesses?.slug,
