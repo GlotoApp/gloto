@@ -4,6 +4,7 @@ import {
   Routes,
   Route,
   Navigate,
+  useLocation,
 } from "react-router-dom";
 import Marketplace from "../modulos/marketplace/Marketplace";
 import Layout from "../modulos/pos/Layout";
@@ -12,6 +13,7 @@ import SinConexion from "../modulos/pos/SinConexion";
 import Upss from "../modulos/pos/Upss";
 import { useAuth } from "./components/AuthContext";
 import Acceso from "../modulos/admin/Acceso";
+import { supabase } from "./lib/supabaseClient";
 
 // Lazy imports
 const POS = lazy(() => import("../modulos/pos/POS"));
@@ -62,6 +64,141 @@ const RequireAuth = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return <Loading />;
   return user ? children : <Navigate to="/login" replace />;
+};
+
+const PlanAccessGate = ({ children }) => {
+  const { user } = useAuth();
+  const location = useLocation();
+  const [accessStatus, setAccessStatus] = useState("loading");
+  const [retryKey, setRetryKey] = useState(0);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkPlanAccess = async () => {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error(
+          "No se pudo consultar el negocio del usuario:",
+          profileError,
+        );
+        if (isMounted) setAccessStatus("error");
+        return;
+      }
+
+      if (!profile?.business_id) {
+        if (isMounted) setAccessStatus("allowed");
+        return;
+      }
+
+      const { data: isSuspended, error: subscriptionError } =
+        await supabase.rpc("is_business_subscription_suspended", {
+          p_business_id: profile.business_id,
+        });
+
+      if (subscriptionError) {
+        console.error(
+          "No se pudo verificar la vigencia del plan:",
+          subscriptionError,
+        );
+        if (isMounted) setAccessStatus("error");
+        return;
+      }
+
+      if (isMounted) setAccessStatus(isSuspended ? "suspended" : "allowed");
+    };
+
+    checkPlanAccess();
+    const intervalId = window.setInterval(checkPlanAccess, 60_000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [retryKey, user.id]);
+
+  if (accessStatus === "loading") return <Loading />;
+
+  if (accessStatus === "error") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-neutral-950 px-4 text-white">
+        <section className="w-full max-w-lg rounded-2xl border border-rose-500/20 bg-neutral-900 p-6 text-center">
+          <h1 className="text-xl font-black">No se pudo verificar tu plan</h1>
+          <p className="mt-2 text-sm text-neutral-300">
+            Para proteger tu cuenta, el POS permanecerá bloqueado hasta poder
+            validar el estado de la suscripción.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setAccessStatus("loading");
+              setRetryKey((current) => current + 1);
+            }}
+            className="mt-5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-black uppercase tracking-wider hover:bg-violet-500"
+          >
+            Reintentar
+          </button>
+        </section>
+      </div>
+    );
+  }
+
+  if (accessStatus === "suspended") {
+    if (location.pathname !== "/pos/mi-plan") {
+      return <Navigate to="/pos/mi-plan" replace />;
+    }
+
+    return (
+      <div className="min-h-screen bg-neutral-950 px-4 py-6 text-white sm:px-6">
+        <section
+          role="alert"
+          className="mx-auto mb-5 flex max-w-4xl flex-wrap items-center justify-between gap-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-5"
+        >
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-black text-rose-200">Plan suspendido</h1>
+            <p className="mt-2 text-sm leading-6 text-rose-100/80">
+              Ya transcurrieron 3 días desde el vencimiento de tu plan y tu
+              tienda ya no aparece en el Marketplace. El POS está bloqueado.
+              Para reactivar tu tienda y recuperar el acceso, completa el pago
+              desde esta sección de Mi plan.
+            </p>
+            {signOutError && (
+              <p role="alert" className="mt-2 text-sm text-rose-200">
+                {signOutError}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={isSigningOut}
+            onClick={async () => {
+              setIsSigningOut(true);
+              setSignOutError("");
+              const { error } = await supabase.auth.signOut();
+              if (error) {
+                console.error("No se pudo cerrar la sesión:", error);
+                setSignOutError("No se pudo cerrar la sesión. Inténtalo de nuevo.");
+                setIsSigningOut(false);
+              }
+            }}
+            className="shrink-0 rounded-lg border border-white/20 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+          >
+            {isSigningOut ? "Cerrando sesión..." : "Cerrar sesión"}
+          </button>
+        </section>
+        <MiPlan />
+      </div>
+    );
+  }
+
+  return children;
 };
 
 function App() {
@@ -155,7 +292,9 @@ function App() {
             path="/pos"
             element={
               <RequireAuth>
-                <Layout />
+                <PlanAccessGate>
+                  <Layout />
+                </PlanAccessGate>
               </RequireAuth>
             }
           >

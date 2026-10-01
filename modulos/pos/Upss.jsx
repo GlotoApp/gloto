@@ -1,9 +1,4 @@
-import { Home, ArrowLeft } from "lucide-react";
-import { useNavigate } from "react-router-dom";
-
 export default function Upss() {
-  const navigate = useNavigate();
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-neutral-950 px-4 text-white font-sans">
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-neutral-900/70 p-8 text-center shadow-2xl shadow-black/30">
@@ -34,25 +29,6 @@ export default function Upss() {
           </ul>
         </div>
 
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-neutral-900 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-200 transition hover:border-white/20 hover:text-white"
-          >
-            <ArrowLeft size={14} />
-            Volver
-          </button>
-
-          <button
-            type="button"
-            onClick={() => navigate("/pos")}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.2em] text-violet-200 transition hover:border-violet-400 hover:bg-violet-500/20"
-          >
-            <Home size={14} />
-            Ir al inicio
-          </button>
-        </div>
       </div>
     </div>
   );

@@ -177,6 +177,8 @@ export default function MiPlan() {
     () => getDaysRemaining(planEndDate),
     [planEndDate],
   );
+  const planHasExpired =
+    planEndDate !== null && new Date(planEndDate).getTime() <= Date.now();
 
   const validity = useMemo(() => {
     const totalDays = subscription?.duration_days || 30;
@@ -402,7 +404,7 @@ export default function MiPlan() {
                       </div>
                     </div>
                     <p className="mt-4 text-xs text-neutral-500">
-                      Vence el{" "}
+                      {planHasExpired ? "Venció el " : "Vence el "}
                       <strong className="font-bold text-neutral-300">
                         {formatDate(planEndDate)}
                       </strong>

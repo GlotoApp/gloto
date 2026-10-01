@@ -307,6 +307,7 @@ const Shop = () => {
   const [businessHoursRows, setBusinessHoursRows] = useState([]);
   const [, setAvailabilityByProduct] = useState({});
   const [isLoadingProductos, setIsLoadingProductos] = useState(true);
+  const [tiendaNoEncontrada, setTiendaNoEncontrada] = useState(false);
   const {
     carrito,
     cartOpen,
@@ -397,6 +398,7 @@ const Shop = () => {
   useEffect(() => {
     const obtenerTienda = async () => {
       setIsLoadingProductos(true);
+      setTiendaNoEncontrada(false);
       try {
         const obtenerNegocioPorId = async (campo, valor) =>
           supabase
@@ -411,7 +413,8 @@ const Shop = () => {
             `,
             )
             .eq(campo, valor)
-            .single();
+            .eq("is_active", true)
+            .maybeSingle();
 
         let tiendaQuery = await obtenerNegocioPorId("slug", slug);
 
@@ -421,7 +424,10 @@ const Shop = () => {
 
         if (tiendaQuery.error) throw tiendaQuery.error;
         const data = tiendaQuery.data;
-        if (!data) throw new Error("Tienda no encontrada");
+        if (!data) {
+          setTiendaNoEncontrada(true);
+          return;
+        }
 
         const businessInfoQuery = supabase
           .from("business_info")
@@ -1072,6 +1078,46 @@ const Shop = () => {
     "Ahorra $6k": "#00c448",
     Nuevo: "#38bdf8",
   };
+
+  if (tiendaNoEncontrada) {
+    return (
+      <main
+        style={{
+          display: "flex",
+          minHeight: "100vh",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#0a0a0a",
+          padding: "24px",
+          color: "#fff",
+          fontFamily: "'Inter', system-ui, sans-serif",
+          textAlign: "center",
+        }}
+      >
+        <section style={{ maxWidth: "420px" }}>
+          <h1 style={{ fontSize: "24px", fontWeight: 800 }}>
+            Tienda no encontrada
+          </h1>
+          <p style={{ marginTop: "8px", color: "#a3a3a3", lineHeight: 1.6 }}>
+            Puedes ir al Marketplace y ver otros negocios.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate("/marketplace")}
+            style={{
+              marginTop: "24px",
+              borderRadius: "10px",
+              background: "#7c3aed",
+              padding: "12px 18px",
+              fontWeight: 700,
+            }}
+          >
+            Ir al Marketplace
+          </button>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <>

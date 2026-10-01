@@ -195,7 +195,7 @@ const Home = () => {
           await supabase
             .from("promotions")
             .select(
-              "id,tag,offer_text,title,cover_path,order_index,business_id,businesses(slug,name)",
+              "id,tag,offer_text,title,cover_path,order_index,business_id,businesses(slug,name,is_active)",
             )
             .eq("is_active", true)
             .eq("payment_status", "paid")
@@ -209,18 +209,20 @@ const Home = () => {
           setPromociones([]);
         } else {
           setPromociones(
-            (promocionesData || []).map((promocion) => ({
-              id: promocion.id,
-              slug: promocion.businesses?.slug,
-              tag: promocion.tag,
-              oferta: promocion.offer_text,
-              nombre: promocion.title || promocion.businesses?.name || "",
-              coverUrl: promocion.cover_path
-                ? supabase.storage
-                    .from("business-assets")
-                    .getPublicUrl(promocion.cover_path).data.publicUrl
-                : null,
-            })),
+            (promocionesData || [])
+              .filter((promocion) => promocion.businesses?.is_active)
+              .map((promocion) => ({
+                id: promocion.id,
+                slug: promocion.businesses?.slug,
+                tag: promocion.tag,
+                oferta: promocion.offer_text,
+                nombre: promocion.title || promocion.businesses?.name || "",
+                coverUrl: promocion.cover_path
+                  ? supabase.storage
+                      .from("business-assets")
+                      .getPublicUrl(promocion.cover_path).data.publicUrl
+                  : null,
+              })),
           );
         }
 
