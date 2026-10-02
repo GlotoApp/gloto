@@ -61,6 +61,11 @@ const formatProductNameForStorage = (value) =>
       (_, separator, letter) => `${separator}${letter.toUpperCase()}`,
     );
 
+const formatStockQuantity = (value) =>
+  new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 }).format(
+    Number(value) || 0,
+  );
+
 const formatSentenceInput = (value) => {
   return formatSentenceText(value);
 };
@@ -103,9 +108,13 @@ const Productos = ({ section = "productos" }) => {
   // ========== ESTADO COMPARTIDO ==========
   const [categories, setCategories] = useState([]);
   const [categoryRecords, setCategoryRecords] = useState([]);
+  const [units, setUnits] = useState([]);
   const [businessId, setBusinessId] = useState(null);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [savingProduct, setSavingProduct] = useState(false);
+  const [quickCategoryOpen, setQuickCategoryOpen] = useState(false);
+  const [quickCategoryName, setQuickCategoryName] = useState("");
+  const [savingQuickCategory, setSavingQuickCategory] = useState(false);
   const [updatingStockIds, setUpdatingStockIds] = useState(new Set());
 
   const handleUpdateCategories = async (newCategories) => {
@@ -118,6 +127,68 @@ const Productos = ({ section = "productos" }) => {
     setCategories(records.map((category) => category.name));
     const { error } = await supabase.from("categories_shop").upsert(records);
     if (error) console.error("Error guardando categorías:", error);
+  };
+
+  const handleQuickCategoryCreate = async () => {
+    const name = formatProductNameForStorage(quickCategoryName);
+    if (!businessId || !name) {
+      alert("Escribe el nombre de la categoría.");
+      return;
+    }
+
+    const existingCategory = categoryRecords.find(
+      (category) => category.name.trim().toLowerCase() === name.toLowerCase(),
+    );
+    if (existingCategory) {
+      setFormData((current) => ({
+        ...current,
+        categoryId: existingCategory.id,
+        category: existingCategory.name,
+      }));
+      setQuickCategoryName("");
+      setQuickCategoryOpen(false);
+      return;
+    }
+
+    setSavingQuickCategory(true);
+    const { data, error } = await supabase
+      .from("categories_shop")
+      .insert({ business_id: businessId, name })
+      .select("id,business_id,name")
+      .single();
+
+    if (error) {
+      console.error("Error creando categoría rápida:", error);
+      alert(
+        error.code === "23505"
+          ? "Ya existe una categoría con ese nombre."
+          : "No se pudo crear la categoría. Intenta nuevamente.",
+      );
+      setSavingQuickCategory(false);
+      return;
+    }
+
+    const nextCategoryRecords = [...categoryRecords, data].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    setCategoryRecords(nextCategoryRecords);
+    setCategories(nextCategoryRecords.map((category) => category.name));
+    setFormData((current) => ({
+      ...current,
+      categoryId: data.id,
+      category: data.name,
+    }));
+    const cachedCatalog = readCatalogCache(businessId);
+    if (cachedCatalog) {
+      writeCatalogCache(businessId, {
+        ...cachedCatalog,
+        categories: nextCategoryRecords.map((category) => category.name),
+        categoryRecords: nextCategoryRecords,
+      });
+    }
+    setQuickCategoryName("");
+    setQuickCategoryOpen(false);
+    setSavingQuickCategory(false);
   };
 
   // ======= NUEVA FUNCIÓN AGREGADA PARA LA ELIMINACIÓN EN CASCADA =======
@@ -219,6 +290,7 @@ const Productos = ({ section = "productos" }) => {
     description: "",
     stock: 0,
     minStock: 0,
+    unitId: "",
     image: "",
   });
   const [optionGroups, setOptionGroups] = useState([]);
@@ -243,6 +315,7 @@ const Productos = ({ section = "productos" }) => {
     isActive: product.is_active !== false && product.is_active !== "false",
     isSoldOut: product.is_sold_out === true || product.is_sold_out === "true",
     image: product.image_url || "",
+    unitId: product.unit_id || "",
   });
 
   useEffect(() => {
@@ -284,6 +357,7 @@ const Productos = ({ section = "productos" }) => {
         { data: productsData, error },
         { data: ingredientsData, error: ingredientsError },
         { data: ingredientCategoriesData, error: ingredientCategoriesError },
+        { data: unitsData, error: unitsError },
       ] = await Promise.all([
         supabase
           .from("categories_shop")
@@ -305,7 +379,19 @@ const Productos = ({ section = "productos" }) => {
           .select("id, name")
           .eq("business_id", profile.business_id)
           .order("name", { ascending: true }),
+        supabase
+          .from("units")
+          .select("id,name,description,allows_fraction,is_active")
+          .eq("is_active", true)
+          .order("name", { ascending: true }),
       ]);
+
+      if (unitsError) {
+        console.error("Error cargando unidades de producto:", unitsError);
+        alert("No se pudieron cargar las unidades. Intenta nuevamente.");
+      } else {
+        setUnits(unitsData || []);
+      }
 
       if (error || ingredientsError || ingredientCategoriesError) {
         console.error(
@@ -362,6 +448,9 @@ const Productos = ({ section = "productos" }) => {
       return groups;
     }, {});
   }, [availableIngredients]);
+
+  const selectedUnit = units.find((unit) => unit.id === formData.unitId);
+  const stockStep = selectedUnit?.allows_fraction ? 0.1 : 1;
 
   // ========== FUNCIONES PARA PRODUCTOS ==========
 
@@ -430,6 +519,8 @@ const Productos = ({ section = "productos" }) => {
   // Abrir modal para crear nuevo
   const handleNewProduct = () => {
     setEditingId(null);
+    setQuickCategoryOpen(false);
+    setQuickCategoryName("");
     setFormData({
       name: "",
       categoryId: categoryRecords[0]?.id || "",
@@ -438,6 +529,8 @@ const Productos = ({ section = "productos" }) => {
       description: "",
       stock: 0,
       minStock: 0,
+      unitId:
+        units.find((unit) => unit.name === "UNIDAD")?.id || units[0]?.id || "",
       image: "",
     });
     setOptionGroups([]);
@@ -502,6 +595,8 @@ const Productos = ({ section = "productos" }) => {
   // Abrir modal para editar
   const handleEditProduct = (product) => {
     setEditingId(product.id);
+    setQuickCategoryOpen(false);
+    setQuickCategoryName("");
     setFormData({
       name: formatProductName(product.name),
       categoryId: product.categoryId,
@@ -510,6 +605,11 @@ const Productos = ({ section = "productos" }) => {
       description: formatSentenceInput(product.description),
       stock: product.stock,
       minStock: product.minStock,
+      unitId:
+        product.unit_id ||
+        units.find((unit) => unit.name === "UNIDAD")?.id ||
+        units[0]?.id ||
+        "",
       image: product.image,
     });
     setOptionGroups([]);
@@ -522,6 +622,8 @@ const Productos = ({ section = "productos" }) => {
   const closeProductModal = () => {
     setIsModalOpen(false);
     setEditingId(null);
+    setQuickCategoryOpen(false);
+    setQuickCategoryName("");
     navigate(location.pathname, { replace: true, state: null });
   };
 
@@ -786,6 +888,10 @@ const Productos = ({ section = "productos" }) => {
       alert("Selecciona una categoría");
       return;
     }
+    if (!formData.unitId) {
+      alert("Selecciona una unidad de venta");
+      return;
+    }
 
     setSavingProduct(true);
     const previousProductImage = editingId
@@ -830,6 +936,7 @@ const Productos = ({ section = "productos" }) => {
       description: formatStoredText(formData.description),
       stock: Number(formData.stock) || 0,
       min_stock: Number(formData.minStock) || 0,
+      unit_id: formData.unitId || null,
       image_url: imageUrl,
     };
     let query;
@@ -1608,32 +1715,47 @@ const Productos = ({ section = "productos" }) => {
                 <div className="pb-2">
                   <div className="grid grid-cols-1 gap-2 pt-2.5 border-t border-white/5 px-2 sm:grid-cols-2 md:px-3">
                     <div className="col-span-full flex justify-center">
-                      {isSelectionMode ? (
-                        <div className="rounded-full border border-white/15 bg-black/75 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white">
-                          Stock:{" "}
-                          {Number(item.stock || 0) > 99
-                            ? "99+"
-                            : Number(item.stock || 0)}
-                        </div>
-                      ) : (
+                      {(() => {
+                        const productUnit =
+                          units.find((unit) => unit.id === item.unitId) ||
+                          units.find((unit) => unit.name === "UNIDAD");
+                        const unitName = productUnit?.name || "UNIDAD";
+                        const stockStep = productUnit?.allows_fraction
+                          ? 0.1
+                          : 1;
+                        const stockLabel = formatStockQuantity(item.stock);
+
+                        return isSelectionMode ? (
+                          <div
+                            className="flex min-w-16 flex-col items-center rounded-lg border border-white/15 bg-black/75 px-3 py-1 text-white"
+                            aria-label={`${unitName}: ${stockLabel}`}
+                          >
+                            <span className="text-[8px] font-bold uppercase tracking-wider text-neutral-400">
+                              {unitName}
+                            </span>
+                            <span className="text-sm font-black tabular-nums">
+                              {Number(item.stock || 0) > 99 ? "99+" : stockLabel}
+                            </span>
+                          </div>
+                        ) : (
                         <div
                           role="group"
-                          aria-label={`Stock de ${item.name}: ${item.stock}`}
-                          title={`Stock: ${item.stock}`}
+                          aria-label={`${item.name}: ${stockLabel} ${unitName}`}
+                          title={`${stockLabel} ${unitName}`}
                           className="flex w-full max-w-[267px] items-center justify-center gap-1 rounded-xl bg-neutral-800/40 p-2 sm:gap-2 sm:p-3"
                         >
                           <button
                             type="button"
                             onClick={(event) => {
                               event.stopPropagation();
-                              handleAdjustStock(item.id, -1);
+                              handleAdjustStock(item.id, -stockStep);
                             }}
                             disabled={
                               updatingStockIds.has(item.id) ||
                               Number(item.stock || 0) <= 0
                             }
-                            aria-label={`Disminuir stock de ${item.name}`}
-                            title="Disminuir stock"
+                            aria-label={`Disminuir ${unitName} de ${item.name}`}
+                            title={`Disminuir ${stockStep} ${unitName}`}
                             className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 sm:p-2"
                           >
                             <ArrowDownRight
@@ -1641,23 +1763,23 @@ const Productos = ({ section = "productos" }) => {
                               className="sm:h-[18px] sm:w-[18px]"
                             />
                           </button>
-                          <span className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg border border-white/10 bg-neutral-700 px-1 py-2 text-center text-white sm:flex-col sm:gap-0 sm:px-3 sm:py-1">
+                          <span className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0 rounded-lg border border-white/10 bg-neutral-700 px-1 py-2 text-center text-white sm:px-3 sm:py-1">
                             <span className="shrink-0 text-[8px] font-bold uppercase tracking-wider text-neutral-400 sm:text-[9px]">
-                              Stock
+                              {unitName}
                             </span>
                             <span className="min-w-0 truncate text-base font-black leading-tight tabular-nums sm:text-lg">
-                              {Number(item.stock || 0)}
+                              {stockLabel}
                             </span>
                           </span>
                           <button
                             type="button"
                             onClick={(event) => {
                               event.stopPropagation();
-                              handleAdjustStock(item.id, 1);
+                              handleAdjustStock(item.id, stockStep);
                             }}
                             disabled={updatingStockIds.has(item.id)}
-                            aria-label={`Aumentar stock de ${item.name}`}
-                            title="Aumentar stock"
+                            aria-label={`Aumentar ${unitName} de ${item.name}`}
+                            title={`Aumentar ${stockStep} ${unitName}`}
                             className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-emerald-400 disabled:cursor-wait disabled:opacity-40 sm:p-2"
                           >
                             <ArrowUpRight
@@ -1666,7 +1788,8 @@ const Productos = ({ section = "productos" }) => {
                             />
                           </button>
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                     <button
                       onClick={(e) => {
@@ -1934,7 +2057,7 @@ const Productos = ({ section = "productos" }) => {
 
                   <div className="space-y-2 border-t border-white/10 pt-4">
                     <label className="text-[9px] font-black uppercase tracking-widest text-emerald-300">
-                      Stock del producto
+                      Stock del producto ({selectedUnit?.name || "UNIDAD"})
                     </label>
                     <div className="flex items-center justify-center gap-4 rounded-xl bg-neutral-800/40 p-3">
                       <button
@@ -1942,7 +2065,10 @@ const Productos = ({ section = "productos" }) => {
                         onClick={() =>
                           setFormData({
                             ...formData,
-                            stock: Math.max(0, Number(formData.stock || 0) - 1),
+                            stock: Math.max(
+                              0,
+                              Number(formData.stock || 0) - stockStep,
+                            ),
                           })
                         }
                         aria-label="Disminuir stock del producto"
@@ -1953,6 +2079,7 @@ const Productos = ({ section = "productos" }) => {
                       <input
                         type="number"
                         min="0"
+                        step={selectedUnit?.allows_fraction ? "0.001" : "1"}
                         value={formData.stock}
                         onChange={(e) =>
                           setFormData({ ...formData, stock: e.target.value })
@@ -1965,7 +2092,7 @@ const Productos = ({ section = "productos" }) => {
                         onClick={() =>
                           setFormData({
                             ...formData,
-                            stock: Number(formData.stock || 0) + 1,
+                            stock: Number(formData.stock || 0) + stockStep,
                           })
                         }
                         aria-label="Aumentar stock del producto"
@@ -1975,7 +2102,7 @@ const Productos = ({ section = "productos" }) => {
                       </button>
                     </div>
                     <p className="text-[9px] text-neutral-500">
-                      Unidades disponibles para vender.
+                      Existencias disponibles en {selectedUnit?.name || "UNIDAD"}.
                     </p>
                   </div>
                   <div className="space-y-2 border-t border-white/10 pt-4">
@@ -1983,7 +2110,7 @@ const Productos = ({ section = "productos" }) => {
                       htmlFor="product-min-stock"
                       className="text-[9px] font-black uppercase tracking-widest text-amber-300"
                     >
-                      Avisar con stock igual o menor a
+                      Avisar con stock igual o menor a ({selectedUnit?.name || "UNIDAD"})
                     </label>
                     <input
                       id="product-min-stock"
@@ -2041,7 +2168,7 @@ const Productos = ({ section = "productos" }) => {
                     <div className="space-y-2 min-w-0">
                       <div className="flex items-center gap-2">
                         <label className="text-[9px] sm:text-[10px] font-black uppercase text-violet-400 tracking-widest truncate">
-                          Precio (COP)
+                          Precio (COP / {selectedUnit?.name || "UNIDAD"})
                         </label>
                       </div>
                       <div className="relative group">
@@ -2084,13 +2211,98 @@ const Productos = ({ section = "productos" }) => {
                         }
                         className="w-full bg-gradient-to-r from-neutral-700/30 to-neutral-800/30 border border-neutral-600/50 focus:border-violet-500/50 rounded-lg sm:rounded-2xl py-3 sm:py-4 px-4 sm:px-5 text-xs sm:text-sm font-bold uppercase tracking-widest focus:outline-none transition-all"
                       >
+                        <option value="">Selecciona una categoría</option>
                         {categoryRecords.map((category) => (
                           <option key={category.id} value={category.id}>
                             {category.name}
                           </option>
                         ))}
                       </select>
+                      {!quickCategoryOpen ? (
+                        <button
+                          type="button"
+                          onClick={() => setQuickCategoryOpen(true)}
+                          className="mt-2 inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-violet-300 transition hover:text-violet-200"
+                        >
+                          <Plus size={13} />
+                          Crear categoría aquí
+                        </button>
+                      ) : (
+                        <div className="mt-2 flex gap-2">
+                          <input
+                            autoFocus
+                            value={quickCategoryName}
+                            onChange={(event) =>
+                              setQuickCategoryName(event.target.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                handleQuickCategoryCreate();
+                              }
+                            }}
+                            placeholder="Nombre de la categoría"
+                            aria-label="Nombre de la nueva categoría"
+                            className="min-w-0 flex-1 rounded-lg border border-white/10 bg-neutral-800 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-violet-500/50"
+                          />
+                          <button
+                            type="button"
+                            disabled={savingQuickCategory}
+                            onClick={handleQuickCategoryCreate}
+                            className="rounded-lg bg-violet-500 px-3 py-2 text-[9px] font-black uppercase text-white disabled:opacity-50"
+                          >
+                            {savingQuickCategory ? "..." : "Crear"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={savingQuickCategory}
+                            onClick={() => {
+                              setQuickCategoryOpen(false);
+                              setQuickCategoryName("");
+                            }}
+                            aria-label="Cancelar creación de categoría"
+                            className="rounded-lg border border-white/10 px-2 py-2 text-neutral-400 hover:bg-white/5 disabled:opacity-50"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      )}
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="product-unit"
+                      className="text-[9px] font-black uppercase tracking-widest text-violet-400"
+                    >
+                      Unidad de venta
+                    </label>
+                    <select
+                      id="product-unit"
+                      value={formData.unitId}
+                      onChange={(event) =>
+                        setFormData({
+                          ...formData,
+                          unitId: event.target.value,
+                        })
+                      }
+                      className="w-full rounded-lg border border-neutral-600/50 bg-neutral-700 px-4 py-3 text-xs font-bold uppercase tracking-widest outline-none focus:border-violet-500/50 sm:rounded-2xl sm:py-4 sm:text-sm"
+                      required
+                    >
+                      <option value="" disabled>
+                        Selecciona una unidad
+                      </option>
+                      {units.map((unit) => (
+                        <option key={unit.id} value={unit.id}>
+                          {unit.description
+                            ? `${unit.name} · ${unit.description}`
+                            : unit.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[9px] text-neutral-500">
+                      El precio y el stock se registran en esta unidad.
+                    </p>
                   </div>
 
                   <div className="space-y-2 min-w-0">
@@ -2125,11 +2337,12 @@ const Productos = ({ section = "productos" }) => {
                     <div className="space-y-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.05] p-4 shadow-[0_12px_40px_rgba(16,185,129,0.05)] sm:p-5">
                       <div>
                         <label className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-emerald-400">
-                          Insumos descontados por unidad
+                          Insumos descontados por{" "}
+                          {selectedUnit?.name || "unidad"} vendida
                         </label>
                         <p className="mt-1 text-[10px] text-neutral-500">
-                          Selecciona los insumos que consume cada unidad
-                          vendida.
+                          Indica cuánto consume el producto por cada 1{" "}
+                          {selectedUnit?.name || "unidad"} vendida.
                         </p>
                       </div>
 
@@ -2226,7 +2439,7 @@ const Productos = ({ section = "productos" }) => {
                                             </div>
                                             {selected && (
                                               <label className="flex shrink-0 items-center gap-1.5 text-[9px] font-black uppercase text-neutral-500">
-                                                Cant.
+                                                Cant. {ingredient.unit}
                                                 <input
                                                   type="number"
                                                   min="0.001"
@@ -2239,7 +2452,7 @@ const Productos = ({ section = "productos" }) => {
                                                     )
                                                   }
                                                   className="w-20 rounded-lg border border-white/10 bg-neutral-900 px-2 py-1.5 text-center text-xs font-bold text-white outline-none focus:border-emerald-500/50"
-                                                  aria-label={`Consumo de ${ingredient.name} por unidad`}
+                                                  aria-label={`Consumo de ${ingredient.name} por cada ${selectedUnit?.name || "unidad"} vendida, en ${ingredient.unit}`}
                                                 />
                                               </label>
                                             )}

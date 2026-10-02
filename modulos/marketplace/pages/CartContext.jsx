@@ -92,14 +92,19 @@ export const CartProvider = ({ children }) => {
     businessWhatsapp,
   ]);
 
-  const agregar = (id) =>
-    setCarrito((prev) => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
+  const agregar = (id, cantidad = 1) =>
+    setCarrito((prev) => ({
+      ...prev,
+      [id]: Number(((prev[id] || 0) + cantidad).toFixed(3)),
+    }));
 
-  const quitar = (id) =>
+  const quitar = (id, cantidad = 1) =>
     setCarrito((prev) => {
       const next = { ...prev };
       if (!next[id]) return prev;
-      if (next[id] > 1) next[id]--;
+      if (next[id] > cantidad) {
+        next[id] = Number((next[id] - cantidad).toFixed(3));
+      }
       else delete next[id];
       return next;
     });
@@ -308,6 +313,7 @@ export const CartProvider = ({ children }) => {
           cantidad: carrito[p.id],
           precio: p.precio,
           notas: p.notas || "",
+          unit_name: p.unit?.name || "UNIDAD",
           varianteNombre: p.varianteNombre || null,
           opciones: p.varianteNombre
             ? String(p.varianteNombre).split(" · ") || []

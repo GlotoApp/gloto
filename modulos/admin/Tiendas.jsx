@@ -95,6 +95,7 @@ const SuperAdminTiendasPanel = ({}) => {
             .select(
               "business_id,plan_name,status,amount,billing_period,starts_at,ends_at",
             )
+            .in("status", ["active", "suspended", "expired"])
             .order("created_at", { ascending: false }),
           supabase
             .from("business_notifications")

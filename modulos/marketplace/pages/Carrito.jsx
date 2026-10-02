@@ -222,9 +222,11 @@ const Carrito = ({ onIrAPagar }) => {
           ) : (
             items.map((p) => {
               const qty = carrito[p.id];
+              const pasoCantidad = p.unit?.allows_fraction ? 0.1 : 1;
               const stockDisponible =
                 typeof p.stock === "number" ? p.stock : Infinity;
-              const alcanzoStock = qty >= stockDisponible;
+              const alcanzoStock =
+                qty + pasoCantidad > stockDisponible + Number.EPSILON;
               return (
                 <div
                   key={p.id}
@@ -321,6 +323,18 @@ const Carrito = ({ onIrAPagar }) => {
                           {p.varianteNombre
                             ? p.nombre.replace(` · ${p.varianteNombre}`, "")
                             : p.nombre}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "rgba(255,255,255,0.58)",
+                          }}
+                        >
+                          {new Intl.NumberFormat("es-CO", {
+                            maximumFractionDigits: 3,
+                          }).format(qty)}{" "}
+                          {p.unit?.name || "UNIDAD"}
                         </span>
                         <span
                           style={{
@@ -434,7 +448,7 @@ const Carrito = ({ onIrAPagar }) => {
                     >
                       <button
                         type="button"
-                        onClick={() => quitar(p.id)}
+                        onClick={() => quitar(p.id, pasoCantidad)}
                         style={{
                           color: "#fff",
                           background: "none",
@@ -463,7 +477,7 @@ const Carrito = ({ onIrAPagar }) => {
                         type="button"
                         onClick={() => {
                           if (alcanzoStock) return;
-                          agregar(p.id);
+                          agregar(p.id, pasoCantidad);
                         }}
                         disabled={alcanzoStock}
                         style={{

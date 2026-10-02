@@ -264,7 +264,6 @@ const TiendaArchivo = () => {
         categoriesResult,
         shopCategoriesResult,
         inventoryCategoriesResult,
-        billingPlansResult,
         billingPeriodsResult,
       ] = await Promise.all([
         supabase
@@ -284,9 +283,10 @@ const TiendaArchivo = () => {
         supabase
           .from("subscriptions")
           .select(
-            "id,business_id,plan_id,period_id,plan_name,status,amount,billing_period,starts_at,ends_at",
+            "id,business_id,plan_code,period_id,plan_name,status,amount,billing_period,starts_at,ends_at",
           )
           .eq("business_id", id)
+          .in("status", ["active", "suspended", "expired"])
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
@@ -315,17 +315,11 @@ const TiendaArchivo = () => {
           .eq("business_id", id)
           .order("name", { ascending: true }),
         supabase
-          .from("billing_plans")
-          .select(
-            "id,code,name,billing_type,price_amount,commission_rate,minimum_amount,is_active,display_order",
-          )
-          .order("display_order", { ascending: true }),
-        supabase
           .from("billing_plan_periods")
           .select(
-            "id,plan_id,code,label,duration_days,price_amount,commission_rate,minimum_amount,is_active,display_order",
+            "id,plan_code,plan_name,billing_type,plan_is_active,plan_display_order,code,label,duration_days,price_amount,commission_rate,minimum_amount,is_active,display_order",
           )
-          .order("display_order", { ascending: true }),
+          .order("plan_display_order", { ascending: true }),
       ]);
 
       if (businessResult.error) throw businessResult.error;
@@ -339,8 +333,24 @@ const TiendaArchivo = () => {
       if (inventoryCategoriesResult.error) {
         throw inventoryCategoriesResult.error;
       }
-      if (billingPlansResult.error) throw billingPlansResult.error;
       if (billingPeriodsResult.error) throw billingPeriodsResult.error;
+      const planMap = new Map();
+      (billingPeriodsResult.data || []).forEach((period) => {
+        if (!planMap.has(period.plan_code)) {
+          planMap.set(period.plan_code, {
+            id: period.plan_code,
+            code: period.plan_code,
+            name: period.plan_name,
+            billing_type: period.billing_type,
+            is_active: period.plan_is_active,
+            display_order: period.plan_display_order,
+          });
+        }
+      });
+      const billingPlans = Array.from(planMap.values()).sort(
+        (first, second) =>
+          Number(first.display_order) - Number(second.display_order),
+      );
 
       const storeNormalized = normalizeBusinessData(
         businessResult.data,
@@ -383,7 +393,7 @@ const TiendaArchivo = () => {
       setCategories(categoriesResult.data || []);
       setShopCategories(shopCategoriesResult.data || []);
       setInventoryCategories(inventoryCategoriesResult.data || []);
-      setBillingPlans(billingPlansResult.data || []);
+      setBillingPlans(billingPlans);
       setBillingPeriods(billingPeriodsResult.data || []);
       setLogoUrl(businessResult.data.logo_url || "");
       setCoverUrl(businessResult.data.cover_url || "");
@@ -396,26 +406,24 @@ const TiendaArchivo = () => {
         inventoryCategories: inventoryCategoriesResult.data || [],
       });
       setBusinessSchedule(normalizeBusinessHours(hoursResult.data || []));
-      const currentPlan =
-        billingPlansResult.data?.find(
-          (plan) => plan.id === subscriptionsResult.data?.plan_id,
-        ) ||
-        billingPlansResult.data?.find(
-          (plan) => plan.name === subscriptionsResult.data?.plan_name,
-        );
+      const currentPlan = billingPlans.find(
+        (plan) =>
+          plan.code === subscriptionsResult.data?.plan_code ||
+          plan.name === subscriptionsResult.data?.plan_name,
+      );
       const currentPeriod =
         billingPeriodsResult.data?.find(
           (period) => period.id === subscriptionsResult.data?.period_id,
         ) ||
         billingPeriodsResult.data?.find(
           (period) =>
-            period.plan_id === currentPlan?.id &&
+            period.plan_code === currentPlan?.code &&
             (period.label?.toLowerCase() ===
               subscriptionsResult.data?.billing_period?.toLowerCase() ||
               period.code?.toLowerCase() ===
                 subscriptionsResult.data?.billing_period?.toLowerCase()),
         );
-      setSelectedPlanId(currentPlan?.id || "");
+      setSelectedPlanId(currentPlan?.code || "");
       setSelectedPeriodId(currentPeriod?.id || "");
       setFormData({
         name: businessResult.data.name || "",
@@ -580,8 +588,9 @@ const TiendaArchivo = () => {
   );
   const availablePeriods = billingPeriods.filter(
     (period) =>
-      period.plan_id === selectedPlanId &&
-      (period.is_active || period.id === selectedPeriodId),
+      period.plan_code === selectedPlanId &&
+      ((period.is_active && period.plan_is_active) ||
+        period.id === selectedPeriodId),
   );
   const selectedPeriod = availablePeriods.find(
     (period) => period.id === selectedPeriodId,
@@ -610,7 +619,10 @@ const TiendaArchivo = () => {
   const handlePlanChange = (planId) => {
     setSelectedPlanId(planId);
     const firstPeriod = billingPeriods.find(
-      (period) => period.plan_id === planId && period.is_active,
+      (period) =>
+        period.plan_code === planId &&
+        period.plan_is_active &&
+        period.is_active,
     );
     setSelectedPeriodId(firstPeriod?.id || "");
   };
@@ -637,7 +649,7 @@ const TiendaArchivo = () => {
         "change_business_subscription_plan",
         {
           p_business_id: id,
-          p_plan_id: selectedPlan.id,
+          p_plan_code: selectedPlan.code,
           p_period_id: period.id,
         },
       );
@@ -1584,7 +1596,7 @@ const TiendaArchivo = () => {
               {selectedPlan && selectedPeriod && (
                 <p className="text-xs text-neutral-400">
                   {selectedPlan.billing_type === "commission"
-                    ? `Comisión ${selectedPeriod.commission_rate ?? selectedPlan.commission_rate}% · mínimo ${formatCurrency(selectedPeriod.minimum_amount ?? selectedPlan.minimum_amount)}`
+                    ? `Comisión ${selectedPeriod.commission_rate ?? "no configurada"}% · mínimo ${selectedPeriod.minimum_amount == null ? "no configurado" : formatCurrency(selectedPeriod.minimum_amount)}`
                     : `${formatCurrency(selectedPeriod.price_amount)} · ${selectedPeriod.duration_days} días`}
                 </p>
               )}

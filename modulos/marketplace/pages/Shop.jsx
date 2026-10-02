@@ -454,7 +454,7 @@ const Shop = () => {
           supabase
             .from("products")
             .select(
-              "id,name,description,price,stock,image_url,is_active,is_sold_out,category_id,order_index,created_at",
+              "id,name,description,price,stock,image_url,is_active,is_sold_out,category_id,order_index,created_at,unit_id,unit:units(id,name,allows_fraction)",
             )
             .eq("business_id", data.id)
             .eq("is_active", true)
@@ -656,7 +656,10 @@ const Shop = () => {
               nombre: producto.name,
               desc: producto.description || "",
               precio: Number(producto.price) || 0,
-              stock: producto.stock || 0,
+              stock: Number(producto.stock || 0),
+              unit:
+                producto.unit ||
+                { id: producto.unit_id, name: "UNIDAD", allows_fraction: false },
               isSoldOut: producto.is_sold_out || producto.is_soldout || false,
               isAvailable:
                 availabilityMap[producto.id] ??
@@ -1914,6 +1917,15 @@ const Shop = () => {
                           }}
                         >
                           {fmt(p.precio)}
+                        </span>
+                        <span
+                          style={{
+                            fontWeight: 600,
+                            fontSize: "11px",
+                            color: "rgba(255,255,255,0.6)",
+                          }}
+                        >
+                          / {p.unit?.name || "UNIDAD"}
                         </span>
                         {precioExtraMax > 0 && (
                           <span

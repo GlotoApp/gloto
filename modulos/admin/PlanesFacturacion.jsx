@@ -31,30 +31,23 @@ const PlanesFacturacion = () => {
     () =>
       Promise.all([
         supabase
-          .from("billing_plans")
-          .select(
-            "id,code,name,billing_type,price_amount,commission_rate,minimum_amount,is_active,display_order",
-          )
-          .order("display_order", { ascending: true }),
-        supabase
           .from("billing_plan_periods")
           .select(
-            "id,plan_id,code,label,duration_days,price_amount,commission_rate,minimum_amount,is_active,display_order",
+            "id,plan_code,plan_name,billing_type,plan_is_active,plan_display_order,code,label,duration_days,price_amount,commission_rate,minimum_amount,is_active,display_order",
           )
-          .order("display_order", { ascending: true }),
+          .order("plan_display_order", { ascending: true }),
         supabase
           .from("billing_plan_features")
-          .select("id,plan_id,feature_text,is_section,display_order,is_active")
+          .select("id,plan_code,feature_text,is_section,display_order,is_active")
           .order("display_order", { ascending: true }),
       ]),
     [],
   );
 
   const applyCatalogResults = useCallback(
-    ([plansResult, periodsResult, featuresResult]) => {
-      if (plansResult.error || periodsResult.error || featuresResult.error) {
-        const error =
-          plansResult.error || periodsResult.error || featuresResult.error;
+    ([periodsResult, featuresResult]) => {
+      if (periodsResult.error || featuresResult.error) {
+        const error = periodsResult.error || featuresResult.error;
         console.error("No se pudo cargar el catálogo de planes:", error);
         setLoadError(
           error.message || "No se pudo cargar la configuración de los planes.",
@@ -63,8 +56,27 @@ const PlanesFacturacion = () => {
         setPeriods([]);
         setFeatures([]);
       } else {
-        setPlans(plansResult.data || []);
-        setPeriods(periodsResult.data || []);
+        const catalogPeriods = periodsResult.data || [];
+        const planMap = new Map();
+        catalogPeriods.forEach((period) => {
+          if (!planMap.has(period.plan_code)) {
+            planMap.set(period.plan_code, {
+              id: period.plan_code,
+              code: period.plan_code,
+              name: period.plan_name,
+              billing_type: period.billing_type,
+              is_active: period.plan_is_active,
+              display_order: period.plan_display_order,
+            });
+          }
+        });
+        setPlans(
+          Array.from(planMap.values()).sort(
+            (first, second) =>
+              Number(first.display_order) - Number(second.display_order),
+          ),
+        );
+        setPeriods(catalogPeriods);
         setFeatures(featuresResult.data || []);
       }
       setLoading(false);
@@ -142,7 +154,8 @@ const PlanesFacturacion = () => {
   };
 
   const addFeature = async (planId) => {
-    const featureText = String(newFeatureText[planId] || "").trim();
+    const planCode = planId;
+    const featureText = String(newFeatureText[planCode] || "").trim();
     if (!featureText) {
       setMessage({ type: "error", text: "Escribe el ítem que quieres agregar." });
       return;
@@ -150,7 +163,7 @@ const PlanesFacturacion = () => {
 
     const existingFeature = features.find(
       (feature) =>
-        feature.plan_id === planId &&
+        feature.plan_code === planCode &&
         feature.feature_text === featureText &&
         !feature.is_active,
     );
@@ -158,32 +171,32 @@ const PlanesFacturacion = () => {
       Math.max(
         -1,
         ...features
-          .filter((feature) => feature.plan_id === planId)
+          .filter((feature) => feature.plan_code === planCode)
           .map((feature) => Number(feature.display_order) || 0),
       ) + 1;
 
-    setSavingId(`feature-new-${planId}`);
+    setSavingId(`feature-new-${planCode}`);
     setMessage(null);
     const result = existingFeature
       ? await supabase
           .from("billing_plan_features")
           .update({
             is_active: true,
-            is_section: Boolean(newFeatureIsSection[planId]),
+            is_section: Boolean(newFeatureIsSection[planCode]),
           })
           .eq("id", existingFeature.id)
-          .select("id,plan_id,feature_text,is_section,display_order,is_active")
+          .select("id,plan_code,feature_text,is_section,display_order,is_active")
           .single()
       : await supabase
           .from("billing_plan_features")
           .insert({
-            plan_id: planId,
+            plan_code: planCode,
             feature_text: featureText,
-            is_section: Boolean(newFeatureIsSection[planId]),
+            is_section: Boolean(newFeatureIsSection[planCode]),
             display_order: nextDisplayOrder,
             is_active: true,
           })
-          .select("id,plan_id,feature_text,is_section,display_order,is_active")
+          .select("id,plan_code,feature_text,is_section,display_order,is_active")
           .single();
 
     if (result.error) {
@@ -201,8 +214,8 @@ const PlanesFacturacion = () => {
         );
         return [...withoutPrevious, result.data];
       });
-      setNewFeatureText((current) => ({ ...current, [planId]: "" }));
-      setNewFeatureIsSection((current) => ({ ...current, [planId]: false }));
+      setNewFeatureText((current) => ({ ...current, [planCode]: "" }));
+      setNewFeatureIsSection((current) => ({ ...current, [planCode]: false }));
       setMessage({
         type: "success",
         text: existingFeature
@@ -270,12 +283,12 @@ const PlanesFacturacion = () => {
     setSavingId(plan.id);
     setMessage(null);
     const { error } = await supabase
-      .from("billing_plans")
+      .from("billing_plan_periods")
       .update({
-        name: plan.name.trim(),
-        is_active: Boolean(plan.is_active),
+        plan_name: plan.name.trim(),
+        plan_is_active: Boolean(plan.is_active),
       })
-      .eq("id", plan.id);
+      .eq("plan_code", plan.code);
 
     if (error) {
       console.error("No se pudo guardar el plan:", error);
@@ -284,10 +297,28 @@ const PlanesFacturacion = () => {
         text: error.message || `No se pudo guardar el plan ${plan.name}.`,
       });
     } else {
-      setMessage({
-        type: "success",
-        text: `Plan ${plan.name} actualizado correctamente.`,
-      });
+      try {
+        const results = await fetchCatalog();
+        applyCatalogResults(results);
+        const refreshError = results.find((result) => result.error)?.error;
+        setMessage(
+          refreshError
+            ? {
+                type: "error",
+                text: "El plan se guardó, pero no se pudo recargar el catálogo.",
+              }
+            : {
+                type: "success",
+                text: `Plan ${plan.name} actualizado correctamente.`,
+              },
+        );
+      } catch (refreshError) {
+        console.error("No se pudo recargar el catálogo después de guardar:", refreshError);
+        setMessage({
+          type: "error",
+          text: "El plan se guardó, pero no se pudo recargar el catálogo.",
+        });
+      }
     }
     setSavingId(null);
   };
@@ -339,10 +370,28 @@ const PlanesFacturacion = () => {
           `No se pudo guardar el periodo ${period.label} de ${plan.name}.`,
       });
     } else {
-      setMessage({
-        type: "success",
-        text: `Periodo ${period.label} de ${plan.name} actualizado.`,
-      });
+      try {
+        const results = await fetchCatalog();
+        applyCatalogResults(results);
+        const refreshError = results.find((result) => result.error)?.error;
+        setMessage(
+          refreshError
+            ? {
+                type: "error",
+                text: "El precio se guardó, pero no se pudo recargar el catálogo. Actualiza la página para verificar los valores.",
+              }
+            : {
+                type: "success",
+                text: `Periodo ${period.label} de ${plan.name} actualizado.`,
+              },
+        );
+      } catch (refreshError) {
+        console.error("No se pudo recargar el catálogo después de guardar:", refreshError);
+        setMessage({
+          type: "error",
+          text: "El precio se guardó, pero no se pudo recargar el catálogo. Actualiza la página para verificar los valores.",
+        });
+      }
     }
     setSavingId(null);
   };
@@ -431,10 +480,10 @@ const PlanesFacturacion = () => {
         <div className="space-y-5">
           {plans.map((plan) => {
             const planPeriods = periods.filter(
-              (period) => period.plan_id === plan.id,
+              (period) => period.plan_code === plan.code,
             );
             const planFeatures = features
-              .filter((feature) => feature.plan_id === plan.id)
+              .filter((feature) => feature.plan_code === plan.code)
               .sort(
                 (first, second) =>
                   Number(first.display_order) - Number(second.display_order),
@@ -678,9 +727,14 @@ const PlanesFacturacion = () => {
                       </h4>
                       <p className="mt-1 text-xs text-neutral-500">
                         {planPeriods.length} configurados · el usuario paga el
-                        precio definido en cada periodo. El mensual se
-                        sincroniza con el precio principal del plan.
+                        precio definido en cada periodo.
                       </p>
+                      {plan.code === "premium" && isCommission && (
+                        <p className="mt-1 text-xs text-violet-300/80">
+                          Configura una comisión y un mínimo independientes
+                          para cada periodo.
+                        </p>
+                      )}
                     </div>
                   </div>
                   {planPeriods.length === 0 ? (
@@ -704,7 +758,9 @@ const PlanesFacturacion = () => {
                           </div>
                           <label>
                             <span className={labelClass}>
-                              {isCommission ? "Comisión (%)" : "Precio (COP)"}
+                              {isCommission
+                                ? "Comisión (%) · este periodo"
+                                : "Precio (COP)"}
                             </span>
                             <input
                               type="number"

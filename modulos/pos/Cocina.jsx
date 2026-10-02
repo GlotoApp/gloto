@@ -71,7 +71,11 @@ const formatOption = (option) => {
     : label;
 };
 
-const mapOrderToKitchen = (order, optionPricesByProduct = {}) => ({
+const mapOrderToKitchen = (
+  order,
+  optionPricesByProduct = {},
+  unitsByProduct = {},
+) => ({
   id: order.order_number || order.id,
   databaseId: order.id,
   cliente: order.customer_name || "Consumidor Final",
@@ -91,6 +95,11 @@ const mapOrderToKitchen = (order, optionPricesByProduct = {}) => ({
     batchId: item.order_batch_id || "legacy",
     batchSequence: Number(item.order_batches?.sequence_number || 0),
     qty: Number(item.quantity) || 0,
+    unit:
+      item.unit_name &&
+      String(item.unit_name).trim().toUpperCase() !== "UNIDAD"
+        ? item.unit_name
+        : unitsByProduct[item.product_id] || item.unit_name || "UNIDAD",
     delivered: Boolean(item.kitchen_dispatched),
     name: item.product_name || item.name || "Producto",
     cat: item.category || "",
@@ -291,11 +300,21 @@ export default function KitchenPanel() {
         ),
       ];
       const optionPricesByProduct = {};
+      const unitsByProduct = {};
       if (productIds.length > 0) {
-        const { data: optionItems, error: optionItemsError } = await supabase
-          .from("products_items")
-          .select("*")
-          .in("product_id", productIds);
+        const [
+          { data: optionItems, error: optionItemsError },
+          { data: products, error: productsError },
+        ] = await Promise.all([
+          supabase
+            .from("products_items")
+            .select("*")
+            .in("product_id", productIds),
+          supabase
+            .from("products")
+            .select("id, unit:units(name)")
+            .in("id", productIds),
+        ]);
 
         if (optionItemsError) {
           console.error(
@@ -303,6 +322,16 @@ export default function KitchenPanel() {
             optionItemsError,
           );
         }
+        if (productsError) {
+          console.error("Error cargando unidades de productos para cocina:", productsError);
+          throw productsError;
+        }
+
+        (products || []).forEach((product) => {
+          if (product.id && product.unit?.name) {
+            unitsByProduct[product.id] = product.unit.name;
+          }
+        });
 
         (optionItems || []).forEach((option) => {
           const productId = option.product_id;
@@ -341,7 +370,9 @@ export default function KitchenPanel() {
       initializedOrdersRef.current = true;
       setOrdenes(
         kitchenOrders
-          .map((order) => mapOrderToKitchen(order, optionPricesByProduct))
+          .map((order) =>
+            mapOrderToKitchen(order, optionPricesByProduct, unitsByProduct),
+          )
           .filter(
             (order) =>
               order.estado && !despachandoIds.current.has(order.databaseId),
@@ -896,7 +927,10 @@ const TicketCard = ({
         const subtotal = (Number(item.price) || 0) * (Number(item.qty) || 0);
 
         return `<tr>
-        <td class="quantity">${escaparHtml(item.qty)}</td>
+        <td class="quantity">
+          ${escaparHtml(item.qty)}
+          <span class="unit">${escaparHtml(item.unit || "UNIDAD")}</span>
+        </td>
         <td class="product">
           <div class="product-name">${escaparHtml(item.name)}</div>
           ${opciones}
@@ -924,6 +958,7 @@ const TicketCard = ({
             th { text-align: left; padding: 5px 3px; border-bottom: 2px solid black; font-weight: bold; font-size: 10px; }
             td { padding: 7px 3px; border-bottom: 1px solid #ddd; vertical-align: top; font-size: 11px; }
             .quantity { width: 12%; font-size: 22px; font-weight: bold; }
+            .unit { display: block; font-size: 9px; font-weight: 600; text-transform: uppercase; }
             .product { width: 58%; }
             .product-name { font-weight: bold; }
             .option, .instruction { font-size: 10px; margin-top: 3px; }
@@ -1055,14 +1090,23 @@ const TicketCard = ({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className={`text-3xl font-black font-mono ${
-                            delivered
-                              ? "text-white/55 line-through"
-                              : "text-white"
-                          }`}
-                        >
-                          {quantity}
+                        <span className="flex flex-col items-center leading-none">
+                          <span
+                            className={`text-3xl font-black font-mono ${
+                              delivered
+                                ? "text-white/55 line-through"
+                                : "text-white"
+                            }`}
+                          >
+                            {quantity}
+                          </span>
+                          <span
+                            className={`mt-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                              delivered ? "text-white/40" : "text-slate-400"
+                            }`}
+                          >
+                            {item.unit || "UNIDAD"}
+                          </span>
                         </span>
                         <p
                           className={`text-sm font-bold uppercase truncate ${

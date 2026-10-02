@@ -191,14 +191,8 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
           .from("subscriptions")
           .select("plan_name")
           .eq("business_id", profile.business_id)
-          .in("status", [
-            "active",
-            "pending",
-            "suspended",
-            "expired",
-            "cancelled",
-          ])
-          .order("ends_at", { ascending: false })
+          .in("status", ["active", "suspended", "expired"])
+          .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
       ]);
@@ -274,9 +268,13 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
             }, 150);
           },
         )
-        .subscribe((status) => {
+        .subscribe((status, channelError) => {
           if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-            console.error("Realtime del contador no disponible:", status);
+            console.error(
+              "Realtime del contador no disponible:",
+              status,
+              channelError,
+            );
           }
         });
 

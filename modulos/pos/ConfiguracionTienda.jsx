@@ -52,6 +52,7 @@ const ConfiguracionTienda = () => {
   const [locating, setLocating] = useState(false);
   const [saveAttempted, setSaveAttempted] = useState(false);
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
+  const [isCssMapFullscreen, setIsCssMapFullscreen] = useState(false);
   const [message, setMessage] = useState("");
   const logoInput = useRef(null);
   const coverInput = useRef(null);
@@ -202,19 +203,71 @@ const ConfiguracionTienda = () => {
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsMapFullscreen(document.fullscreenElement === mapElement.current);
+      const nativeFullscreen =
+        document.fullscreenElement === mapElement.current;
+      setIsMapFullscreen(nativeFullscreen || isCssMapFullscreen);
       setTimeout(() => mapInstance.current?.invalidateSize(), 100);
     };
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () =>
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, []);
+  }, [isCssMapFullscreen]);
 
-  const toggleMapFullscreen = () => {
+  useEffect(() => {
+    if (!isCssMapFullscreen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setIsCssMapFullscreen(false);
+        setIsMapFullscreen(false);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    const resizeFrame = window.requestAnimationFrame(() =>
+      mapInstance.current?.invalidateSize({ pan: false }),
+    );
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+      window.cancelAnimationFrame(resizeFrame);
+      window.requestAnimationFrame(() =>
+        mapInstance.current?.invalidateSize({ pan: false }),
+      );
+    };
+  }, [isCssMapFullscreen]);
+
+  const toggleMapFullscreen = async () => {
     if (!mapElement.current) return;
-    if (document.fullscreenElement) document.exitFullscreen();
-    else mapElement.current.requestFullscreen?.();
-    setTimeout(() => mapInstance.current?.invalidateSize(), 200);
+    if (isMapFullscreen) {
+      setIsCssMapFullscreen(false);
+      setIsMapFullscreen(false);
+      if (document.fullscreenElement) {
+        try {
+          await document.exitFullscreen();
+        } catch (error) {
+          console.error("No se pudo cerrar la pantalla completa del mapa:", error);
+        }
+      }
+      return;
+    }
+
+    if (mapElement.current.requestFullscreen) {
+      try {
+        await mapElement.current.requestFullscreen();
+        return;
+      } catch (error) {
+        console.warn(
+          "El navegador no permitió pantalla completa nativa; se abrirá el mapa ampliado.",
+          error,
+        );
+      }
+    }
+
+    setIsCssMapFullscreen(true);
+    setIsMapFullscreen(true);
   };
 
   const useCurrentLocation = () => {
@@ -557,7 +610,11 @@ const ConfiguracionTienda = () => {
             </div>
             <div
               ref={mapElement}
-              className="relative mb-5 h-72 overflow-hidden rounded-2xl border border-white/[0.08] bg-neutral-950 [&:fullscreen]:mb-0 [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0"
+              className={`overflow-hidden bg-neutral-950 [&:fullscreen]:mb-0 [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0 ${
+                isCssMapFullscreen
+                  ? "fixed inset-0 z-[1000] m-0 h-[100dvh] w-screen rounded-none border-0"
+                  : "relative mb-5 h-72 rounded-2xl border border-white/[0.08]"
+              }`}
               aria-label="Mapa interactivo de ubicación de la tienda"
             >
               <button

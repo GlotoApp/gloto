@@ -28,15 +28,6 @@ const formatDate = (value) =>
       })
     : "Sin fecha";
 
-const formatShortDate = (value) =>
-  value
-    ? new Date(value).toLocaleDateString("es-CO", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      })
-    : "Sin fecha";
-
 const getDaysRemaining = (endsAt) => {
   if (!endsAt) return null;
   return Math.max(
@@ -69,6 +60,8 @@ const getPlanEndDate = (plan) => {
 export default function MiPlan() {
   const [businessId, setBusinessId] = useState(null);
   const [subscription, setSubscription] = useState(null);
+  const [renewalAmount, setRenewalAmount] = useState(null);
+  const [commissionStatement, setCommissionStatement] = useState(null);
   const [latestPayment, setLatestPayment] = useState(null);
   const [paymentQr, setPaymentQr] = useState(null);
   const [paymentFile, setPaymentFile] = useState(null);
@@ -103,22 +96,18 @@ export default function MiPlan() {
     }
 
     setBusinessId(profile.business_id);
+    setRenewalAmount(null);
+    setCommissionStatement(null);
     const [{ data, error }, { data: paymentData }, { data: qrData }] =
       await Promise.all([
         supabase
           .from("subscriptions")
           .select(
-            "id,plan_name,status,amount,billing_period,starts_at,ends_at,payment_method,plan_id,period_id,duration_days",
+            "id,plan_code,plan_name,status,amount,billing_period,starts_at,ends_at,payment_method,period_id,duration_days,billing_type,commission_rate,minimum_amount",
           )
           .eq("business_id", profile.business_id)
-          .in("status", [
-            "active",
-            "pending",
-            "suspended",
-            "expired",
-            "cancelled",
-          ])
-          .order("ends_at", { ascending: false })
+          .in("status", ["active", "suspended", "expired"])
+          .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
         supabase
@@ -137,8 +126,68 @@ export default function MiPlan() {
           .maybeSingle(),
       ]);
 
-    if (error) setMessage("No se pudo cargar la información del plan.");
-    else setSubscription(data);
+    if (error) {
+      console.error("No se pudo cargar la suscripción:", error);
+      setMessage("No se pudo cargar la información del plan.");
+    } else {
+      setSubscription(data);
+      if (data?.billing_type === "commission") {
+        const { data: statement, error: statementError } = await supabase.rpc(
+          "get_or_create_subscription_commission_statement",
+          { p_subscription_id: data.id },
+        );
+
+        if (statementError) {
+          console.error(
+            "No se pudo calcular la comisión del ciclo:",
+            statementError,
+          );
+          setMessage("No se pudo calcular el cobro de comisión del ciclo.");
+        } else {
+          setCommissionStatement(statement);
+          if (statement?.is_closed) {
+            const amount = Number(statement.amount_due);
+            if (Number.isFinite(amount) && amount >= 0) {
+              setRenewalAmount(amount);
+            } else {
+              setMessage("El cobro calculado para el ciclo no es válido.");
+            }
+          }
+        }
+      } else if (data?.period_id) {
+        const { data: period, error: periodError } = await supabase
+          .from("billing_plan_periods")
+          .select("plan_code,billing_type,price_amount,minimum_amount")
+          .eq("id", data.period_id)
+          .eq("plan_code", data.plan_code)
+          .eq("is_active", true)
+          .eq("plan_is_active", true)
+          .maybeSingle();
+
+        if (periodError || !period) {
+          console.error(
+            "No se pudo consultar el precio de renovación:",
+            periodError,
+          );
+          setMessage(
+            "No se pudo consultar el precio actualizado para renovar el plan.",
+          );
+        } else {
+          const amount =
+            period.billing_type === "commission"
+              ? (period.minimum_amount ?? data.amount)
+              : period.price_amount;
+          const parsedAmount = Number(amount);
+          if (Number.isFinite(parsedAmount) && parsedAmount >= 0) {
+            setRenewalAmount(parsedAmount);
+          } else {
+            setMessage("El precio configurado para renovar no es válido.");
+          }
+        }
+      } else if (data) {
+        setMessage("La suscripción no tiene un período de renovación.");
+      }
+    }
     setLatestPayment(paymentData || null);
     if (qrData?.storage_path) {
       const { data: publicUrlData } = supabase.storage
@@ -200,17 +249,21 @@ export default function MiPlan() {
     };
   }, [daysRemaining, subscription?.duration_days, subscription?.status]);
 
-  const showPaymentPanel =
-    (subscription?.status === "active" &&
-      daysRemaining !== null &&
-      daysRemaining <= 5) ||
-    ["suspended", "expired"].includes(subscription?.status);
+  const isCommissionPlan = subscription?.billing_type === "commission";
+  const commissionCycleClosed = commissionStatement?.is_closed === true;
+  const showPaymentPanel = isCommissionPlan
+    ? commissionCycleClosed && commissionStatement?.status === "due"
+    : (subscription?.status === "active" &&
+        daysRemaining !== null &&
+        daysRemaining <= 5) ||
+      ["suspended", "expired"].includes(subscription?.status);
 
   const handleUpload = async (event) => {
     event.preventDefault();
     if (
       !businessId ||
       !subscription ||
+      renewalAmount === null ||
       !paymentFile ||
       latestPayment?.status === "pending"
     )
@@ -230,23 +283,39 @@ export default function MiPlan() {
       return;
     }
 
-    const { error: recordError } = await supabase
-      .from("payment_records")
-      .insert({
-        business_id: businessId,
-        subscription_id: subscription.id,
-        amount: subscription.amount,
-        payment_method: "manual",
-        status: "pending",
-        support_path: filePath,
-      });
+    const { error: recordError } = isCommissionPlan
+      ? (
+          await supabase.rpc("submit_subscription_commission_payment", {
+            p_statement_id: commissionStatement?.statement_id,
+            p_support_path: filePath,
+          })
+        )
+      : await supabase.from("payment_records").insert({
+          business_id: businessId,
+          subscription_id: subscription.id,
+          amount: renewalAmount,
+          payment_method: "manual",
+          status: "pending",
+          support_path: filePath,
+        });
 
-    setMessage(
-      recordError
-        ? "El archivo se subió, pero no se pudo registrar el pago."
-        : "Soporte enviado y solicitud de pago registrada. Te avisaremos cuando sea validada.",
-    );
-    if (!recordError) setShowSuccessModal(true);
+    if (recordError) {
+      console.error("No se pudo registrar la solicitud de pago:", recordError);
+      setMessage(`No se pudo registrar el pago: ${recordError.message}`);
+    } else {
+      setMessage(
+        "Soporte enviado y solicitud de pago registrada. Te avisaremos cuando sea validada.",
+      );
+    }
+    if (!recordError) {
+      setShowSuccessModal(true);
+      setLatestPayment({ status: "pending" });
+      if (isCommissionPlan) {
+        setCommissionStatement((current) =>
+          current ? { ...current, status: "payment_pending" } : current,
+        );
+      }
+    }
     setPaymentFile(null);
     setFileInputKey((current) => current + 1);
     setSaving(false);
@@ -412,37 +481,108 @@ export default function MiPlan() {
                   </div>
                 </section>
 
-                {showPaymentPanel && (
-                  <>
-                    <div className="flex flex-col gap-3 rounded-xl bg-white/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                      <div className="flex items-center gap-3">
-                        <CreditCard
-                          className={
-                            showPaymentPanel
-                              ? "text-rose-300"
-                              : "text-violet-300"
-                          }
-                          size={22}
-                        />
+                {isCommissionPlan &&
+                  commissionStatement &&
+                  !commissionCycleClosed && (
+                    <section className="rounded-2xl border border-violet-300/15 bg-gradient-to-br from-violet-400/[0.07] via-neutral-900/80 to-neutral-900 p-5 sm:p-6">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                         <div>
-                          <h2 className="text-base font-black">
-                            Monto a pagar
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-300">
+                            Comisión del ciclo en curso
+                          </p>
+                          <h2 className="mt-1 text-base font-black text-white">
+                            El cobro se calcula al terminar tu periodo
                           </h2>
-                          <p className="mt-1 text-sm text-neutral-400">
-                            Ciclo facturado:{" "}
-                            {formatShortDate(subscription.starts_at)}
-                            {" - "}
-                            {formatShortDate(subscription.ends_at)}
+                          <p className="mt-1 text-xs text-neutral-400">
+                            Ciclo: {formatDate(commissionStatement.cycle_starts_at)}
+                            {" – "}
+                            {formatDate(commissionStatement.cycle_ends_at)}
+                          </p>
+                          <p className="mt-1 text-xs text-neutral-500">
+                            Se calcula sobre el total de los tickets creados,
+                            incluso si luego se cancelan.
+                          </p>
+                          <p className="mt-1 text-[11px] font-semibold text-neutral-400">
+                            Comisión acumulada ({commissionStatement.commission_rate}% por ticket):{" "}
+                            {formatCurrency(commissionStatement.commission_total)}{" "}
+                            · Mínimo del ciclo:{" "}
+                            {formatCurrency(commissionStatement.minimum_amount)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.07] bg-black/20 px-4 py-3 sm:min-w-44 sm:text-right">
+                          <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-neutral-500">
+                            Estimado de cobro (comisión o mínimo)
+                          </p>
+                          <p className="mt-1 text-xl font-black text-violet-300">
+                            {formatCurrency(commissionStatement.estimated_amount)}
+                          </p>
+                          <p className="mt-1 text-[10px] text-neutral-500">
+                            {commissionStatement.order_count} tickets · ventas{" "}
+                            {formatCurrency(commissionStatement.sales_total)}
                           </p>
                         </div>
                       </div>
-                      <p
-                        className={`text-3xl font-black sm:text-right ${
-                          showPaymentPanel ? "text-rose-300" : "text-violet-300"
-                        }`}
-                      >
-                        {formatCurrency(subscription.amount)}
-                      </p>
+                    </section>
+                  )}
+
+                {showPaymentPanel && (
+                  <>
+                    <div className="overflow-hidden rounded-2xl border border-rose-300/15 bg-gradient-to-br from-rose-400/[0.08] via-neutral-900/80 to-neutral-900">
+                      <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-300/15 bg-rose-400/10 text-rose-300">
+                            <CreditCard size={19} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-rose-300">
+                              {isCommissionPlan
+                                ? "Comisión del ciclo vencido"
+                                : "Renovación del plan"}
+                            </p>
+                            <h2 className="mt-1 text-base font-black text-white">
+                              Plan {subscription.plan_name}
+                            </h2>
+                            {!isCommissionPlan && (
+                              <p className="mt-1 text-xs font-semibold text-neutral-300">
+                                Ciclo que vas a renovar:{" "}
+                                <span className="text-white">
+                                  {subscription.billing_period || "No especificado"}
+                                </span>
+                              </p>
+                            )}
+                            <p className="mt-1 max-w-xl text-xs leading-relaxed text-neutral-400">
+                              {isCommissionPlan
+                                ? `Ciclo vencido ${formatDate(commissionStatement.cycle_starts_at)} – ${formatDate(commissionStatement.cycle_ends_at)}: ${commissionStatement.order_count} tickets sumaron ${formatCurrency(commissionStatement.sales_total)} en ventas. La comisión del ${commissionStatement.commission_rate}% calculada y redondeada por ticket suma ${formatCurrency(commissionStatement.commission_total)}. Se compara con el mínimo de ${formatCurrency(commissionStatement.minimum_amount)}; el total fijado para pagar es ${formatCurrency(commissionStatement.amount_due)}. Al aprobar el pago, se activa el siguiente ciclo.`
+                                : planHasExpired
+                                  ? `Tu periodo terminó el ${formatDate(planEndDate)}. Este es el precio para renovar tu plan.`
+                                  : subscription.status === "suspended"
+                                    ? "Tu plan está suspendido. Este es el precio para solicitar su reactivación."
+                                    : `Este es el precio para renovar cuando termine tu periodo actual${planEndDate ? `, el ${formatDate(planEndDate)}` : ""}.`}
+                            </p>
+                            {!isCommissionPlan && (
+                              <p className="mt-2 text-[11px] text-neutral-500">
+                                Este cobro corresponde al próximo periodo, no al que ya pagaste.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="shrink-0 rounded-xl border border-white/[0.07] bg-black/20 px-4 py-3 sm:min-w-40 sm:text-right">
+                          <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-neutral-500">
+                            {isCommissionPlan
+                              ? "Total a pagar"
+                              : "Valor de renovación"}
+                          </p>
+                          <p
+                            className={`mt-1 text-2xl font-black ${
+                              showPaymentPanel ? "text-rose-300" : "text-violet-300"
+                            }`}
+                          >
+                            {renewalAmount === null
+                              ? "No disponible"
+                              : formatCurrency(renewalAmount)}
+                          </p>
+                        </div>
+                      </div>
                     </div>
                     <section className="grid gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
                       <div className="flex flex-col justify-center rounded-xl bg-white/[0.035] p-5 text-center">
@@ -458,13 +598,19 @@ export default function MiPlan() {
                               className="h-full w-full object-contain"
                             />
                           ) : (
-                            <QRCodeSVG
-                              value={`Entidad bancaria genérica | Referencia GLOTO-${businessId} | Monto ${subscription.amount} COP`}
-                              size={156}
-                              bgColor="#ffffff"
-                              fgColor="#111111"
-                              level="M"
-                            />
+                            renewalAmount === null ? (
+                              <p className="text-center text-xs text-neutral-500">
+                                No se pudo consultar el valor del cobro.
+                              </p>
+                            ) : (
+                              <QRCodeSVG
+                                value={`Entidad bancaria genérica | Referencia GLOTO-${businessId} | Monto ${renewalAmount} COP`}
+                                size={156}
+                                bgColor="#ffffff"
+                                fgColor="#111111"
+                                level="M"
+                              />
+                            )
                           )}
                         </div>
                         <button
@@ -547,7 +693,9 @@ export default function MiPlan() {
                             )}
                             <button
                               type="submit"
-                              disabled={saving || !paymentFile}
+                              disabled={
+                                saving || !paymentFile || renewalAmount === null
+                              }
                               className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-wider transition hover:bg-violet-500 disabled:opacity-50"
                             >
                               {saving ? (
@@ -626,13 +774,19 @@ export default function MiPlan() {
                 className="h-full w-full object-contain"
               />
             ) : (
-              <QRCodeSVG
-                value={`Entidad bancaria genérica | Referencia GLOTO-${businessId} | Monto ${subscription.amount} COP`}
-                className="h-full w-full"
-                bgColor="#ffffff"
-                fgColor="#111111"
-                level="M"
-              />
+              renewalAmount === null ? (
+                <p className="text-center text-sm text-neutral-500">
+                  No se pudo consultar el precio de renovación.
+                </p>
+              ) : (
+                <QRCodeSVG
+                  value={`Entidad bancaria genérica | Referencia GLOTO-${businessId} | Monto ${renewalAmount} COP`}
+                  className="h-full w-full"
+                  bgColor="#ffffff"
+                  fgColor="#111111"
+                  level="M"
+                />
+              )
             )}
           </div>
         </div>

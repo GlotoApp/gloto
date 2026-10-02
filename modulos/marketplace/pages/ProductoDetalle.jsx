@@ -67,6 +67,7 @@ const ProductoDetalle = ({
   const [varianteId, setVarianteId] = useState(null);
   const [notas, setNotas] = useState("");
   const [cantidad, setCantidad] = useState(1);
+  const [cantidadMedida, setCantidadMedida] = useState("1");
 
   // Única fuente de verdad: las opciones ya vienen cargadas en
   // `producto.variantes` desde la consulta en bloque que hace
@@ -216,6 +217,7 @@ const ProductoDetalle = ({
 
       setNotas("");
       setCantidad(1);
+      setCantidadMedida("1");
       setVarianteId(null);
     };
 
@@ -266,7 +268,18 @@ const ProductoDetalle = ({
     : opciones.find((v) => v.id === varianteId) || null;
 
   const precioUnitario = producto.precio + (variante?.precioExtra || 0);
-  const precioTotal = precioUnitario * cantidad;
+  const unidadVenta = producto.unit || {
+    name: "UNIDAD",
+    allows_fraction: false,
+  };
+  const admiteFracciones = unidadVenta.allows_fraction === true;
+  const cantidadIngresada = admiteFracciones
+    ? Number(String(cantidadMedida).replace(",", "."))
+    : cantidad;
+  const cantidadAgregada = Number.isFinite(cantidadIngresada)
+    ? cantidadIngresada
+    : 0;
+  const precioTotal = precioUnitario * cantidadAgregada;
   const stockDisponible =
     typeof producto.stock === "number" ? producto.stock : Infinity;
 
@@ -305,8 +318,13 @@ const ProductoDetalle = ({
     producto.sold_out === true;
   const limiteAlcanzado = !agotado && yaEnCarrito >= stockDisponible;
   const restanteParaAgregar = Math.max(0, stockDisponible - yaEnCarrito);
-  const alcanzoStock = cantidad >= restanteParaAgregar;
-  const noSePuedeAgregar = agotado || limiteAlcanzado;
+  const alcanzoStock =
+    restanteParaAgregar <= 0 || cantidadAgregada >= restanteParaAgregar;
+  const noSePuedeAgregar =
+    agotado ||
+    limiteAlcanzado ||
+    cantidadAgregada <= 0 ||
+    cantidadAgregada > restanteParaAgregar;
 
   const handleAgregar = () => {
     if (noSePuedeAgregar || requiereSeleccionarVariante) return;
@@ -325,7 +343,7 @@ const ProductoDetalle = ({
       productoBase: producto,
       variante,
       notas,
-      cantidad,
+      cantidad: cantidadAgregada,
     });
     onAddedToCart?.(producto);
     onClose();
@@ -427,6 +445,16 @@ const ProductoDetalle = ({
           </h2>
           <p
             style={{
+              fontSize: "15px",
+              fontWeight: 800,
+              color: "#a78bfa",
+              margin: "0 0 10px",
+            }}
+          >
+            {fmt(producto.precio)} / {unidadVenta.name}
+          </p>
+          <p
+            style={{
               fontSize: "13px",
               color: "rgba(255,255,255,0.5)",
               lineHeight: 1.6,
@@ -457,7 +485,7 @@ const ProductoDetalle = ({
                   marginBottom: "20px",
                 }}
               >
-                ¡Solo quedan {stockDisponible} unidades!
+                ¡Solo quedan {stockDisponible} {unidadVenta.name}!
               </p>
             )
           )}
@@ -799,47 +827,84 @@ const ProductoDetalle = ({
             flexShrink: 0,
           }}
         >
-          <button
-            type="button"
-            onClick={() => setCantidad((c) => Math.max(1, c - 1))}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#fff",
-              cursor: "pointer",
-              display: "flex",
-            }}
-            aria-label="Quitar uno"
-          >
-            <Minus size={16} />
-          </button>
-          <span
-            style={{
-              fontSize: "14px",
-              fontWeight: 800,
-              minWidth: "16px",
-              textAlign: "center",
-            }}
-          >
-            {cantidad}
-          </span>
-          <button
-            type="button"
-            onClick={() =>
-              setCantidad((c) => (c < restanteParaAgregar ? c + 1 : c))
-            }
-            disabled={alcanzoStock}
-            style={{
-              background: "none",
-              border: "none",
-              color: alcanzoStock ? "rgba(255,255,255,0.3)" : "#fff",
-              cursor: alcanzoStock ? "not-allowed" : "pointer",
-              display: "flex",
-            }}
-            aria-label="Agregar uno"
-          >
-            <Plus size={16} />
-          </button>
+          {admiteFracciones ? (
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                color: "#fff",
+                fontSize: "13px",
+                fontWeight: 700,
+              }}
+            >
+              Cantidad ({unidadVenta.name})
+              <input
+                type="text"
+                inputMode="decimal"
+                value={cantidadMedida}
+                onChange={(event) => {
+                  const value = event.target.value.replace(",", ".");
+                  if (/^\d*(\.\d{0,3})?$/.test(value)) {
+                    setCantidadMedida(value);
+                  }
+                }}
+                aria-label={`Cantidad en ${unidadVenta.name}`}
+                style={{
+                  width: "84px",
+                  borderRadius: "10px",
+                  border: "1px solid #333",
+                  background: "#131313",
+                  color: "#fff",
+                  padding: "9px",
+                }}
+              />
+            </label>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setCantidad((c) => Math.max(1, c - 1))}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#fff",
+                  cursor: "pointer",
+                  display: "flex",
+                }}
+                aria-label="Quitar uno"
+              >
+                <Minus size={16} />
+              </button>
+              <span
+                style={{
+                  fontSize: "14px",
+                  fontWeight: 800,
+                  minWidth: "16px",
+                  textAlign: "center",
+                }}
+              >
+                {cantidad}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setCantidad((c) => (c < restanteParaAgregar ? c + 1 : c))
+                }
+                disabled={alcanzoStock}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: alcanzoStock ? "rgba(255,255,255,0.3)" : "#fff",
+                  cursor: alcanzoStock ? "not-allowed" : "pointer",
+                  display: "flex",
+                }}
+                aria-label="Agregar uno"
+              >
+                <Plus size={16} />
+              </button>
+            </>
+          )}
         </div>
 
         <button

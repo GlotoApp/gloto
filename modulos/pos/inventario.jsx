@@ -12,19 +12,25 @@ import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 import SubLoading from "./SubLoading";
 
-const DEFAULT_UNITS = [];
+const DEFAULT_UNITS = ["UNIDAD"];
 const inputClass =
   "w-full rounded-lg border border-white/10 bg-neutral-800 p-3 text-sm outline-none focus:border-violet-500";
 const upper = (value) =>
   String(value ?? "")
     .trim()
     .toUpperCase();
+const formatQuantity = (value) =>
+  new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 }).format(
+    Number(value) || 0,
+  );
+const getStockStatus = (item) =>
+  item.stock < 0 ? "critico" : item.stock <= item.minStock ? "bajo" : "optimo";
 
 function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 p-6">
-        <div className="mb-6 flex items-center justify-between">
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 p-5 sm:p-8">
+        <div className="mb-8 flex items-center justify-between">
           <h2 className="text-lg font-black uppercase tracking-tighter">
             {title}
           </h2>
@@ -48,10 +54,12 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
   const [value, setValue] = useState(String(item.stock));
   const numericValue = Number(value || 0);
   const changed = numericValue !== item.stock;
+  const stockStep = item.allowsFraction ? 0.1 : 1;
+  const stockStatus = getStockStatus(item);
   const status =
-    item.stock < 0
+    stockStatus === "critico"
       ? "crítico"
-      : item.stock <= item.minStock
+      : stockStatus === "bajo"
         ? "bajo"
         : "óptimo";
   const color =
@@ -83,12 +91,12 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
               {item.name}
             </p>
             <p className="text-xs text-neutral-500">
-              {item.category} · mínimo {item.minStock} {item.unit}
+              Categoría: {item.category} · mínimo {formatQuantity(item.minStock)} {item.unit}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
             <span className={`text-sm font-black ${color}`}>
-              {item.stock} {item.unit}
+              {formatQuantity(item.stock)} {item.unit}
             </span>
             <span className={`text-[9px] font-black uppercase ${color}`}>
               {status}
@@ -112,7 +120,9 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
           <div className="flex items-center justify-center gap-4 rounded-lg bg-neutral-800/40 p-4">
             <button
               type="button"
-              onClick={() => setValue(String(numericValue - 1))}
+              onClick={() =>
+                setValue(String(Number((numericValue - stockStep).toFixed(3))))
+              }
               aria-label="Disminuir stock"
               className="rounded-lg p-2 text-neutral-500 hover:bg-neutral-700 hover:text-red-400"
             >
@@ -120,7 +130,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
             </button>
             <input
               type="number"
-              step="any"
+              step={item.allowsFraction ? "0.001" : "1"}
               value={value}
               onChange={(event) => setValue(event.target.value)}
               aria-label={`Stock de ${item.name}`}
@@ -128,7 +138,9 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
             />
             <button
               type="button"
-              onClick={() => setValue(String(numericValue + 1))}
+              onClick={() =>
+                setValue(String(Number((numericValue + stockStep).toFixed(3))))
+              }
               aria-label="Aumentar stock"
               className="rounded-lg p-2 text-neutral-500 hover:bg-neutral-700 hover:text-emerald-400"
             >
@@ -164,17 +176,23 @@ export default function Inventario() {
   const [inventory, setInventory] = useState([]);
   const [categories, setCategories] = useState([]);
   const [units, setUnits] = useState(DEFAULT_UNITS);
+  const [unitDescriptions, setUnitDescriptions] = useState({});
+  const [fractionalUnits, setFractionalUnits] = useState({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Todos");
   const [unit, setUnit] = useState("Todos");
+  const [stockStatus, setStockStatus] = useState("Todos");
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [showQuickCategory, setShowQuickCategory] = useState(false);
+  const [quickCategoryName, setQuickCategoryName] = useState("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
   const [form, setForm] = useState({
     name: "",
     categoryId: "",
     stock: 0,
-    unit: DEFAULT_UNITS[0],
+    unit: "",
     minStock: 10,
     price: 0,
   });
@@ -204,10 +222,19 @@ export default function Inventario() {
         .select("id,name")
         .eq("business_id", profile.business_id),
       supabase
-        .from("inventory_units")
-        .select("name")
-        .eq("business_id", profile.business_id),
+        .from("units")
+        .select("name,description,allows_fraction")
+        .eq("is_active", true)
+        .order("name"),
     ]);
+    if (items.error || categoryRows.error || unitRows.error) {
+      const loadError = items.error || categoryRows.error || unitRows.error;
+      console.error("Error cargando inventario, categorías o unidades:", loadError);
+      alert("No se pudo cargar completamente el inventario. Intenta nuevamente.");
+      setLoading(false);
+      return;
+    }
+
     const categoryMap = Object.fromEntries(
       (categoryRows.data || []).map((item) => [item.id, upper(item.name)]),
     );
@@ -219,6 +246,11 @@ export default function Inventario() {
         category: categoryMap[item.category_id] || "Sin categoría",
         stock: Number(item.stock || 0),
         unit: upper(item.unit),
+        allowsFraction: Boolean(
+          (unitRows.data || []).find(
+            (unitRow) => upper(unitRow.name) === upper(item.unit),
+          )?.allows_fraction,
+        ),
         minStock: Number(item.min_stock || 0),
         price: Number(item.price || 0),
       })),
@@ -228,10 +260,25 @@ export default function Inventario() {
         .map((item) => ({ id: item.id, name: upper(item.name) }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     );
-    setUnits(
-      [
-        ...new Set((unitRows.data || []).map((item) => upper(item.name))),
-      ].sort(),
+    const activeUnits = [
+      ...new Set((unitRows.data || []).map((item) => upper(item.name))),
+    ].sort();
+    setFractionalUnits(
+      Object.fromEntries(
+        (unitRows.data || []).map((item) => [
+          upper(item.name),
+          Boolean(item.allows_fraction),
+        ]),
+      ),
+    );
+    setUnits(activeUnits);
+    setUnitDescriptions(
+      Object.fromEntries(
+        (unitRows.data || []).map((item) => [
+          upper(item.name),
+          String(item.description || "").trim(),
+        ]),
+      ),
     );
     setLoading(false);
   };
@@ -250,20 +297,23 @@ export default function Inventario() {
               item.name.toLowerCase().includes(text) ||
               item.category.toLowerCase().includes(text)) &&
             (category === "Todos" || item.categoryId === category) &&
-            (unit === "Todos" || item.unit === unit)
+            (unit === "Todos" || item.unit === unit) &&
+            (stockStatus === "Todos" || getStockStatus(item) === stockStatus)
           );
         })
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [inventory, search, category, unit],
+    [inventory, search, category, unit, stockStatus],
   );
 
   const openNew = () => {
     setEditing(null);
+    setShowQuickCategory(false);
+    setQuickCategoryName("");
     setForm({
       name: "",
-      categoryId: categories[0]?.id || "",
+      categoryId: "",
       stock: 0,
-      unit: units[0],
+      unit: "",
       minStock: 10,
       price: 0,
     });
@@ -271,14 +321,58 @@ export default function Inventario() {
   };
   const openEdit = (item) => {
     setEditing(item);
+    setShowQuickCategory(false);
+    setQuickCategoryName("");
     setForm({ ...item, categoryId: item.categoryId || "" });
     setModal(true);
+  };
+
+  const createQuickCategory = async () => {
+    const name = upper(quickCategoryName);
+    if (!businessId || !name || creatingCategory) return;
+
+    const existingCategory = categories.find((item) => item.name === name);
+    if (existingCategory) {
+      setQuickCategoryName("");
+      setShowQuickCategory(false);
+      alert("La categoría ya existe. Selecciónala en la lista.");
+      return;
+    }
+
+    setCreatingCategory(true);
+    const { data, error } = await supabase
+      .from("inventory_categories")
+      .insert({ business_id: businessId, name })
+      .select("id,name")
+      .single();
+    setCreatingCategory(false);
+
+    if (error) {
+      console.error("Error creando categoría rápida de inventario:", error);
+      alert(
+        error.code === "23505"
+          ? "La categoría ya existe."
+          : "No se pudo crear la categoría. Intenta nuevamente.",
+      );
+      return;
+    }
+
+    const newCategory = { id: data.id, name: upper(data.name) };
+    setCategories((current) =>
+      [...current, newCategory].sort((a, b) => a.name.localeCompare(b.name)),
+    );
+    setQuickCategoryName("");
+    setShowQuickCategory(false);
   };
 
   const saveInventory = async () => {
     if (!businessId || !form.name.trim()) return;
     if (!form.categoryId) {
       alert("Selecciona una categoría para el insumo.");
+      return;
+    }
+    if (!form.unit) {
+      alert("Selecciona una unidad para el insumo.");
       return;
     }
     const desiredStock = Number(form.stock) || 0;
@@ -333,6 +427,7 @@ export default function Inventario() {
         )?.name || "Sin categoría",
       stock: Number(saved.stock || 0),
       unit: saved.unit,
+      allowsFraction: Boolean(fractionalUnits[upper(saved.unit)]),
       minStock: Number(saved.min_stock || 0),
       price: Number(saved.price || 0),
     };
@@ -386,6 +481,9 @@ export default function Inventario() {
   const lowStock = inventory.filter(
     (item) => item.stock <= item.minStock,
   ).length;
+  const selectedUnit = upper(form.unit);
+  const selectedUnitAllowsFraction = Boolean(fractionalUnits[selectedUnit]);
+  const quantityStep = selectedUnitAllowsFraction ? "0.001" : "1";
 
   if (loading) {
     return (
@@ -437,49 +535,85 @@ export default function Inventario() {
         </div>
       </header>
       <main className="mx-auto max-w-7xl space-y-5 pb-20">
-        <div className="flex flex-col gap-3 rounded-2xl border border-white/5 bg-neutral-900/30 p-4 lg:flex-row">
-          <div className="relative flex-1">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-600"
-              size={14}
-            />
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="BUSCAR INSUMO..."
-              className={`${inputClass} pl-10 text-[10px] uppercase`}
-            />
+        <div className="rounded-2xl border border-white/5 bg-neutral-900/30 p-3 sm:p-4">
+          <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.5fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(150px,1fr)_auto]">
+            <label className="block min-w-0">
+              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+                Buscar
+              </span>
+              <span className="relative block">
+                <Search
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
+                  size={15}
+                />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Nombre del insumo"
+                  className={`${inputClass} pl-10`}
+                />
+              </span>
+            </label>
+            <label className="block min-w-0">
+              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+                Categoría
+              </span>
+              <select
+                value={category}
+                onChange={(event) => setCategory(event.target.value)}
+                className={inputClass}
+              >
+                <option value="Todos">Todas las categorías</option>
+                {categories.map((value) => (
+                  <option key={value.id} value={value.id}>
+                    {value.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block min-w-0">
+              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+                Unidad
+              </span>
+              <select
+                value={unit}
+                onChange={(event) => setUnit(event.target.value)}
+                className={`${inputClass} uppercase`}
+              >
+                <option value="Todos">Todas las unidades</option>
+                {units.map((value) => (
+                  <option key={value} value={value}>
+                    {unitDescriptions[value]
+                      ? `${value} · ${unitDescriptions[value]}`
+                      : value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block min-w-0">
+              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+                Estado del stock
+              </span>
+              <select
+                value={stockStatus}
+                onChange={(event) => setStockStatus(event.target.value)}
+                className={inputClass}
+              >
+                <option value="Todos">Todos los estados</option>
+                <option value="optimo">Óptimos</option>
+                <option value="bajo">Bajos</option>
+                <option value="critico">Críticos</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={openNew}
+              className="flex min-h-[46px] items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-violet-500 px-5 py-3 text-[10px] font-black uppercase transition-colors hover:bg-violet-600 sm:col-span-2 xl:col-span-1"
+            >
+              <Plus size={14} /> Nuevo insumo
+            </button>
           </div>
-          <select
-            value={category}
-            onChange={(event) => setCategory(event.target.value)}
-            className={inputClass}
-          >
-            <option value="Todos">Todas las categorías</option>
-            {categories.map((value) => (
-              <option key={value.id} value={value.id}>
-                {value.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={unit}
-            onChange={(event) => setUnit(event.target.value)}
-            className={inputClass}
-          >
-            <option value="Todos">Todas las unidades</option>
-            {units.map((value) => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={openNew}
-            className="flex items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 py-3 text-[10px] font-black uppercase hover:bg-violet-600"
-          >
-            <Plus size={14} /> Nuevo insumo
-          </button>
         </div>
         <div className="space-y-3">
           {filteredInventory.length === 0 ? (
@@ -504,7 +638,7 @@ export default function Inventario() {
           title={editing ? "Editar insumo" : "Nuevo insumo"}
           onClose={() => setModal(false)}
         >
-          <div className="space-y-4">
+          <div className="space-y-6">
             <label className="block text-[10px] font-black uppercase tracking-widest text-neutral-500">
               Nombre
               <input
@@ -516,23 +650,64 @@ export default function Inventario() {
                 placeholder="Ej: Harina de maíz"
               />
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
-                Categoría
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <div className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+                <label htmlFor="inventory-category">Categoría</label>
                 <select
+                  id="inventory-category"
                   value={form.categoryId}
                   onChange={(event) =>
                     setForm({ ...form, categoryId: event.target.value })
                   }
                   className={`${inputClass} mt-2`}
+                  required
                 >
+                  <option value="" disabled>
+                    Selecciona una categoría
+                  </option>
                   {categories.map((value) => (
                     <option key={value.id} value={value.id}>
                       {value.name}
                     </option>
                   ))}
                 </select>
-              </label>
+                {!showQuickCategory ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickCategory(true)}
+                    className="mt-2 flex items-center gap-1.5 text-[10px] font-bold normal-case tracking-normal text-violet-300 hover:text-violet-200"
+                  >
+                    <Plus size={13} /> Crear categoría rápida
+                  </button>
+                ) : (
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      autoFocus
+                      value={quickCategoryName}
+                      onChange={(event) =>
+                        setQuickCategoryName(event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          createQuickCategory();
+                        }
+                      }}
+                      aria-label="Nombre de la nueva categoría"
+                      placeholder="Nombre de la categoría"
+                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-neutral-800 px-3 py-2 text-xs normal-case tracking-normal outline-none focus:border-violet-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={createQuickCategory}
+                      disabled={!quickCategoryName.trim() || creatingCategory}
+                      className="rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {creatingCategory ? "..." : "Crear"}
+                    </button>
+                  </div>
+                )}
+              </div>
               <label className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
                 Unidad
                 <select
@@ -540,20 +715,36 @@ export default function Inventario() {
                   onChange={(event) =>
                     setForm({ ...form, unit: event.target.value })
                   }
-                  className={`${inputClass} mt-2`}
+                  className={`${inputClass} mt-2 uppercase`}
+                  required
                 >
-                  {units.map((value) => (
-                    <option key={value}>{value}</option>
+                  <option value="" disabled>
+                    Selecciona una unidad
+                  </option>
+                  {[...new Set([
+                    ...units,
+                    ...(editing?.unit && !units.includes(editing.unit)
+                      ? [editing.unit]
+                      : []),
+                  ])].map((value) => (
+                    <option key={value} value={value}>
+                      {unitDescriptions[value]
+                        ? `${value} · ${unitDescriptions[value]}`
+                        : value}
+                    </option>
                   ))}
                 </select>
               </label>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
-                Stock actual
+                Existencia actual ({selectedUnit || "UNIDAD"})
+                <span className="mt-1 block text-[9px] font-medium normal-case tracking-normal text-neutral-500">
+                  Cantidad disponible expresada en {selectedUnit || "UNIDAD"}.
+                </span>
                 <input
                   type="number"
-                  step="any"
+                  step={quantityStep}
                   value={form.stock}
                   onChange={(event) =>
                     setForm({ ...form, stock: event.target.value })
@@ -562,10 +753,13 @@ export default function Inventario() {
                 />
               </label>
               <label className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
-                Stock mínimo
+                Stock mínimo ({selectedUnit || "UNIDAD"})
+                <span className="mt-1 block text-[9px] font-medium normal-case tracking-normal text-neutral-500">
+                  Alerta cuando queden esta cantidad o menos.
+                </span>
                 <input
                   type="number"
-                  step="any"
+                  step={quantityStep}
                   value={form.minStock}
                   onChange={(event) =>
                     setForm({ ...form, minStock: event.target.value })
@@ -575,21 +769,27 @@ export default function Inventario() {
               </label>
             </div>
             <label className="block text-[10px] font-black uppercase tracking-widest text-neutral-500">
-              Precio por unidad
+              Costo por {selectedUnit || "UNIDAD"}
               <input
                 type="number"
-                step="any"
+                step="0.01"
                 value={form.price}
                 onChange={(event) =>
                   setForm({ ...form, price: event.target.value })
                 }
                 className={`${inputClass} mt-2`}
               />
+              <span className="mt-1 block text-[10px] font-medium normal-case tracking-normal text-neutral-500">
+                El stock y su mínimo se registran en {selectedUnit || "UNIDAD"}.
+                {selectedUnitAllowsFraction
+                  ? " Esta unidad permite cantidades fraccionarias."
+                  : " Esta unidad solo admite cantidades enteras."}
+              </span>
             </label>
             <button
               type="button"
               onClick={saveInventory}
-              disabled={!form.name.trim()}
+              disabled={!form.name.trim() || !form.categoryId || !form.unit}
               className="w-full rounded-lg bg-violet-500 px-4 py-3 text-[10px] font-black uppercase disabled:opacity-40"
             >
               {editing ? "Actualizar" : "Crear insumo"}

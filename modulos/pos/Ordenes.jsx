@@ -193,6 +193,57 @@ const formatMoney = (value) =>
     maximumFractionDigits: 0,
   }).format(Number(value || 0));
 
+const formatQuantity = (value) =>
+  new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 }).format(
+    Number(value) || 0,
+  );
+
+const getSpecificUnitName = (value) => {
+  const unitName = String(value || "").trim();
+  return unitName && unitName.toUpperCase() !== "UNIDAD" ? unitName : "";
+};
+
+const hydrateOrderItemUnits = async (orders) => {
+  const productIds = [
+    ...new Set(
+      (orders || []).flatMap((order) =>
+        (order.order_items || [])
+          .filter((item) => !getSpecificUnitName(item.unit_name))
+          .map((item) => item.product_id)
+          .filter(Boolean),
+      ),
+    ),
+  ];
+
+  if (productIds.length === 0) return orders || [];
+
+  const { data: products, error } = await supabase
+    .from("products")
+    .select("id, unit:units(name)")
+    .in("id", productIds);
+
+  if (error) {
+    console.error("Error cargando unidades para las órdenes:", error);
+    throw error;
+  }
+
+  const unitsByProduct = new Map(
+    (products || []).map((product) => [product.id, product.unit?.name]),
+  );
+
+  return (orders || []).map((order) => ({
+    ...order,
+    order_items: (order.order_items || []).map((item) => ({
+      ...item,
+      unit_name:
+        getSpecificUnitName(item.unit_name) ||
+        unitsByProduct.get(item.product_id) ||
+        item.unit_name ||
+        "UNIDAD",
+    })),
+  }));
+};
+
 const formatDateTime = (value) => {
   if (!value) return "Sin fecha";
   const date = new Date(value);
@@ -392,7 +443,9 @@ const OrderCard = memo(
                                 {item.product_name}
                               </p>
                               <span className="text-sm text-neutral-400 font-medium">
-                                x{item.quantity}
+                                x{formatQuantity(item.quantity)}
+                                {getSpecificUnitName(item.unit_name) &&
+                                  ` ${getSpecificUnitName(item.unit_name)}`}
                               </span>
                             </div>
                             <p className="text-sm font-bold text-emerald-400">
@@ -404,7 +457,10 @@ const OrderCard = memo(
                           </div>
                           <div className="flex flex-wrap items-center gap-2 text-[10px] text-neutral-400">
                             <span>
-                              Precio c/u: {formatMoney(item.unit_price)}
+                              {getSpecificUnitName(item.unit_name)
+                                ? `Precio / ${getSpecificUnitName(item.unit_name)}`
+                                : "Precio c/u"}
+                              : {formatMoney(item.unit_price)}
                             </span>
                           </div>
                           {item.options?.length > 0 && (
@@ -840,6 +896,7 @@ const mapDatabaseOrderToUi = (order) => {
       product_id: item.product_id,
       product_name: item.product_name || "Producto",
       quantity: Number(item.quantity || 0),
+      unit_name: item.unit_name || "UNIDAD",
       init_price: Number(item.init_price ?? item.unit_price ?? 0),
       unit_price: Number(item.unit_price || 0),
       subtotal: Number(item.subtotal || 0),
@@ -857,6 +914,7 @@ const Ordenes = () => {
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [ordersError, setOrdersError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [canDelete, setCanDelete] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [deliveryFilter, setDeliveryFilter] = useState("");
@@ -929,9 +987,11 @@ const Ordenes = () => {
       }
 
       businessIdRef.current = profile.business_id;
-      setOrders((data || []).map(mapDatabaseOrderToUi));
+      const ordersWithUnits = await hydrateOrderItemUnits(data || []);
+      setOrders(ordersWithUnits.map(mapDatabaseOrderToUi));
       setOrdersPage(0);
       setHasMoreOrders((data || []).length === 30);
+      setLastUpdated(new Date());
     } catch (error) {
       console.error("Error al cargar órdenes:", error);
       setOrders([]);
@@ -973,9 +1033,17 @@ const Ordenes = () => {
     if (error) {
       console.error("Error cargando más órdenes:", error);
     } else {
+      let ordersWithUnits;
+      try {
+        ordersWithUnits = await hydrateOrderItemUnits(data || []);
+      } catch (unitError) {
+        console.error("No se pudieron completar las unidades de las órdenes:", unitError);
+        setLoadingMoreOrders(false);
+        return;
+      }
       setOrders((current) => [
         ...current,
-        ...(data || []).map(mapDatabaseOrderToUi),
+        ...ordersWithUnits.map(mapDatabaseOrderToUi),
       ]);
       setOrdersPage(nextPage);
       setHasMoreOrders((data || []).length === 30);
@@ -1123,8 +1191,13 @@ const Ordenes = () => {
         .replace(/'/g, "&#039;");
     const itemsHtml = (orden.items || [])
       .map(
-        (item) =>
-          `<tr><td>${escaparHtml(item.product_name)}</td><td>${item.quantity}</td><td>${formatMoney(item.subtotal || item.unit_price * item.quantity)}</td></tr>`,
+        (item) => {
+          const unitName = getSpecificUnitName(item.unit_name);
+          const quantityLabel = `${formatQuantity(item.quantity)}${
+            unitName ? ` ${escaparHtml(unitName)}` : ""
+          }`;
+          return `<tr><td>${escaparHtml(item.product_name)}</td><td>${quantityLabel}</td><td>${formatMoney(item.subtotal || item.unit_price * item.quantity)}</td></tr>`;
+        },
       )
       .join("");
 
@@ -1295,18 +1368,26 @@ const Ordenes = () => {
         <div className="flex flex-col gap-3 justify-between mb-3">
           <div className="flex items-center justify-between gap-3">
             <h1 className="text-2xl font-black tracking-tighter">Órdenes</h1>
-            <button
-              type="button"
-              onClick={loadBusinessOrders}
-              disabled={refreshing}
-              title={refreshing ? "Actualizando órdenes" : "Actualizar órdenes"}
-              className="inline-flex items-center justify-center rounded-xl  p-2 text-violet-300 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <RefreshCcw
-                size={14}
-                className={refreshing ? "animate-spin" : ""}
-              />
-            </button>
+            <div className="flex items-center gap-2">
+              {lastUpdated && (
+                <span className="text-[10px] text-neutral-500">
+                  Actualizado {lastUpdated.toLocaleTimeString("es-CO")}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={loadBusinessOrders}
+                disabled={refreshing}
+                title={refreshing ? "Actualizando órdenes" : "Actualizar órdenes"}
+                aria-label="Actualizar órdenes"
+                className="inline-flex items-center justify-center rounded-xl p-2 text-violet-300 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCcw
+                  size={14}
+                  className={refreshing ? "animate-spin" : ""}
+                />
+              </button>
+            </div>
           </div>
           <div className="relative w-full">
             <Search

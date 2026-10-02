@@ -28,6 +28,7 @@ import SuperAdminSidebar from "./MenuLateral";
 import SuperAdminToggle from "./ControlEstado";
 import SuperAdminStorageCleanup from "./LimpiarArchivos";
 import SuperAdminTiendasPanel from "./Tiendas";
+import SolicitudesCambioPlan from "./SolicitudesCambioPlan";
 import SuperAdminDashboardOverview from "./Resumen";
 
 const STORAGE_KEY = "superadmin_tiendas";
@@ -319,7 +320,6 @@ const SuperAdmin = ({ onVolver }) => {
   const [pagosPendientes, setPagosPendientes] = useState([]);
   const [cargandoPagos, setCargandoPagos] = useState(true);
   const [confirmandoPago, setConfirmandoPago] = useState(null);
-  const [periodosSeleccionados, setPeriodosSeleccionados] = useState({});
   const [activeSection, setActiveSection] = useState("resumen");
 
   const [tiendaAEliminar, setTiendaAEliminar] = useState(null);
@@ -394,7 +394,7 @@ const SuperAdmin = ({ onVolver }) => {
       const { data, error } = await supabase
         .from("payment_records")
         .select(
-          "id,business_id,subscription_id,amount,status,support_path,created_at,businesses(name),subscriptions(id,plan_name,plan_id,period_id,billing_period)",
+          "id,business_id,subscription_id,commission_statement_id,amount,status,support_path,created_at,businesses(name),subscriptions(id,plan_name,plan_code,period_id,billing_period),commission_statement:subscription_commission_statements(cycle_starts_at,cycle_ends_at,order_count,sales_total,commission_rate,commission_total,minimum_amount)",
         )
         .eq("status", "pending")
         .order("created_at", { ascending: false });
@@ -405,15 +405,6 @@ const SuperAdmin = ({ onVolver }) => {
       } else {
         const pagos = data || [];
         setPagosPendientes(pagos);
-        setPeriodosSeleccionados((actuales) =>
-          pagos.reduce(
-            (seleccionados, pago) => ({
-              ...seleccionados,
-              [pago.id]: pago.subscriptions?.period_id || "",
-            }),
-            actuales,
-          ),
-        );
       }
       setCargandoPagos(false);
     };
@@ -458,22 +449,15 @@ const SuperAdmin = ({ onVolver }) => {
   useEffect(() => {
     const cargarConfiguracionFacturacion = async () => {
       const [
-        { data: planes, error: planesError },
         { data: periodos, error: periodosError },
         { data: qr, error: qrError },
       ] = await Promise.all([
         supabase
-          .from("billing_plans")
-          .select(
-            "id,code,name,billing_type,price_amount,commission_rate,minimum_amount,is_active,display_order",
-          )
-          .order("display_order", { ascending: true }),
-        supabase
           .from("billing_plan_periods")
           .select(
-            "id,plan_id,code,label,duration_days,price_amount,commission_rate,minimum_amount,is_active",
+            "id,plan_code,plan_name,billing_type,plan_is_active,plan_display_order,code,label,duration_days,price_amount,commission_rate,minimum_amount,is_active",
           )
-          .order("display_order", { ascending: true }),
+          .order("plan_display_order", { ascending: true }),
         supabase
           .from("payment_qr_codes")
           .select("id,label,storage_path,is_active,updated_at")
@@ -482,17 +466,25 @@ const SuperAdmin = ({ onVolver }) => {
           .maybeSingle(),
       ]);
 
-      if (planesError) {
-        console.error("No se pudieron cargar los planes:", planesError);
-        setPlanesFacturacion([]);
-      } else {
-        setPlanesFacturacion(planes || []);
-      }
       if (periodosError) {
         console.error("No se pudieron cargar los periodos:", periodosError);
         setPeriodosFacturacion([]);
       } else {
         setPeriodosFacturacion(periodos || []);
+        const planMap = new Map();
+        (periodos || []).forEach((periodo) => {
+          if (!planMap.has(periodo.plan_code)) {
+            planMap.set(periodo.plan_code, {
+              id: periodo.plan_code,
+              code: periodo.plan_code,
+              name: periodo.plan_name,
+              billing_type: periodo.billing_type,
+              is_active: periodo.plan_is_active,
+              display_order: periodo.plan_display_order,
+            });
+          }
+        });
+        setPlanesFacturacion(Array.from(planMap.values()));
       }
 
       if (qrError) {
@@ -561,12 +553,13 @@ const SuperAdmin = ({ onVolver }) => {
   const guardarPlanFacturacion = async (plan) => {
     setGuardandoPlan(plan.id);
     const { error } = await supabase
-      .from("billing_plans")
+      .from("billing_plan_periods")
       .update({
-        name: plan.name,
-        is_active: plan.is_active,
+        plan_name: plan.name,
+        plan_is_active: plan.is_active,
+        plan_display_order: plan.display_order,
       })
-      .eq("id", plan.id);
+      .eq("plan_code", plan.code);
 
     setMensajeEstado(
       error
@@ -594,6 +587,29 @@ const SuperAdmin = ({ onVolver }) => {
       })
       .eq("id", periodo.id);
 
+    if (!error) {
+      setPeriodosFacturacion((current) =>
+        current.map((item) => {
+          if (item.id === periodo.id) {
+            return {
+              ...item,
+              price_amount: Number(periodo.price_amount) || 0,
+              commission_rate:
+                periodo.commission_rate === null
+                  ? null
+                  : Number(periodo.commission_rate) || 0,
+              minimum_amount:
+                periodo.minimum_amount === null
+                  ? null
+                  : Number(periodo.minimum_amount) || 0,
+              is_active: periodo.is_active,
+            };
+          }
+          return item;
+        }),
+      );
+    }
+
     setMensajeEstado(
       error
         ? { tipo: "error", texto: "No se pudo guardar el periodo." }
@@ -603,11 +619,11 @@ const SuperAdmin = ({ onVolver }) => {
   };
 
   const confirmarPagoSuscripcion = async (pago) => {
-    const periodId = periodosSeleccionados[pago.id];
+    const periodId = pago.subscriptions?.period_id;
     if (!periodId) {
       setMensajeEstado({
         tipo: "error",
-        texto: "Selecciona mensual o trimestral antes de confirmar.",
+        texto: "La suscripción no tiene un período asignado para renovar.",
       });
       return;
     }
@@ -1402,7 +1418,7 @@ const SuperAdmin = ({ onVolver }) => {
               <span style={labelStyle}>Periodos de cobro</span>
               {periodosFacturacion.map((periodo) => {
                 const periodoPlan = planesFacturacion.find(
-                  (plan) => plan.id === periodo.plan_id,
+                  (plan) => plan.code === periodo.plan_code,
                 );
                 if (!periodoPlan) return null;
 
@@ -1440,7 +1456,7 @@ const SuperAdmin = ({ onVolver }) => {
                     <div>
                       <label style={labelStyle}>
                         {periodoPlan.billing_type === "commission"
-                          ? "Comisión (%)"
+                          ? "Comisión (%) · este periodo"
                           : "Precio"}
                       </label>
                       <input
@@ -1652,22 +1668,12 @@ const SuperAdmin = ({ onVolver }) => {
                 {pagosPendientes.map((pago) => {
                   const periodos = periodosFacturacion.filter(
                     (periodo) =>
-                      periodo.plan_id === pago.subscriptions?.plan_id,
+                      periodo.plan_code === pago.subscriptions?.plan_code,
                   );
                   const periodoSeleccionado = periodos.find(
-                    (periodo) => periodo.id === periodosSeleccionados[pago.id],
+                    (periodo) =>
+                      periodo.id === pago.subscriptions?.period_id,
                   );
-                  const planSeleccionado = planesFacturacion.find(
-                    (plan) => plan.id === pago.subscriptions?.plan_id,
-                  );
-                  const montoEsperado =
-                    periodoSeleccionado &&
-                    planSeleccionado?.billing_type !== "commission"
-                      ? Number(periodoSeleccionado.price_amount)
-                      : null;
-                  const montoNoCoincide =
-                    montoEsperado !== null &&
-                    Number(pago.amount) !== montoEsperado;
                   return (
                     <div
                       key={pago.id}
@@ -1702,31 +1708,34 @@ const SuperAdmin = ({ onVolver }) => {
                           {fmtCOP(pago.amount)}
                         </p>
                       </div>
-                      <select
-                        value={periodosSeleccionados[pago.id] || ""}
-                        onChange={(event) =>
-                          setPeriodosSeleccionados((actuales) => ({
-                            ...actuales,
-                            [pago.id]: event.target.value,
-                          }))
-                        }
+                      <span
                         style={{
-                          ...inputStyle,
-                          width: "180px",
-                          padding: "10px",
+                          color: "rgba(255,255,255,0.6)",
+                          fontSize: "11px",
                         }}
                       >
-                        <option value="">Elegir periodo</option>
-                        {periodos.map((periodo) => (
-                          <option key={periodo.id} value={periodo.id}>
-                            {periodo.label} ·{" "}
-                            {fmtCOP(
-                              periodo.price_amount || periodo.minimum_amount,
-                            )}
-                          </option>
-                        ))}
-                      </select>
-                      {montoNoCoincide && (
+                        Período:{" "}
+                        {pago.commission_statement_id
+                          ? "Comisión del ciclo vencido"
+                          : periodoSeleccionado?.label ||
+                            pago.subscriptions?.billing_period ||
+                            "No disponible"}
+                      </span>
+                      {pago.commission_statement && (
+                        <span
+                          style={{
+                            color: "rgba(255,255,255,0.45)",
+                            fontSize: "11px",
+                          }}
+                        >
+                          Ventas {fmtCOP(pago.commission_statement.sales_total)}{" "}
+                          · {pago.commission_statement.order_count} tickets ·{" "}
+                          Comisión por ticket{" "}
+                          {fmtCOP(pago.commission_statement.commission_total)} ·
+                          mínimo {fmtCOP(pago.commission_statement.minimum_amount)}
+                        </span>
+                      )}
+                      {!periodoSeleccionado && !pago.commission_statement_id && (
                         <span
                           style={{
                             flexBasis: "100%",
@@ -1734,8 +1743,8 @@ const SuperAdmin = ({ onVolver }) => {
                             fontSize: "11px",
                           }}
                         >
-                          El monto recibido ({fmtCOP(pago.amount)}) no coincide
-                          con el periodo elegido ({fmtCOP(montoEsperado)}).
+                          El período de esta suscripción no está activo en el
+                          catálogo.
                         </span>
                       )}
                       <button
@@ -1761,8 +1770,8 @@ const SuperAdmin = ({ onVolver }) => {
                         onClick={() => confirmarPagoSuscripcion(pago)}
                         disabled={
                           confirmandoPago === pago.id ||
-                          periodos.length === 0 ||
-                          montoNoCoincide
+                          (!periodoSeleccionado &&
+                            !pago.commission_statement_id)
                         }
                         style={{
                           background: "#059669",
@@ -1777,8 +1786,10 @@ const SuperAdmin = ({ onVolver }) => {
                         }}
                       >
                         {confirmandoPago === pago.id
-                          ? "Renovando..."
-                          : "Confirmar y renovar"}
+                          ? "Procesando..."
+                          : pago.commission_statement_id
+                            ? "Confirmar comisión"
+                            : "Confirmar y renovar"}
                       </button>
                       <button
                         type="button"
@@ -1804,6 +1815,8 @@ const SuperAdmin = ({ onVolver }) => {
               </div>
             )}
           </section>
+
+          <SolicitudesCambioPlan />
 
           <section
             id="categorias-maestras"

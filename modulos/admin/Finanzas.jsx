@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import SuperAdminSectionShell from "./ContenedorSeccion";
+import SolicitudesCambioPlan from "./SolicitudesCambioPlan";
 
 const STATUS_LABELS = {
   pending: "Pendiente",
@@ -47,9 +48,13 @@ const normalizePaymentRows = (subscriptionPayments, promotionPayments) =>
       businessSlug: payment.businesses?.slug || "",
       type: "subscription",
       title: payment.subscriptions?.plan_name || "Suscripción",
-      planId: payment.subscriptions?.plan_id || "",
+      planCode: payment.subscriptions?.plan_code || "",
       periodId: payment.subscriptions?.period_id || "",
-      period: payment.subscriptions?.billing_period || "",
+      period: payment.commission_statement_id
+        ? "Comisión del ciclo vencido"
+        : payment.subscriptions?.billing_period || "",
+      commissionStatementId: payment.commission_statement_id || null,
+      commissionStatement: payment.commission_statement || null,
       status: payment.status,
       amount: payment.amount,
       method: payment.payment_method,
@@ -117,7 +122,7 @@ const SuperAdminFinanzasPanel = ({
           supabase
             .from("payment_records")
             .select(
-              "id,business_id,subscription_id,amount,status,payment_method,support_path,notes,paid_at,created_at,businesses(name,slug),subscriptions(plan_name,plan_id,period_id,billing_period)",
+              "id,business_id,subscription_id,commission_statement_id,amount,status,payment_method,support_path,notes,paid_at,created_at,businesses(name,slug),subscriptions(plan_name,plan_code,period_id,billing_period),commission_statement:subscription_commission_statements(cycle_starts_at,cycle_ends_at,order_count,sales_total,commission_rate,commission_total,minimum_amount)",
             )
             .order("created_at", { ascending: false }),
           supabase
@@ -129,9 +134,10 @@ const SuperAdminFinanzasPanel = ({
           supabase
             .from("billing_plan_periods")
             .select(
-              "id,plan_id,code,label,duration_days,price_amount,commission_rate,minimum_amount,is_active,display_order",
+              "id,plan_code,code,label,duration_days,price_amount,commission_rate,minimum_amount,is_active,plan_is_active,display_order",
             )
             .eq("is_active", true)
+            .eq("plan_is_active", true)
             .order("display_order", { ascending: true }),
         ]);
 
@@ -223,14 +229,7 @@ const SuperAdminFinanzasPanel = ({
   };
 
   const reviewSubscriptionPayment = async (payment, approve) => {
-    const planPeriods = billingPeriods.filter(
-      (period) => period.plan_id === payment.planId,
-    );
-    const periodId =
-      payment.periodId ||
-      planPeriods.find((period) => period.code === "monthly")?.id ||
-      planPeriods[0]?.id ||
-      null;
+    const periodId = payment.periodId;
 
     if (approve && !periodId) {
       setNotice("No hay un período activo disponible para renovar este plan.");
@@ -243,7 +242,9 @@ const SuperAdminFinanzasPanel = ({
       if (!reason.trim()) return;
     } else if (
       !window.confirm(
-        `¿Confirmas el pago de ${payment.businessName} y renuevas su plan por el período seleccionado?`,
+        payment.commissionStatementId
+          ? `¿Confirmas el pago de la comisión vencida de ${payment.businessName} por ${formatCurrency(payment.amount)} y activas su siguiente ciclo Premium?`
+          : `¿Confirmas el pago de ${payment.businessName} y renuevas su plan por ${payment.period || "el periodo actual"} por ${formatCurrency(payment.amount)}?`,
       )
     ) {
       return;
@@ -490,6 +491,8 @@ const SuperAdminFinanzasPanel = ({
           </div>
         )}
 
+        {initialTypeFilter !== "promotion" && <SolicitudesCambioPlan />}
+
         <section className="overflow-hidden rounded-2xl border border-white/10 bg-neutral-900/65">
           <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
             <h3 className="text-sm font-semibold text-white">
@@ -517,20 +520,11 @@ const SuperAdminFinanzasPanel = ({
                 const isSubscription = payment.type === "subscription";
                 const isPending = payment.status === "pending";
                 const periodsForPayment = billingPeriods.filter(
-                  (period) => period.plan_id === payment.planId,
+                  (period) => period.plan_code === payment.planCode,
                 );
                 const selectedPeriod = periodsForPayment.find(
                   (period) => period.id === payment.periodId,
                 );
-                const expectedAmount =
-                  selectedPeriod && selectedPeriod.commission_rate == null
-                    ? Number(selectedPeriod.price_amount || 0)
-                    : null;
-                const amountMismatch =
-                  isSubscription &&
-                  isPending &&
-                  expectedAmount !== null &&
-                  Number(payment.amount) !== expectedAmount;
                 const statusLabel =
                   STATUS_LABELS[payment.status] || payment.status;
                 const statusClass =
@@ -574,11 +568,19 @@ const SuperAdminFinanzasPanel = ({
                           {isSubscription ? "Suscripción" : "Promoción"}
                           {payment.period ? ` · ${payment.period}` : ""}
                         </p>
-                        {amountMismatch && (
-                          <p className="mt-1 text-[11px] text-amber-300">
-                            El pago ({formatCurrency(payment.amount)}) no
-                            coincide con el período (
-                            {formatCurrency(expectedAmount)}).
+                        {payment.commissionStatement && (
+                          <p className="mt-1 text-[10px] leading-relaxed text-neutral-500">
+                            {formatDate(payment.commissionStatement.cycle_starts_at)}
+                            {" – "}
+                            {formatDate(payment.commissionStatement.cycle_ends_at)}
+                            {" · "}
+                            {payment.commissionStatement.order_count} tickets
+                            {" · "}
+                            {formatCurrency(payment.commissionStatement.sales_total)} en ventas
+                            {" · comisión por ticket: "}
+                            {formatCurrency(payment.commissionStatement.commission_total)}
+                            {" · mínimo: "}
+                            {formatCurrency(payment.commissionStatement.minimum_amount)}
                           </p>
                         )}
                       </div>
@@ -642,14 +644,17 @@ const SuperAdminFinanzasPanel = ({
                               !payment.supportPath ||
                               (!isSubscription && payment.amount == null) ||
                               (isSubscription &&
-                                (!selectedPeriod || amountMismatch))
+                                !selectedPeriod &&
+                                !payment.commissionStatementId)
                             }
                             className="rounded-lg bg-emerald-600 px-2 py-1.5 text-[10px] font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-45"
                           >
                             {reviewingPaymentId === payment.id
                               ? "Procesando..."
                               : isSubscription
-                                ? "Confirmar y renovar"
+                                ? payment.commissionStatementId
+                                  ? "Confirmar comisión"
+                                  : "Confirmar y renovar"
                                 : "Confirmar pago"}
                           </button>
                         </>

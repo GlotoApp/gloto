@@ -438,8 +438,8 @@ ${
                         style={{ height: `${bar.percentage}%` }}
                         className={`w-full rounded-t-sm transition-all duration-500 ${
                           bar.isPeak
-                            ? "bg-violet-500 shadow-md shadow-violet-500/20"
-                            : "bg-neutral-800 group-hover:bg-violet-400/50"
+                            ? "bg-primary-container shadow-md shadow-primary-container/30"
+                            : "bg-primary-container/60 group-hover:bg-primary-container"
                         }`}
                       />
                     </div>
@@ -489,7 +489,7 @@ ${
                     <div className="w-full bg-neutral-950 rounded-t-md overflow-hidden h-full flex items-end border border-white/[0.02]">
                       <div
                         style={{ height: `${bar.percentage}%` }}
-                        className={`w-full rounded-t-sm transition-all duration-500 ${bar.isPeak ? "bg-violet-500 shadow-md shadow-violet-500/20" : "bg-neutral-800 group-hover:bg-violet-400/50"}`}
+                        className={`w-full rounded-t-sm transition-all duration-500 ${bar.isPeak ? "bg-primary-container shadow-md shadow-primary-container/30" : "bg-primary-container/60 group-hover:bg-primary-container"}`}
                       />
                     </div>
                     <span className="text-[8px] font-mono font-bold text-neutral-600 tracking-tighter">

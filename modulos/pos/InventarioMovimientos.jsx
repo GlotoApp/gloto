@@ -1,5 +1,16 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, RefreshCcw } from "lucide-react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  ChevronDown,
+  RefreshCcw,
+} from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 import SubLoading from "./SubLoading";
@@ -17,8 +28,14 @@ export default function InventarioMovimientos() {
   const [dateFilter, setDateFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [expandedMovements, setExpandedMovements] = useState({});
+  const [loadError, setLoadError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const refreshingRef = useRef(false);
 
-  const loadMovements = async (id) => {
+  const loadMovements = useCallback(async (id) => {
+    setLoadError("");
     const { data, error } = await supabase
       .from("inventory_movements")
       .select(
@@ -29,10 +46,111 @@ export default function InventarioMovimientos() {
       .limit(100);
     if (error) {
       console.error("Error cargando movimientos:", error);
+      setMovements([]);
+      setLoadError(
+        `No se pudieron cargar los movimientos: ${error.message}`,
+      );
       return;
     }
-    setMovements(data || []);
-  };
+
+    const rows = data || [];
+    setLastUpdated(new Date());
+    if (rows.length === 0) {
+      setMovements([]);
+      return;
+    }
+
+    const { data: linkRows, error: linkError } = await supabase
+      .from("inventory_movements")
+      .select("id,movement_type,order_id,order_item_id")
+      .in(
+        "id",
+        rows.map((movement) => movement.id),
+      );
+    if (linkError) {
+      console.error("Error cargando vínculos de movimientos:", linkError);
+      setMovements(rows);
+      setLoadError(
+        "Los movimientos se cargaron, pero no fue posible obtener el vínculo con las órdenes. Verifica que la migración 007 esté aplicada y vuelve a cargar.",
+      );
+      return;
+    }
+
+    const linksById = Object.fromEntries(
+      (linkRows || []).map((row) => [row.id, row]),
+    );
+    const linkedOrderItemIds = [
+      ...new Set(
+        (linkRows || [])
+          .map((row) => row.order_item_id)
+          .filter(Boolean),
+      ),
+    ];
+    let orderItemsById = {};
+    let ordersById = {};
+
+    if (linkedOrderItemIds.length > 0) {
+      const { data: orderItems, error: orderItemsError } = await supabase
+        .from("order_items")
+        .select("id,product_name,quantity,unit_name,order_id")
+        .in("id", linkedOrderItemIds);
+      if (orderItemsError) {
+        console.error("Error cargando productos de las órdenes:", orderItemsError);
+        setLoadError(
+          "Los movimientos se cargaron, pero no fue posible mostrar los productos asociados.",
+        );
+      } else {
+        orderItemsById = Object.fromEntries(
+          (orderItems || []).map((item) => [item.id, item]),
+        );
+        const orderIds = [
+          ...new Set((orderItems || []).map((item) => item.order_id).filter(Boolean)),
+        ];
+        if (orderIds.length > 0) {
+          const { data: orders, error: ordersError } = await supabase
+            .from("orders")
+            .select("id,order_number,channel")
+            .in("id", orderIds);
+          if (ordersError) {
+            console.error("Error cargando órdenes de los movimientos:", ordersError);
+          } else {
+            ordersById = Object.fromEntries(
+              (orders || []).map((order) => [order.id, order]),
+            );
+          }
+        }
+      }
+    }
+
+    setMovements(
+      rows.map((movement) => {
+        const link = linksById[movement.id] || {};
+        const orderItem = orderItemsById[link.order_item_id];
+        return {
+          ...movement,
+          ...link,
+          order_items: orderItem
+            ? {
+                ...orderItem,
+                orders: ordersById[orderItem.order_id] || null,
+              }
+            : null,
+        };
+      }),
+    );
+  }, []);
+
+  const refreshMovements = useCallback(async (id = businessId) => {
+    if (!id || refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      await loadMovements(id);
+    } finally {
+      refreshingRef.current = false;
+      setRefreshing(false);
+    }
+  }, [businessId, loadMovements]);
 
   useEffect(() => {
     const load = async () => {
@@ -42,7 +160,14 @@ export default function InventarioMovimientos() {
         .select("business_id")
         .eq("id", user.id)
         .maybeSingle();
-      if (error || !data?.business_id) return;
+      if (error || !data?.business_id) {
+        console.error("Error buscando el negocio del usuario:", error);
+        setLoadError(
+          error?.message || "No se encontró el negocio asociado a tu usuario.",
+        );
+        setLoading(false);
+        return;
+      }
       setBusinessId(data.business_id);
       await loadMovements(data.business_id);
       setLoading(false);
@@ -50,7 +175,7 @@ export default function InventarioMovimientos() {
     load();
   }, [user?.id]);
 
-  const filteredMovements = useMemo(() => {
+  const movementGroups = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     const now = new Date();
     const startOfToday = new Date(now);
@@ -62,13 +187,18 @@ export default function InventarioMovimientos() {
     const customFrom = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null;
     const customTo = dateTo ? new Date(`${dateTo}T23:59:59.999`) : null;
 
-    return movements.filter((movement) => {
+    const filtered = movements.filter((movement) => {
       const delta = Number(movement.quantity_delta || 0);
       const createdAt = new Date(movement.created_at);
+      const product = movement.order_items;
       const name = movement.inventory_items?.name || "";
+      const productName = product?.product_name || "";
+      const orderNumber = product?.orders?.order_number || "";
       const matchesSearch =
         !normalizedSearch ||
         name.toLowerCase().includes(normalizedSearch) ||
+        productName.toLowerCase().includes(normalizedSearch) ||
+        String(orderNumber).toLowerCase().includes(normalizedSearch) ||
         String(movement.reason || "")
           .toLowerCase()
           .includes(normalizedSearch);
@@ -90,6 +220,39 @@ export default function InventarioMovimientos() {
           createdAt <= customTo);
 
       return matchesSearch && matchesType && matchesDate;
+    });
+
+    const groups = new Map();
+    filtered.forEach((movement) => {
+      const isSale = movement.movement_type === "sale";
+      const groupKey =
+        isSale && movement.order_item_id
+          ? `sale-line:${movement.order_item_id}`
+          : isSale && movement.order_id
+            ? `sale-order:${movement.order_id}`
+            : `movement:${movement.id}`;
+      const group = groups.get(groupKey);
+      if (group) {
+        group.movements.push(movement);
+      } else {
+        groups.set(groupKey, { id: groupKey, movements: [movement], isSale });
+      }
+    });
+
+    return Array.from(groups.values()).map((group) => {
+      const first = group.movements[0];
+      const delta = group.movements.reduce(
+        (sum, movement) => sum + Number(movement.quantity_delta || 0),
+        0,
+      );
+      return {
+        ...group,
+        delta,
+        product: first.order_items || null,
+        orderId: first.order_id,
+        createdAt: first.created_at,
+        reason: first.reason,
+      };
     });
   }, [movements, search, movementType, dateFilter, dateFrom, dateTo]);
 
@@ -120,13 +283,33 @@ export default function InventarioMovimientos() {
           </div>
           <button
             type="button"
-            onClick={() => businessId && loadMovements(businessId)}
-            className="rounded-xl p-2 text-violet-300 hover:bg-violet-500/10"
-            aria-label="Actualizar historial"
+            onClick={() => refreshMovements()}
+            disabled={!businessId || refreshing}
+            className="rounded-xl p-2 text-violet-300 hover:bg-violet-500/10 disabled:cursor-wait disabled:opacity-50"
+            aria-label={refreshing ? "Actualizando historial" : "Actualizar historial"}
+            title={refreshing ? "Actualizando..." : "Actualizar historial"}
           >
-            <RefreshCcw size={16} />
+            <RefreshCcw
+              size={16}
+              className={refreshing ? "animate-spin" : ""}
+            />
           </button>
         </header>
+        <p className="mt-[-1.25rem] text-right text-[10px] text-neutral-500">
+          {refreshing
+            ? "Actualizando movimientos..."
+            : lastUpdated
+              ? `Actualizado ${lastUpdated.toLocaleTimeString("es-CO")}`
+              : "Aún no se ha actualizado"}
+        </p>
+        {loadError && (
+          <p
+            role="alert"
+            className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-200"
+          >
+            {loadError}
+          </p>
+        )}
         <div className="overflow-hidden rounded-2xl border border-white/5 bg-neutral-900/40">
           <div className="grid gap-3 border-b border-white/5 bg-neutral-900/30 p-4 md:grid-cols-[minmax(0,1fr)_180px_180px]">
             <input
@@ -179,51 +362,107 @@ export default function InventarioMovimientos() {
               </label>
             </div>
           )}
-          {filteredMovements.length === 0 ? (
+          {movementGroups.length === 0 ? (
             <p className="py-12 text-center text-sm text-neutral-500">
               No hay movimientos que coincidan con los filtros.
             </p>
           ) : (
             <div className="space-y-3 p-3 sm:p-4">
-              {filteredMovements.map((movement) => {
-                const delta = Number(movement.quantity_delta || 0);
-                const isEntry = delta > 0;
+              {movementGroups.map((group) => {
+                const isEntry = group.delta > 0;
+                const expanded = Boolean(expandedMovements[group.id]);
+                const productName = group.product?.product_name;
+                const orderNumber = group.product?.orders?.order_number;
+                const productQuantity = Number(group.product?.quantity || 0);
+                const productUnit = group.product?.unit_name || "";
+                const singleMovement = group.movements[0];
+                const title = group.isSale
+                  ? productName || "Salida por venta"
+                  : singleMovement.inventory_items?.name || "Insumo";
                 return (
-                  <div
-                    key={movement.id}
-                    className="flex items-center gap-3 rounded-2xl border border-white/5 bg-neutral-900/40 p-4 transition-all hover:border-white/10 hover:bg-neutral-900/70"
+                  <article
+                    key={group.id}
+                    className="overflow-hidden rounded-2xl border border-white/5 bg-neutral-900/40 transition-colors hover:border-white/10"
                   >
-                    <span
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${isEntry ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}
+                    <button
+                      type="button"
+                      aria-expanded={expanded}
+                      onClick={() =>
+                        setExpandedMovements((current) => ({
+                          ...current,
+                          [group.id]: !current[group.id],
+                        }))
+                      }
+                      className="flex w-full items-center gap-3 p-4 text-left hover:bg-neutral-900/70"
                     >
-                      {isEntry ? (
-                        <ArrowUpRight size={17} />
-                      ) : (
-                        <ArrowDownRight size={17} />
-                      )}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-black text-white">
-                        {movement.inventory_items?.name || "Insumo"}
-                      </p>
-                      <p
-                        className={`text-[10px] font-black uppercase tracking-widest ${isEntry ? "text-emerald-400" : "text-red-400"}`}
+                      <span
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${isEntry ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}
                       >
-                        {isEntry ? "Entrada" : "Salida"}
-                      </p>
-                      <p className="text-[10px] uppercase tracking-widest text-neutral-500">
-                        {movement.reason} ·{" "}
-                        {new Date(movement.created_at).toLocaleString("es-CO")}
-                      </p>
-                    </div>
-                    <span
-                      className={`shrink-0 text-sm font-black ${isEntry ? "text-emerald-400" : "text-red-400"}`}
-                    >
-                      {isEntry ? "+" : ""}
-                      {formatNumber(delta)}{" "}
-                      {movement.inventory_items?.unit || ""}
-                    </span>
-                  </div>
+                        {isEntry ? (
+                          <ArrowUpRight size={17} />
+                        ) : (
+                          <ArrowDownRight size={17} />
+                        )}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-black text-white">
+                          {title}
+                        </span>
+                        <span
+                          className={`block text-[10px] font-black uppercase tracking-widest ${isEntry ? "text-emerald-400" : "text-red-400"}`}
+                        >
+                          {isEntry ? "Entrada" : "Salida"}
+                          {group.isSale &&
+                            ` · Venta${productQuantity ? ` de ${formatNumber(productQuantity)} ${productUnit}` : ""}`}
+                          {orderNumber ? ` · Orden #${orderNumber}` : ""}
+                        </span>
+                        <span className="block text-[10px] uppercase tracking-widest text-neutral-500">
+                          {group.isSale
+                            ? `${group.movements.length} insumo${group.movements.length === 1 ? "" : "s"} descontado${group.movements.length === 1 ? "" : "s"}`
+                            : group.reason}
+                          {" · "}
+                          {new Date(group.createdAt).toLocaleString("es-CO")}
+                        </span>
+                      </span>
+                      {!group.isSale && (
+                        <span
+                          className={`shrink-0 text-sm font-black ${isEntry ? "text-emerald-400" : "text-red-400"}`}
+                        >
+                          {isEntry ? "+" : ""}
+                          {formatNumber(group.delta)}{" "}
+                          {singleMovement.inventory_items?.unit || ""}
+                        </span>
+                      )}
+                      <ChevronDown
+                        size={17}
+                        className={`shrink-0 text-neutral-500 transition-transform ${expanded ? "rotate-180" : ""}`}
+                      />
+                    </button>
+                    {expanded && (
+                      <div className="space-y-2 border-t border-white/5 bg-black/10 px-4 py-3">
+                        {group.movements.map((movement) => {
+                          const delta = Number(movement.quantity_delta || 0);
+                          return (
+                            <div
+                              key={movement.id}
+                              className="flex items-center justify-between gap-3 text-xs"
+                            >
+                              <span className="min-w-0 truncate text-neutral-300">
+                                {movement.inventory_items?.name || "Insumo"}
+                              </span>
+                              <span
+                                className={`shrink-0 font-bold ${delta > 0 ? "text-emerald-400" : "text-red-400"}`}
+                              >
+                                {delta > 0 ? "+" : ""}
+                                {formatNumber(delta)}{" "}
+                                {movement.inventory_items?.unit || ""}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </article>
                 );
               })}
             </div>

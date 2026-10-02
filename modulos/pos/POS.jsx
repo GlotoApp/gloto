@@ -140,10 +140,14 @@ const formatPrice = (price) => {
     .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 };
 
-const formatInteger = (value) => {
-  return String(value)
-    .replace(/\D/g, "")
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+const formatInteger = (value) => String(value);
+
+const parseDecimalQuantity = (value) => {
+  const normalized = String(value ?? "").replace(",", ".");
+  if (!/^\d*(\.\d{0,3})?$/.test(normalized)) return null;
+  if (!normalized || normalized === ".") return null;
+  const quantity = Number(normalized);
+  return Number.isFinite(quantity) ? quantity : null;
 };
 
 const normalizeOptionGroup = (group, items = []) => {
@@ -457,6 +461,7 @@ const POS = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [cart, setCart] = useState([]);
+  const [quantityDrafts, setQuantityDrafts] = useState({});
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [removingItems, setRemovingItems] = useState(new Set());
@@ -615,7 +620,7 @@ const POS = () => {
       const { data, error } = await supabase
         .from("products")
         .select(
-          "id,name,description,price,stock,image_url,is_active,is_sold_out,category_id,order_index,created_at",
+          "id,name,description,price,stock,image_url,is_active,is_sold_out,category_id,order_index,created_at,unit_id,unit:units(id,name,allows_fraction)",
         )
         .eq("business_id", businessId)
         .eq("is_active", true)
@@ -699,6 +704,7 @@ const POS = () => {
           optionGroups: groups,
           hasOptionGroups: groups.length > 0,
           stock: Number(item.stock || 0),
+          unit: item.unit || { id: item.unit_id, name: "UNIDAD", allows_fraction: false },
           soldOut: item.is_sold_out || item.is_soldout || false,
           orderIndex: Number(item.order_index || 0),
         };
@@ -1126,29 +1132,36 @@ const POS = () => {
           optionNames: item.optionNames || item.options || [],
           selectedOptions: item.selectedOptions || [],
           options: item.selectedOptions || item.options || [],
+          unit: item.unit || {
+            name: item.unit_name || "UNIDAD",
+            allows_fraction: false,
+          },
+          unit_name: item.unit_name || "UNIDAD",
           image_url: item.image_url || item.image || item.imageUrl || "",
         })),
       );
     }
   }, [location.state]);
 
-  // Las órdenes guardan el product_id, pero la imagen pertenece al catálogo.
-  // Cuando el catálogo termina de cargar, completamos la miniatura del carrito
-  // sin reemplazar los datos históricos de la orden.
+  // Las órdenes guardan el product_id; la imagen y la unidad se completan
+  // desde el catálogo cuando este termina de cargar.
   useEffect(() => {
     if (!location.state?.mesaEdit || products.length === 0) return;
 
     setCart((currentCart) =>
       currentCart.map((item) => {
-        if (item.image_url) return item;
-
         const product = products.find(
           (catalogProduct) => catalogProduct.id === item.productId,
         );
         const imageUrl =
           product?.image_url || product?.image || product?.imageUrl || "";
 
-        return imageUrl ? { ...item, image_url: imageUrl } : item;
+        return {
+          ...item,
+          unit: product?.unit || item.unit,
+          unit_name: product?.unit?.name || item.unit_name || "UNIDAD",
+          image_url: item.image_url || imageUrl,
+        };
       }),
     );
   }, [location.state, products]);
@@ -1453,11 +1466,11 @@ const POS = () => {
       return;
     }
 
-    if (product?.hasOptionGroups) {
+    if (product?.hasOptionGroups || product?.unit?.allows_fraction) {
       setActiveProduct(product);
       setOptionSelections(initializeOptionSelections(product));
       setOptionNote("");
-      setOptionQuantity(1);
+      setOptionQuantity("1");
       setOptionValidationError("");
       setOptionModalOpen(true);
       return;
@@ -1582,6 +1595,30 @@ const POS = () => {
 
   const confirmOptionSelection = () => {
     if (!activeProduct) return;
+    const requestedQuantity = activeProduct.unit?.allows_fraction
+      ? parseDecimalQuantity(optionQuantity)
+      : Number(optionQuantity);
+    if (!requestedQuantity || requestedQuantity <= 0) {
+      setOptionValidationError("Ingresa una cantidad válida.");
+      return;
+    }
+    const existingQuantity = cart.reduce(
+      (sum, item) =>
+        item.productId === activeProduct.id
+          ? sum + Number(item.qty || 0)
+          : sum,
+      0,
+    );
+    const availableStock = Number(activeProduct.stock);
+    if (
+      Number.isFinite(availableStock) &&
+      existingQuantity + requestedQuantity > availableStock
+    ) {
+      addToast(
+        `La cantidad solicitada supera el stock disponible de ${activeProduct.unit?.name || "UNIDAD"}. Se registrará el faltante.`,
+        "error",
+      );
+    }
     const selectedOptions = getSelectedOptionItems(
       activeProduct,
       optionSelections,
@@ -1605,7 +1642,7 @@ const POS = () => {
       activeProduct,
       selectedOptions,
       optionNote,
-      optionQuantity,
+      requestedQuantity,
     );
 
     if (typeof window !== "undefined" && window.innerWidth < 1024) {
@@ -1640,9 +1677,9 @@ const POS = () => {
           item.cartId === existingItem.cartId
             ? {
                 ...item,
-                qty: item.qty + optionQuantity,
+                qty: Number(item.qty) + requestedQuantity,
                 pendingQty: item.orderItemId
-                  ? (item.pendingQty || 0) + optionQuantity
+                  ? (item.pendingQty || 0) + requestedQuantity
                   : item.pendingQty || 0,
               }
             : item,
@@ -1735,6 +1772,7 @@ const POS = () => {
   };
 
   const incrementCartItem = (cartItem) => {
+    const quantityStep = cartItem.unit?.allows_fraction ? 0.1 : 1;
     const product = products.find((item) => item.id === cartItem.productId);
     if (!product) {
       if (isEditingTableOrder && cartItem.orderItemId) {
@@ -1743,15 +1781,18 @@ const POS = () => {
             item.cartId === cartItem.cartId
               ? {
                   ...item,
-                  qty: item.qty + 1,
-                  pendingQty: (item.pendingQty || 0) + 1,
+                  qty: Number((Number(item.qty) + quantityStep).toFixed(3)),
+                  pendingQty: (item.pendingQty || 0) + quantityStep,
                 }
               : item,
           ),
         );
         return;
       }
-      updateQty(cartItem.cartId, cartItem.qty + 1);
+      updateQty(
+        cartItem.cartId,
+        Number((Number(cartItem.qty) + quantityStep).toFixed(3)),
+      );
       return;
     }
 
@@ -1799,7 +1840,7 @@ const POS = () => {
     const exceedsAvailableStock =
       !isEditingTableOrder &&
       Number.isFinite(numericStock) &&
-      cartItem.qty >= Math.max(0, numericStock);
+      Number(cartItem.qty) + quantityStep > Math.max(0, numericStock);
 
     if (isOutOfStock || exceedsAvailableStock) {
       setOutOfStockProduct(product);
@@ -1822,8 +1863,8 @@ const POS = () => {
           item.cartId === cartItem.cartId
             ? {
                 ...item,
-                qty: item.qty + 1,
-                pendingQty: (item.pendingQty || 0) + 1,
+                qty: Number(item.qty) + quantityStep,
+                pendingQty: (item.pendingQty || 0) + quantityStep,
               }
             : item,
         ),
@@ -1831,14 +1872,24 @@ const POS = () => {
       return;
     }
 
-    updateQty(cartItem.cartId, cartItem.qty + 1);
+    updateQty(
+      cartItem.cartId,
+      Number((Number(cartItem.qty) + quantityStep).toFixed(3)),
+    );
   };
 
   const handleQtyInputChange = (cartId, value) => {
-    const digits = String(value).replace(/\D/g, "");
-    let qty = digits ? Math.max(1, Number(digits)) : 1;
     const currentItem = cart.find((item) => item.cartId === cartId);
     const product = products.find((item) => item.id === currentItem?.productId);
+    let qty;
+    if (product?.unit?.allows_fraction) {
+      const parsedQuantity = parseDecimalQuantity(value);
+      if (parsedQuantity === null) return;
+      qty = parsedQuantity;
+    } else {
+      const digits = String(value).replace(/\D/g, "");
+      qty = digits ? Math.max(1, Number(digits)) : 1;
+    }
     const originalQuantityInEdit =
       editingSnapshot?.cart.reduce(
         (sum, item) =>
@@ -1889,7 +1940,17 @@ const POS = () => {
       return;
     }
 
-    updateQty(cartId, Math.max(1, qty));
+    updateQty(cartId, product?.unit?.allows_fraction ? qty : Math.max(1, qty));
+  };
+
+  const commitQuantityDraft = (cartId) => {
+    if (!Object.prototype.hasOwnProperty.call(quantityDrafts, cartId)) return;
+    handleQtyInputChange(cartId, quantityDrafts[cartId]);
+    setQuantityDrafts((current) => {
+      const next = { ...current };
+      delete next[cartId];
+      return next;
+    });
   };
 
   const handleDeliveryDestinationChange = useCallback((destination) => {
@@ -2399,6 +2460,7 @@ const POS = () => {
         nombre: item.name || "Producto",
         precio: Number(item.price || 0),
         initPrice: Number(item.initPrice || 0),
+        unit_name: item.unit?.name || item.unit_name || "UNIDAD",
         notas: item.note || "",
         varianteNombre: item.optionNames?.length
           ? item.optionNames.join(" · ")
@@ -2611,7 +2673,7 @@ const POS = () => {
       subtotal: item.precio * item.cantidad,
       product_name: item.nombre,
       product_sku: item.product_sku || null,
-      unit_name: item.unit_name || "unidad",
+      unit_name: item.unit?.name || item.unit_name || "UNIDAD",
       options: item.opciones || [],
       notes: item.notas || null,
     }));
@@ -2894,6 +2956,7 @@ const POS = () => {
       setSentOrder(null);
     }
     setCart([]);
+    setQuantityDrafts({});
     setRemovingItems(new Set());
     setShowConfirmModal(false);
     setIsModalOpen(false);
@@ -3437,7 +3500,8 @@ const POS = () => {
 
                       <div className="flex items-center justify-between  pr-2 pl-2 pb-2">
                         <p className="text-primary font-black text-ml md:text-lg tracking-tight">
-                          $ {formatPrice(product.price)}
+                          $ {formatPrice(product.price)} /{" "}
+                          {product.unit?.name || "UNIDAD"}
                         </p>
                         <button
                           onClick={(e) => openNoteModal(e, product)}
@@ -3861,7 +3925,20 @@ const POS = () => {
                     }`}
                   >
                     <button
-                      onClick={() => updateQty(item.cartId, item.qty - 1)}
+                      onClick={() =>
+                        updateQty(
+                          item.cartId,
+                          Math.max(
+                            0,
+                            Number(
+                              (
+                                Number(item.qty) -
+                                (item.unit?.allows_fraction ? 0.1 : 1)
+                              ).toFixed(3),
+                            ),
+                          ),
+                        )
+                      }
                       className="opacity-60 hover:opacity-100 transition-opacity w-2 h-2 flex items-center justify-center rounded-full hover:text-primary-container"
                       aria-label="Disminuir cantidad"
                     >
@@ -3870,16 +3947,36 @@ const POS = () => {
                       </span>
                     </button>
                     <input
-                      type="tel"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={formatInteger(item.qty)}
-                      onChange={(e) =>
-                        handleQtyInputChange(item.cartId, e.target.value)
+                      type="text"
+                      inputMode={
+                        item.unit?.allows_fraction ? "decimal" : "numeric"
                       }
-                      className="w-8 bg-transparent text-center text-[11px] font-black text-on-surface outline-none appearance-none"
+                      value={
+                        quantityDrafts[item.cartId] ??
+                        formatInteger(item.qty)
+                      }
+                      onFocus={() =>
+                        item.unit?.allows_fraction &&
+                        setQuantityDrafts((current) => ({
+                          ...current,
+                          [item.cartId]: String(item.qty),
+                        }))
+                      }
+                      onChange={(e) =>
+                        item.unit?.allows_fraction
+                          ? setQuantityDrafts((current) => ({
+                              ...current,
+                              [item.cartId]: e.target.value,
+                            }))
+                          : handleQtyInputChange(item.cartId, e.target.value)
+                      }
+                      onBlur={() => commitQuantityDraft(item.cartId)}
+                      className="w-12 bg-transparent text-center text-[11px] font-black text-on-surface outline-none appearance-none"
                       aria-label="Cantidad del producto"
                     />
+                    <span className="text-[9px] font-bold text-neutral-400">
+                      {item.unit?.name || "UNIDAD"}
+                    </span>
                     <button
                       onClick={() => incrementCartItem(item)}
                       className="opacity-60 hover:opacity-100 transition-opacity w-2 h-2 flex items-center justify-center rounded-full hover:text-primary-container"
@@ -4126,7 +4223,20 @@ const POS = () => {
                       }`}
                     >
                       <button
-                        onClick={() => updateQty(item.cartId, item.qty - 1)}
+                        onClick={() =>
+                          updateQty(
+                            item.cartId,
+                            Math.max(
+                              0,
+                              Number(
+                                (
+                                  Number(item.qty) -
+                                  (item.unit?.allows_fraction ? 0.1 : 1)
+                                ).toFixed(3),
+                              ),
+                            ),
+                          )
+                        }
                         className="opacity-60 hover:opacity-100 transition-opacity w-2 h-2 flex items-center justify-center rounded-full hover:text-primary-container"
                         aria-label="Disminuir cantidad"
                       >
@@ -4135,16 +4245,35 @@ const POS = () => {
                         </span>
                       </button>
                       <input
-                        type="tel"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        value={formatInteger(item.qty)}
-                        onChange={(e) =>
-                          handleQtyInputChange(item.cartId, e.target.value)
+                        type="text"
+                        inputMode={
+                          item.unit?.allows_fraction ? "decimal" : "numeric"
                         }
-                        className="w-8 bg-transparent text-center text-[11px] font-black text-on-surface outline-none appearance-none"
+                        value={
+                          quantityDrafts[item.cartId] ?? formatInteger(item.qty)
+                        }
+                        onFocus={() =>
+                          item.unit?.allows_fraction &&
+                          setQuantityDrafts((current) => ({
+                            ...current,
+                            [item.cartId]: String(item.qty),
+                          }))
+                        }
+                        onChange={(e) =>
+                          item.unit?.allows_fraction
+                            ? setQuantityDrafts((current) => ({
+                                ...current,
+                                [item.cartId]: e.target.value,
+                              }))
+                            : handleQtyInputChange(item.cartId, e.target.value)
+                        }
+                        onBlur={() => commitQuantityDraft(item.cartId)}
+                        className="w-12 bg-transparent text-center text-[11px] font-black text-on-surface outline-none appearance-none"
                         aria-label="Cantidad del producto"
                       />
+                      <span className="text-[9px] font-bold text-neutral-400">
+                        {item.unit?.name || "UNIDAD"}
+                      </span>
                       <button
                         onClick={() => incrementCartItem(item)}
                         className="opacity-60 hover:opacity-100 transition-opacity w-2 h-2 flex items-center justify-center rounded-full hover:text-primary-container"
@@ -4564,7 +4693,21 @@ const POS = () => {
                     <button
                       type="button"
                       onClick={() =>
-                        setOptionQuantity((prev) => Math.max(1, prev - 1))
+                        setOptionQuantity((previous) =>
+                          String(
+                            Math.max(
+                              activeProduct?.unit?.allows_fraction ? 0.1 : 1,
+                              (parseDecimalQuantity(previous) ??
+                                Number(previous) ??
+                                0) -
+                                (activeProduct?.unit?.allows_fraction
+                                  ? 0.1
+                                  : 1),
+                            ).toFixed(
+                              activeProduct?.unit?.allows_fraction ? 1 : 0,
+                            ),
+                          ),
+                        )
                       }
                       className=" rounded-md text-on-surface-variant hover:text-on-surface transition-colors text-2xl font-bold"
                     >
@@ -4572,20 +4715,39 @@ const POS = () => {
                     </button>
                     <input
                       type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
+                      inputMode={
+                        activeProduct?.unit?.allows_fraction
+                          ? "decimal"
+                          : "numeric"
+                      }
                       value={optionQuantity}
                       onChange={(e) => {
-                        const digits = e.target.value.replace(/\D/g, "");
-                        setOptionQuantity(
-                          digits ? Math.max(1, Number(digits)) : 1,
-                        );
+                        const value = e.target.value;
+                        if (activeProduct?.unit?.allows_fraction) {
+                          if (/^\d*([,.]\d{0,3})?$/.test(value)) {
+                            setOptionQuantity(value);
+                          }
+                        } else {
+                          const digits = value.replace(/\D/g, "");
+                          setOptionQuantity(digits || "1");
+                        }
                       }}
                       className="w-12 bg-transparent text-center text-[16px] font-semibold text-on-surface outline-none"
                     />
                     <button
                       type="button"
-                      onClick={() => setOptionQuantity((prev) => prev + 1)}
+                      onClick={() => {
+                        const step = activeProduct?.unit?.allows_fraction
+                          ? 0.1
+                          : 1;
+                        const current =
+                          parseDecimalQuantity(optionQuantity) ??
+                          Number(optionQuantity) ??
+                          0;
+                        setOptionQuantity(
+                          String(Number((current + step).toFixed(3))),
+                        );
+                      }}
                       className="rounded-md text-on-surface-variant hover:text-on-surface transition-colors text-2xl font-bold"
                     >
                       +
@@ -4597,7 +4759,13 @@ const POS = () => {
                     className="flex-1 rounded-[1.5rem] bg-primary-container px-4 py-3 text-sm font-semibold uppercase  text-on-primary transition-colors duration-200 hover:bg-success"
                   >
                     Agregar • ${" "}
-                    {formatPrice(activeProductSelectedPrice * optionQuantity)}
+                    {formatPrice(
+                      activeProductSelectedPrice *
+                        (parseDecimalQuantity(optionQuantity) || 0),
+                    )}
+                    {activeProduct?.unit?.allows_fraction
+                      ? ` · ${activeProduct.unit.name}`
+                      : ""}
                   </button>
                 </div>
               </div>
