@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useMemo,
   useState,
+  useCallback,
 } from "react";
 import { supabase } from "../../../src/lib/supabaseClient";
 
@@ -47,6 +48,7 @@ export const CartProvider = ({ children }) => {
   const [businessWhatsapp, setBusinessWhatsapp] = useState(
     carritoPersistido?.businessWhatsapp || "",
   );
+  const [deliverySettings, setDeliverySettings] = useState(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [observaciones, setObservaciones] = useState("");
   const [metodoPago, setMetodoPago] = useState([]);
@@ -57,6 +59,9 @@ export const CartProvider = ({ children }) => {
     mesa: "",
     direccion: "",
     puntoRetiro: "",
+    deliveryFee: 0,
+    latitude: null,
+    longitude: null,
   });
   // Pedido ya confirmado, pendiente de seguimiento (cocina → camino → entregado)
   const [pedidoActivo, setPedidoActivo] = useState(null);
@@ -129,6 +134,9 @@ export const CartProvider = ({ children }) => {
       mesa: "",
       direccion: "",
       puntoRetiro: "",
+      deliveryFee: 0,
+      latitude: null,
+      longitude: null,
     });
   };
 
@@ -301,7 +309,7 @@ export const CartProvider = ({ children }) => {
 
   // Crea un pedido a partir del carrito actual (snapshot) y lo deja
   // listo para el seguimiento en pantalla.
-  const crearPedido = async () => {
+  const crearPedido = async ({ deliveryFee: deliveryFeeOverride } = {}) => {
     const items = productos
       .filter((p) => carrito[p.id] > 0)
       .map((p) => {
@@ -322,14 +330,16 @@ export const CartProvider = ({ children }) => {
       });
 
     const orderNumber = generarNumeroPedido(datosCliente.telefono);
-    const deliveryFee = Number(datosCliente.deliveryFee) || 0;
+    const deliveryFee =
+      Number(deliveryFeeOverride ?? datosCliente.deliveryFee) || 0;
     const tipAmount = Number(datosCliente.propina) || 0;
     const paymentMethod = metodoPago
       .map((item) => (item.metodo || "desconocido").toString().trim())
       .filter(Boolean)
       .map((m) => m.toLowerCase())
       .join(", ");
-    const paymentStatus = totalPagado === totalPrecio ? "paid" : "pending";
+    const paymentStatus =
+      totalPagado >= totalPrecio + deliveryFee ? "paid" : "pending";
     const orderStatus = paymentStatus === "paid" ? "confirmed" : "pending";
     const orderTypeMap = {
       domicilio: "delivery",
@@ -377,15 +387,6 @@ export const CartProvider = ({ children }) => {
       customer_name: datosCliente.nombre || null,
       customer_phone: datosCliente.telefono || null,
       currency: "COP",
-      mesa:
-        metodoEntrega === "mesa"
-          ? datosCliente.mesa
-            ? Number(datosCliente.mesa)
-            : null
-          : null,
-      punto:
-        metodoEntrega === "punto" ? datosCliente.puntoRetiro || null : null,
-      notes: observaciones || null,
       metadata: {
         tiendaSlug,
         canal: "marketplace",
@@ -406,6 +407,19 @@ export const CartProvider = ({ children }) => {
               .toLowerCase(),
             monto: Number(item.monto) || 0,
           })),
+        delivery_location:
+          metodoEntrega === "domicilio" &&
+          datosCliente.latitude !== null &&
+          datosCliente.latitude !== undefined &&
+          datosCliente.longitude !== null &&
+          datosCliente.longitude !== undefined &&
+          Number.isFinite(Number(datosCliente.latitude)) &&
+          Number.isFinite(Number(datosCliente.longitude))
+            ? {
+                latitude: Number(datosCliente.latitude),
+                longitude: Number(datosCliente.longitude),
+              }
+            : null,
         cliente: {
           nombre: datosCliente.nombre || null,
           telefono: datosCliente.telefono
@@ -416,8 +430,28 @@ export const CartProvider = ({ children }) => {
             metodoEntrega === "punto"
               ? null
               : datosCliente.referencia || datosCliente.puntoRetiro || null,
+          ubicacion:
+            metodoEntrega === "domicilio" &&
+            datosCliente.latitude !== null &&
+            datosCliente.latitude !== undefined &&
+            datosCliente.longitude !== null &&
+            datosCliente.longitude !== undefined
+              ? {
+                  latitude: Number(datosCliente.latitude),
+                  longitude: Number(datosCliente.longitude),
+                }
+              : null,
         },
       },
+      mesa:
+        metodoEntrega === "mesa"
+          ? datosCliente.mesa
+            ? Number(datosCliente.mesa)
+            : null
+          : null,
+      punto:
+        metodoEntrega === "punto" ? datosCliente.puntoRetiro || null : null,
+      notes: observaciones || null,
     };
 
     let savedOrderId = null;
@@ -581,11 +615,14 @@ export const CartProvider = ({ children }) => {
       lines.push(pedido.observaciones || "__");
       lines.push("");
 
-      // Ubicación en Google Maps si lat/lng disponibles
-      if (pedido.datosCliente.lat && pedido.datosCliente.lng) {
+      // Ubicación de entrega elegida por el cliente en el mapa.
+      if (
+        pedido.datosCliente.latitude != null &&
+        pedido.datosCliente.longitude != null
+      ) {
         lines.push(`*Ubicación en Google Maps:*`);
         lines.push(
-          `https://www.google.com/maps?q=${pedido.datosCliente.lat},${pedido.datosCliente.lng}`,
+          `https://www.google.com/maps?q=${pedido.datosCliente.latitude},${pedido.datosCliente.longitude}`,
         );
         lines.push("");
       }
@@ -648,8 +685,11 @@ export const CartProvider = ({ children }) => {
     setEstadoPedido("recibido");
   };
 
-  const actualizarDatoCliente = (campo, valor) =>
-    setDatosCliente((prev) => ({ ...prev, [campo]: valor }));
+  const actualizarDatoCliente = useCallback(
+    (campo, valor) =>
+      setDatosCliente((prev) => ({ ...prev, [campo]: valor })),
+    [],
+  );
 
   const puedeConfirmarEntrega = (() => {
     if (!metodoEntrega) return false;
@@ -702,6 +742,8 @@ export const CartProvider = ({ children }) => {
     datosCliente,
     setDatosCliente,
     actualizarDatoCliente,
+    deliverySettings,
+    setDeliverySettings,
     puedeConfirmarEntrega,
     agregarConVariante,
     obtenerItemId,

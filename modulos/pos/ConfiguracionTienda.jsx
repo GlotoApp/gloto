@@ -27,6 +27,11 @@ const EMPTY_DATA = {
   delivery_fee_per_km: "",
   min_delivery_fee: "",
   max_delivery_fee: "",
+  night_delivery_surcharge_enabled: false,
+  night_delivery_surcharge_start: "21:00",
+  night_delivery_surcharge_end: "06:00",
+  night_delivery_surcharge_percent: "",
+  tip_percent: "",
   latitude: "",
   longitude: "",
 };
@@ -83,7 +88,7 @@ const ConfiguracionTienda = () => {
         supabase
           .from("business_info")
           .select(
-            "address,whatsapp_phone,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,category_id,categoria,latitude,longitude",
+            "address,whatsapp_phone,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent,category_id,categoria,latitude,longitude",
           )
           .eq("business_id", profile.business_id)
           .maybeSingle(),
@@ -115,6 +120,15 @@ const ConfiguracionTienda = () => {
         delivery_fee_per_km: info?.delivery_fee_per_km ?? "",
         min_delivery_fee: info?.min_delivery_fee ?? "",
         max_delivery_fee: info?.max_delivery_fee ?? "",
+        night_delivery_surcharge_enabled:
+          info?.night_delivery_surcharge_enabled ?? false,
+        night_delivery_surcharge_start:
+          info?.night_delivery_surcharge_start?.slice(0, 5) || "21:00",
+        night_delivery_surcharge_end:
+          info?.night_delivery_surcharge_end?.slice(0, 5) || "06:00",
+        night_delivery_surcharge_percent:
+          info?.night_delivery_surcharge_percent ?? "",
+        tip_percent: info?.tip_percent ?? "",
         latitude: info?.latitude ?? "",
         longitude: info?.longitude ?? "",
       }));
@@ -328,6 +342,32 @@ const ConfiguracionTienda = () => {
       setMessage("El costo mínimo no puede ser mayor que el costo máximo.");
       return;
     }
+    const nightSurchargePercent = Number(
+      data.night_delivery_surcharge_percent,
+    );
+    const tipPercent = Number(data.tip_percent);
+    if (
+      data.tip_percent !== "" &&
+      (!Number.isFinite(tipPercent) || tipPercent < 0 || tipPercent > 100)
+    ) {
+      setMessage("El porcentaje de propina debe estar entre 0 y 100.");
+      return;
+    }
+    if (data.night_delivery_surcharge_enabled) {
+      if (
+        !data.night_delivery_surcharge_start ||
+        !data.night_delivery_surcharge_end ||
+        data.night_delivery_surcharge_start ===
+          data.night_delivery_surcharge_end
+      ) {
+        setMessage("Define un horario nocturno válido.");
+        return;
+      }
+      if (!Number.isFinite(nightSurchargePercent) || nightSurchargePercent <= 0) {
+        setMessage("El porcentaje del recargo nocturno debe ser mayor que cero.");
+        return;
+      }
+    }
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
       setMessage("La latitud debe estar entre -90 y 90.");
       return;
@@ -357,6 +397,19 @@ const ConfiguracionTienda = () => {
           delivery_fee_per_km: parseThousands(data.delivery_fee_per_km),
           min_delivery_fee: parseThousands(data.min_delivery_fee),
           max_delivery_fee: parseThousands(data.max_delivery_fee),
+          night_delivery_surcharge_enabled:
+            data.night_delivery_surcharge_enabled,
+          night_delivery_surcharge_start: data.night_delivery_surcharge_enabled
+            ? data.night_delivery_surcharge_start
+            : null,
+          night_delivery_surcharge_end: data.night_delivery_surcharge_enabled
+            ? data.night_delivery_surcharge_end
+            : null,
+          night_delivery_surcharge_percent:
+            data.night_delivery_surcharge_enabled
+              ? nightSurchargePercent
+              : null,
+          tip_percent: data.tip_percent === "" ? 0 : tipPercent,
           category_id: selectedCategory?.id || null,
           categoria: selectedCategory?.name || "",
           latitude: data.latitude ? Number(data.latitude) : null,
@@ -702,6 +755,76 @@ const ConfiguracionTienda = () => {
                 onChange={(e) =>
                   updateMoney("max_delivery_fee", e.target.value)
                 }
+              />
+            </div>
+            <div className="mt-6 rounded-xl border border-white/[0.07] bg-neutral-950/50 p-4">
+              <label className="flex cursor-pointer items-center gap-3 text-sm font-bold text-neutral-200">
+                <input
+                  type="checkbox"
+                  checked={data.night_delivery_surcharge_enabled}
+                  onChange={(e) =>
+                    update("night_delivery_surcharge_enabled", e.target.checked)
+                  }
+                  className="h-4 w-4 accent-violet-500"
+                />
+                Activar recargo nocturno para domicilios
+              </label>
+              {data.night_delivery_surcharge_enabled && (
+                <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                  <ConfiguracionField
+                    label="Hora de inicio"
+                    type="time"
+                    value={data.night_delivery_surcharge_start}
+                    onChange={(e) =>
+                      update("night_delivery_surcharge_start", e.target.value)
+                    }
+                  />
+                  <ConfiguracionField
+                    label="Hora de fin"
+                    type="time"
+                    value={data.night_delivery_surcharge_end}
+                    onChange={(e) =>
+                      update("night_delivery_surcharge_end", e.target.value)
+                    }
+                  />
+                  <ConfiguracionField
+                    label="Recargo (%)"
+                    type="number"
+                    value={data.night_delivery_surcharge_percent}
+                    onChange={(e) =>
+                      update(
+                        "night_delivery_surcharge_percent",
+                        e.target.value,
+                      )
+                    }
+                    placeholder="Ej. 15"
+                  />
+                </div>
+              )}
+              <p className="mt-3 text-xs text-neutral-500">
+                El porcentaje se suma al costo de domicilio calculado. El
+                horario puede cruzar la medianoche.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
+            <h3 className="mb-2 text-sm font-black uppercase tracking-wider text-neutral-300">
+              Propina en POS
+            </h3>
+            <p className="mb-5 text-xs text-neutral-500">
+              Define el porcentaje que se agregará automáticamente al subtotal
+              de los productos en cada pedido. Usa 0 para no cobrar propina.
+            </p>
+            <div className="max-w-sm">
+              <ConfiguracionField
+                label="Propina (%)"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={data.tip_percent}
+                onChange={(e) => update("tip_percent", e.target.value)}
+                placeholder="Ej. 10"
               />
             </div>
           </div>

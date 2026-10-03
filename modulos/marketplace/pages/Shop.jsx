@@ -325,6 +325,7 @@ const Shop = () => {
     setTiendaSlug,
     businessId,
     setBusinessId,
+    setDeliverySettings,
     businessWhatsapp,
     setBusinessWhatsapp,
     vaciar,
@@ -434,7 +435,7 @@ const Shop = () => {
         const businessInfoQuery = supabase
           .from("business_info")
           .select(
-            "rating,rating_count,delivery_time_min,delivery_time_max,min_delivery_fee,category_id,categoria,category:categories!business_info_category_id_fkey(name),whatsapp_phone,address",
+            "rating,rating_count,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,latitude,longitude,category_id,categoria,category:categories!business_info_category_id_fkey(name),whatsapp_phone,address",
           )
           .eq("business_id", data.id)
           .single();
@@ -801,6 +802,7 @@ const Shop = () => {
           setBusinessWhatsapp(
             normalizeWhatsappNumber(info?.whatsapp_phone || "") || "",
           );
+          setDeliverySettings(info);
           // Aseguramos también registrar el slug de la tienda en el contexto
           // para que el carrito sepa de qué tienda provienen los productos
           // cuando el usuario agregue items.
@@ -816,7 +818,13 @@ const Shop = () => {
     if (slug) {
       obtenerTienda();
     }
-  }, [slug, setNombreTienda, setLogoTienda, setBusinessWhatsapp]);
+  }, [
+    slug,
+    setNombreTienda,
+    setLogoTienda,
+    setBusinessWhatsapp,
+    setDeliverySettings,
+  ]);
 
   useEffect(() => {
     if (businessHoursRows.length === 0) return undefined;
@@ -990,14 +998,16 @@ const Shop = () => {
     catActiva === "Todos"
       ? productos
       : productos.filter((p) => p.cat === catActiva);
+  const productosParaBuscar =
+    searchQuery.trim() === "" ? productosPorCategoria : productos;
   const displayedProducts =
     searchQuery.trim() === ""
       ? productosPorCategoria
-      : productosPorCategoria.filter((p) => {
+      : productosParaBuscar.filter((p) => {
           const q = searchQuery.trim().toLowerCase();
           return (
-            p.nombre.toLowerCase().includes(q) ||
-            (p.desc && p.desc.toLowerCase().includes(q))
+            String(p.nombre || "").toLowerCase().includes(q) ||
+            String(p.desc || "").toLowerCase().includes(q)
           );
         });
 
@@ -1663,11 +1673,7 @@ const Shop = () => {
                 ref={searchInputRef}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={
-                  catActiva === "Todos"
-                    ? "Buscar en el menú..."
-                    : `Buscar en ${catActiva}...`
-                }
+                placeholder="Buscar productos en todas las categorías..."
                 style={{
                   width: "100%",
                   padding: "10px 40px 10px 14px",
@@ -1678,7 +1684,7 @@ const Shop = () => {
                   outline: "none",
                   boxSizing: "border-box",
                 }}
-                aria-label={`Buscar en ${catActiva}`}
+                aria-label="Buscar productos en todas las categorías"
               />
               <button
                 type="button"
@@ -1722,18 +1728,6 @@ const Shop = () => {
             animation: "fadeInLista 0.22s ease",
           }}
         >
-          {searchQuery.trim() !== "" && (
-            <p
-              style={{
-                fontSize: "12px",
-                color: "rgba(255,255,255,0.35)",
-                padding: "8px 20px 4px",
-              }}
-            >
-              {displayedProducts.length} resultado(s) para "{searchQuery}"
-            </p>
-          )}
-
           {isLoadingProductos ? (
             // ── SKELETON ── mismo layout que la tarjeta real (texto a la
             // izquierda, imagen 88x88 a la derecha) para que no haya salto
@@ -2335,9 +2329,9 @@ const Shop = () => {
             setCheckoutOpen(false);
             abrirCarrito();
           }}
-          onConfirmar={async () => {
+          onConfirmar={async (deliveryFee) => {
             try {
-              const pedido = await crearPedido();
+              const pedido = await crearPedido({ deliveryFee });
               setCheckoutOpen(false);
               if (pedido) {
                 navigate(

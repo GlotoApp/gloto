@@ -13,6 +13,11 @@ const FIELD_DESCRIPTIONS = {
   "Tarifa por kilómetro": "Valor cobrado por cada kilómetro de distancia.",
   "Costo mínimo de domicilio": "Valor mínimo que puede tener un domicilio.",
   "Costo máximo de domicilio": "Límite máximo cobrado por un domicilio.",
+  "Hora de inicio": "Hora local en que comienza el recargo nocturno.",
+  "Hora de fin": "Hora local en que termina el recargo nocturno.",
+  "Recargo (%)": "Porcentaje que se suma al costo base del domicilio.",
+  "Propina (%)":
+    "Porcentaje que se agrega al subtotal de productos de cada pedido en POS.",
   Latitud: "Coordenada norte-sur de la ubicación de la tienda.",
   Longitud: "Coordenada este-oeste de la ubicación de la tienda.",
   "Nombre completo": "Nombre de la persona que administra la cuenta.",
@@ -28,6 +33,9 @@ const ConfiguracionField = ({
   inputMode,
   placeholder = "",
   showError = false,
+  min,
+  max,
+  step,
 }) => (
   <label className="flex flex-col gap-2">
     <span className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-500">
@@ -36,6 +44,9 @@ const ConfiguracionField = ({
     <input
       type={type}
       inputMode={inputMode}
+      min={min}
+      max={max}
+      step={step}
       value={value ?? ""}
       onChange={onChange}
       placeholder={placeholder}

@@ -8,6 +8,11 @@ import React, {
 import { useLocation, useNavigate } from "react-router-dom";
 import { Trash2, Pencil, X, Maximize2 } from "lucide-react";
 import SplitPaymentModal from "./SplitPaymentModal";
+import { printOrderInvoice } from "./OrderInvoice";
+import {
+  downloadOrderInvoicePdf,
+  shareOrderInvoicePdf,
+} from "./OrderInvoicePdf";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 import DeliveryMap from "./DeliveryMap";
@@ -61,6 +66,49 @@ const formatMapCoordinates = ({ latitude, longitude }) =>
 
 const createGoogleMapsLink = ({ latitude, longitude }) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
+
+const getProductUnitLabel = (product) =>
+  String(product?.unit?.name || product?.unit_name || "UNIDAD").trim();
+
+const DELIVERY_PLACE_SEARCH_URL = "https://photon.komoot.io/api/";
+const DELIVERY_PLACE_REVERSE_URL = "https://photon.komoot.io/reverse";
+const DELIVERY_PLACE_MAX_DISTANCE_KM = 15;
+
+const getDeliveryPlaceLabel = (properties = {}) => {
+  const streetAddress = [properties.street, properties.housenumber]
+    .filter(Boolean)
+    .join(" ");
+  const primary = streetAddress || properties.name;
+  const locality = [
+    properties.district,
+    properties.suburb,
+    properties.city,
+    properties.state,
+    properties.country,
+  ].filter(Boolean);
+  return [primary, ...locality]
+    .filter(
+      (part, index, values) =>
+        part &&
+        values.findIndex(
+          (value) =>
+            String(value).toLowerCase() === String(part).toLowerCase(),
+        ) === index,
+    )
+    .join(", ");
+};
+
+const getCoordinateDistanceKm = (first, second) => {
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
+  const latitudeDelta = toRadians(second.latitude - first.latitude);
+  const longitudeDelta = toRadians(second.longitude - first.longitude);
+  const value =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(toRadians(first.latitude)) *
+      Math.cos(toRadians(second.latitude)) *
+      Math.sin(longitudeDelta / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+};
 
 const TextField = ({
   label,
@@ -466,6 +514,7 @@ const POS = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [removingItems, setRemovingItems] = useState(new Set());
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [showOutOfStockWarning, setShowOutOfStockWarning] = useState(false);
   const [outOfStockProduct, setOutOfStockProduct] = useState(null);
   const [outOfStockMessage, setOutOfStockMessage] = useState("");
@@ -498,14 +547,22 @@ const POS = () => {
   const [isProductCatalogReady, setIsProductCatalogReady] = useState(false);
   const [businessId, setBusinessId] = useState(null);
   const [deliverySettings, setDeliverySettings] = useState(null);
+  const [deliveryClock, setDeliveryClock] = useState(() => new Date());
   const [deliveryBusinessLogoUrl, setDeliveryBusinessLogoUrl] = useState("");
+  const [deliveryBusinessDetails, setDeliveryBusinessDetails] = useState({
+    name: "",
+    address: "",
+    phone: "",
+  });
   const [isLoadingDeliverySettings, setIsLoadingDeliverySettings] =
     useState(true);
   const [deliverySettingsError, setDeliverySettingsError] = useState("");
   const toastTimers = useRef({});
+  const submittingOrderRef = useRef(false);
   const cartScrollRef = useRef(null);
   const cartScrollRefMobile = useRef(null);
   const tableInputRef = useRef(null);
+  const optionQuantityInputRef = useRef(null);
   const modalOverlayRef = useRef(null);
   const prevActiveElRef = useRef(null);
 
@@ -531,6 +588,12 @@ const POS = () => {
       } catch {}
     };
   }, [isModalOpen]);
+
+  useEffect(() => {
+    if (!optionModalOpen) return;
+    optionQuantityInputRef.current?.focus();
+    optionQuantityInputRef.current?.select();
+  }, [optionModalOpen, activeProduct]);
 
   const fetchCategoriesForBusiness = async (businessId) => {
     setIsLoadingCategories(true);
@@ -575,6 +638,58 @@ const POS = () => {
 
   const getProductCacheKey = (businessIdKey) =>
     `pos-products-cache-${businessIdKey}`;
+
+  const getDeliverySettingsCacheKey = (businessIdKey) =>
+    `pos-delivery-settings-cache-${businessIdKey}`;
+
+  const getDeliveryLogoCacheKey = (businessIdKey) =>
+    `pos-delivery-logo-cache-${businessIdKey}`;
+
+  const readDeliveryLogoCache = (businessIdKey) => {
+    try {
+      return localStorage.getItem(getDeliveryLogoCacheKey(businessIdKey)) || "";
+    } catch (error) {
+      console.warn("No se pudo leer el logo guardado de la tienda:", error);
+      return "";
+    }
+  };
+
+  const writeDeliveryLogoCache = (businessIdKey, logoUrl) => {
+    try {
+      if (logoUrl) {
+        localStorage.setItem(getDeliveryLogoCacheKey(businessIdKey), logoUrl);
+      } else {
+        localStorage.removeItem(getDeliveryLogoCacheKey(businessIdKey));
+      }
+    } catch (error) {
+      console.warn("No se pudo guardar el logo de la tienda:", error);
+    }
+  };
+
+  const readDeliverySettingsCache = (businessIdKey) => {
+    try {
+      const cached = localStorage.getItem(
+        getDeliverySettingsCacheKey(businessIdKey),
+      );
+      if (!cached) return null;
+      const parsed = JSON.parse(cached);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (error) {
+      console.warn("No se pudo leer la ubicación guardada de la tienda:", error);
+      return null;
+    }
+  };
+
+  const writeDeliverySettingsCache = (businessIdKey, settings) => {
+    try {
+      localStorage.setItem(
+        getDeliverySettingsCacheKey(businessIdKey),
+        JSON.stringify(settings),
+      );
+    } catch (error) {
+      console.warn("No se pudo guardar la ubicación de la tienda:", error);
+    }
+  };
 
   const readProductCache = (businessIdKey) => {
     try {
@@ -782,10 +897,15 @@ const POS = () => {
         return;
       }
 
-      setDeliverySettings(null);
-      setDeliveryBusinessLogoUrl("");
+      const cachedDeliverySettings = readDeliverySettingsCache(
+        profile.business_id,
+      );
+      setDeliverySettings(cachedDeliverySettings);
+      setDeliveryBusinessLogoUrl(
+        readDeliveryLogoCache(profile.business_id),
+      );
       setDeliverySettingsError("");
-      setIsLoadingDeliverySettings(true);
+      setIsLoadingDeliverySettings(!cachedDeliverySettings);
       setBusinessId(profile.business_id);
       const { categoryMap: fetchedCategoryMap } =
         await fetchCategoriesForBusiness(profile.business_id);
@@ -805,7 +925,7 @@ const POS = () => {
         const { data, error } = await supabase
           .from("business_info")
           .select(
-            "latitude,longitude,delivery_fee_per_km,min_delivery_fee,max_delivery_fee",
+            "latitude,longitude,address,whatsapp_phone,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent",
           )
           .eq("business_id", businessId)
           .maybeSingle();
@@ -816,9 +936,13 @@ const POS = () => {
           setDeliverySettingsError(
             "No se pudo cargar la configuración de domicilio.",
           );
-          setDeliverySettings(null);
+          setDeliverySettings(
+            (current) =>
+              current || readDeliverySettingsCache(businessId),
+          );
         } else {
           setDeliverySettings(data || null);
+          if (data) writeDeliverySettingsCache(businessId, data);
         }
       } catch (error) {
         if (cancelled) return;
@@ -826,7 +950,9 @@ const POS = () => {
         setDeliverySettingsError(
           "No se pudo cargar la configuración de domicilio.",
         );
-        setDeliverySettings(null);
+        setDeliverySettings(
+          (current) => current || readDeliverySettingsCache(businessId),
+        );
       } finally {
         if (!cancelled) setIsLoadingDeliverySettings(false);
       }
@@ -839,25 +965,50 @@ const POS = () => {
   }, [businessId]);
 
   useEffect(() => {
+    if (!deliverySettings?.night_delivery_surcharge_enabled) return undefined;
+    const timer = window.setInterval(() => setDeliveryClock(new Date()), 30000);
+    return () => window.clearInterval(timer);
+  }, [deliverySettings?.night_delivery_surcharge_enabled]);
+
+  useEffect(() => {
     if (!businessId) return undefined;
 
     let cancelled = false;
-    supabase
-      .from("businesses")
-      .select("logo_url")
-      .eq("id", businessId)
-      .maybeSingle()
-      .then(({ data, error }) => {
+    Promise.all([
+      supabase
+        .from("businesses")
+        .select("name,logo_url")
+        .eq("id", businessId)
+        .maybeSingle(),
+      supabase
+        .from("business_info")
+        .select("address,whatsapp_phone")
+        .eq("business_id", businessId)
+        .maybeSingle(),
+    ])
+      .then(([{ data, error }, { data: businessInfo, error: infoError }]) => {
         if (cancelled) return;
-        if (error) {
-          console.warn("No se pudo cargar el logo del negocio:", error);
+        if (error || infoError) {
+          console.warn(
+            "No se pudieron cargar los datos del negocio para la factura:",
+            error || infoError,
+          );
         }
-        setDeliveryBusinessLogoUrl(data?.logo_url || "");
+        if (error) {
+          return;
+        }
+        const logoUrl = data?.logo_url || "";
+        setDeliveryBusinessLogoUrl(logoUrl);
+        setDeliveryBusinessDetails({
+          name: data?.name || "",
+          address: businessInfo?.address || "",
+          phone: businessInfo?.whatsapp_phone || "",
+        });
+        writeDeliveryLogoCache(businessId, logoUrl);
       })
       .catch((error) => {
         if (cancelled) return;
-        console.warn("No se pudo cargar el logo del negocio:", error);
-        setDeliveryBusinessLogoUrl("");
+        console.warn("No se pudieron cargar los datos del negocio:", error);
       });
 
     return () => {
@@ -924,8 +1075,15 @@ const POS = () => {
   const [deliveryMethod, setDeliveryMethod] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [address, setAddress] = useState("");
+  const [deliveryCoordinatesInput, setDeliveryCoordinatesInput] = useState("");
+  const [deliveryPlaceSuggestions, setDeliveryPlaceSuggestions] = useState([]);
+  const [isSearchingDeliveryPlaces, setIsSearchingDeliveryPlaces] =
+    useState(false);
+  const [deliveryPlaceSearchError, setDeliveryPlaceSearchError] = useState("");
   const [deliveryDestination, setDeliveryDestination] = useState(null);
   const deliveryDestinationRef = useRef(null);
+  const suppressDeliveryPlaceSearchRef = useRef("");
+  const skipReverseGeocodeRef = useRef("");
   const [deliveryRouteDistanceMeters, setDeliveryRouteDistanceMeters] =
     useState(null);
   const [isCalculatingDeliveryRoute, setIsCalculatingDeliveryRoute] =
@@ -980,10 +1138,7 @@ const POS = () => {
       parseMapCoordinates(editMesa.deliveryMapLink) ||
       parseMapCoordinates(storedAddress);
     const editAddress =
-      storedAddress ||
-      (storedDeliveryDestination
-        ? formatMapCoordinates(storedDeliveryDestination)
-        : "");
+      parseMapCoordinates(storedAddress) ? "" : storedAddress;
     const storedReferencePoint =
       editMesa.referencePoint || editMesa.delivery_instructions || "";
     const storedLocationText = editMesa.locationText || editMesa.punto || "";
@@ -1070,6 +1225,9 @@ const POS = () => {
       selectedTable: storedDeliveryMethod === "table" ? nextTable : "",
     });
     setDeliveryMethod(storedDeliveryMethod);
+    skipReverseGeocodeRef.current = storedDeliveryDestination
+      ? `${storedDeliveryDestination.latitude.toFixed(6)},${storedDeliveryDestination.longitude.toFixed(6)}`
+      : "";
     deliveryDestinationRef.current =
       storedDeliveryMethod === "delivery" ? storedDeliveryDestination : null;
     setDeliveryDestination(
@@ -1099,6 +1257,11 @@ const POS = () => {
     }
     setSelectedTable(storedDeliveryMethod === "table" ? nextTable : "");
     setAddress(editAddress);
+    setDeliveryCoordinatesInput(
+      storedDeliveryDestination
+        ? formatMapCoordinates(storedDeliveryDestination)
+        : "",
+    );
     setReferencePoint(storedReferencePoint);
     setLocationText(storedLocationText);
     setCustomerName(nextCustomerName);
@@ -1458,7 +1621,7 @@ const POS = () => {
       setOutOfStockMessage(
         isOutOfStock
           ? "El sistema marca este producto como AGOTADO porque su inventario está en cero o en negativo. Aun así, puedes continuar la venta; el faltante quedará registrado en el inventario."
-          : `El sistema indica que solo hay ${numericStock} unidades disponibles. Puedes continuar la venta; el excedente quedará registrado como faltante en el inventario.`,
+          : `El sistema indica que solo hay ${numericStock} ${getProductUnitLabel(product)} disponibles. Puedes continuar la venta; el excedente quedará registrado como faltante en el inventario.`,
       );
       setOutOfStockCartId(null);
       setPendingOutOfStockQuantity(null);
@@ -1849,7 +2012,7 @@ const POS = () => {
       setOutOfStockMessage(
         isOutOfStock
           ? "El sistema marca este producto como AGOTADO porque su inventario está en cero o en negativo. Aun así, puedes continuar la venta; el faltante quedará registrado en el inventario."
-          : `El sistema indica que solo hay ${numericStock} unidades disponibles. Puedes continuar la venta; el excedente quedará registrado como faltante en el inventario.`,
+          : `El sistema indica que solo hay ${numericStock} ${getProductUnitLabel(product)} disponibles. Puedes continuar la venta; el excedente quedará registrado como faltante en el inventario.`,
       );
       setShowOutOfStockWarning(true);
       return;
@@ -1914,7 +2077,7 @@ const POS = () => {
         setOutOfStockCartId(cartId);
         setPendingOutOfStockQuantity(qty);
         setOutOfStockMessage(
-          `La cantidad escrita supera las ${editQuantityLimit} unidades disponibles para esta mesa. El sistema considera agotado el excedente, pero puedes continuar la venta y registrar el faltante en el inventario.`,
+          `La cantidad escrita supera las ${editQuantityLimit} ${getProductUnitLabel(product)} disponibles para esta mesa. El sistema considera agotado el excedente, pero puedes continuar la venta y registrar el faltante en el inventario.`,
         );
         setShowOutOfStockWarning(true);
         return;
@@ -1964,13 +2127,15 @@ const POS = () => {
         0.0000001;
 
     if (unchanged) {
-      setAddress(formatMapCoordinates(destination));
+      setDeliveryCoordinatesInput(formatMapCoordinates(destination));
       return;
     }
 
     deliveryDestinationRef.current = destination;
     setDeliveryDestination(destination);
-    if (destination) setAddress(formatMapCoordinates(destination));
+    setDeliveryCoordinatesInput(
+      destination ? formatMapCoordinates(destination) : "",
+    );
     setDeliveryRouteDistanceMeters(null);
     setDeliveryRouteError("");
     setIsCalculatingDeliveryRoute(Boolean(destination));
@@ -2064,6 +2229,189 @@ const POS = () => {
 
     return { latitude, longitude };
   }, [deliverySettings?.latitude, deliverySettings?.longitude]);
+
+  useEffect(() => {
+    const query = address.trim();
+    if (suppressDeliveryPlaceSearchRef.current === query) {
+      suppressDeliveryPlaceSearchRef.current = "";
+      setDeliveryPlaceSuggestions([]);
+      setDeliveryPlaceSearchError("");
+      setIsSearchingDeliveryPlaces(false);
+      return undefined;
+    }
+
+    if (!query || deliveryDestination) {
+      setDeliveryPlaceSuggestions([]);
+      setDeliveryPlaceSearchError("");
+      setIsSearchingDeliveryPlaces(false);
+      return undefined;
+    }
+
+    setDeliveryPlaceSuggestions([]);
+    if (query.length < 2) {
+      setDeliveryPlaceSearchError("");
+      setIsSearchingDeliveryPlaces(false);
+      return undefined;
+    }
+    if (isLoadingDeliverySettings) {
+      setDeliveryPlaceSearchError("");
+      setIsSearchingDeliveryPlaces(true);
+      return undefined;
+    }
+    if (!deliveryOrigin) {
+      setDeliveryPlaceSearchError(
+        "Configura la ubicación de la tienda para buscar direcciones cercanas.",
+      );
+      setIsSearchingDeliveryPlaces(false);
+      return undefined;
+    }
+
+    setDeliveryPlaceSearchError("");
+    setIsSearchingDeliveryPlaces(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const createSearchParams = () => {
+          const params = new URLSearchParams({ q: query, limit: "50" });
+          params.set("lat", String(deliveryOrigin.latitude));
+          params.set("lon", String(deliveryOrigin.longitude));
+          const latitudeOffset = DELIVERY_PLACE_MAX_DISTANCE_KM / 111;
+          const longitudeOffset =
+            latitudeOffset /
+            Math.max(
+              Math.cos((deliveryOrigin.latitude * Math.PI) / 180),
+              0.2,
+            );
+          params.set(
+            "bbox",
+            [
+              deliveryOrigin.longitude - longitudeOffset,
+              deliveryOrigin.latitude - latitudeOffset,
+              deliveryOrigin.longitude + longitudeOffset,
+              deliveryOrigin.latitude + latitudeOffset,
+            ].join(","),
+          );
+          return params;
+        };
+
+        const response = await fetch(
+          `${DELIVERY_PLACE_SEARCH_URL}?${createSearchParams()}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) {
+          throw new Error(
+            `La búsqueda de direcciones respondió ${response.status}.`,
+          );
+        }
+        const result = await response.json();
+        const suggestions = (result.features || [])
+          .map((feature) => {
+            const [longitude, latitude] = feature.geometry?.coordinates || [];
+            const label = getDeliveryPlaceLabel(feature.properties);
+            if (
+              !label ||
+              !Number.isFinite(latitude) ||
+              !Number.isFinite(longitude)
+            ) {
+              return null;
+            }
+            return {
+              id: feature.properties?.osm_id
+                ? `${feature.properties.osm_type || "osm"}-${feature.properties.osm_id}`
+                : `${latitude},${longitude},${label}`,
+              label,
+              latitude,
+              longitude,
+              distance: getCoordinateDistanceKm(deliveryOrigin, {
+                latitude,
+                longitude,
+              }),
+            };
+          })
+          .filter(
+            (suggestion) =>
+              suggestion &&
+              suggestion.distance <= DELIVERY_PLACE_MAX_DISTANCE_KM,
+          );
+
+        suggestions.sort((first, second) => first.distance - second.distance);
+        setDeliveryPlaceSuggestions(suggestions);
+        if (suggestions.length === 0) {
+          setDeliveryPlaceSearchError(
+            "No encontramos direcciones cercanas a la tienda. Prueba con otra búsqueda.",
+          );
+        }
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          console.error("Error buscando direcciones de domicilio:", error);
+          setDeliveryPlaceSuggestions([]);
+          setDeliveryPlaceSearchError(
+            "No se pudieron cargar sugerencias. Puedes ingresar la dirección manualmente.",
+          );
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearchingDeliveryPlaces(false);
+        }
+      }
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [
+    address,
+    deliveryDestination,
+    deliveryOrigin,
+    isLoadingDeliverySettings,
+  ]);
+
+  useEffect(() => {
+    if (!deliveryDestination) return undefined;
+
+    const destinationKey = `${deliveryDestination.latitude.toFixed(6)},${deliveryDestination.longitude.toFixed(6)}`;
+    if (skipReverseGeocodeRef.current === destinationKey) {
+      skipReverseGeocodeRef.current = "";
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({
+          lat: String(deliveryDestination.latitude),
+          lon: String(deliveryDestination.longitude),
+        });
+        const response = await fetch(
+          `${DELIVERY_PLACE_REVERSE_URL}?${params.toString()}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) {
+          throw new Error(
+            `La búsqueda de la dirección respondió ${response.status}.`,
+          );
+        }
+
+        const result = await response.json();
+        const label = getDeliveryPlaceLabel(result.features?.[0]?.properties);
+        if (label) {
+          suppressDeliveryPlaceSearchRef.current = label;
+          setAddress(label);
+        }
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          console.warn("No se pudo obtener la dirección de las coordenadas:", error);
+        }
+      }
+    }, 500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [deliveryDestination]);
+
   const deliveryRate = Number(deliverySettings?.delivery_fee_per_km);
   const minimumDeliveryFee = Number(deliverySettings?.min_delivery_fee);
   const maximumDeliveryFee = Number(deliverySettings?.max_delivery_fee);
@@ -2098,11 +2446,40 @@ const POS = () => {
     deliveryFeeBeforeRounding === null
       ? null
       : Math.ceil(deliveryFeeBeforeRounding / 100) * 100;
-  const deliveryFee =
+  const deliveryBaseCharge =
     deliveryMethod === "delivery" && roundedDeliveryFee !== null
       ? Math.min(maximumDeliveryFee, roundedDeliveryFee)
       : 0;
-  const total = itemsSubtotal + deliveryFee;
+  const surchargeStart = String(
+    deliverySettings?.night_delivery_surcharge_start || "",
+  ).slice(0, 5);
+  const surchargeEnd = String(
+    deliverySettings?.night_delivery_surcharge_end || "",
+  ).slice(0, 5);
+  const currentDeliveryTime = `${String(deliveryClock.getHours()).padStart(2, "0")}:${String(deliveryClock.getMinutes()).padStart(2, "0")}`;
+  const isNightDeliverySurchargeTime =
+    Boolean(deliverySettings?.night_delivery_surcharge_enabled) &&
+    Boolean(surchargeStart && surchargeEnd && surchargeStart !== surchargeEnd) &&
+    (surchargeStart < surchargeEnd
+      ? currentDeliveryTime >= surchargeStart &&
+        currentDeliveryTime < surchargeEnd
+      : currentDeliveryTime >= surchargeStart ||
+        currentDeliveryTime < surchargeEnd);
+  const nightSurchargePercent =
+    Number(deliverySettings?.night_delivery_surcharge_percent) || 0;
+  const nightDeliverySurcharge =
+    deliveryMethod === "delivery" &&
+    roundedDeliveryFee !== null &&
+    isNightDeliverySurchargeTime
+      ? Math.ceil(
+          Math.round((deliveryBaseCharge * nightSurchargePercent) / 100) / 100,
+        ) * 100
+      : 0;
+  const deliveryFee = deliveryBaseCharge + nightDeliverySurcharge;
+  const tipPercent = Number(deliverySettings?.tip_percent) || 0;
+  const tipAmount = Math.round((itemsSubtotal * tipPercent) / 100);
+  const totalWithoutTip = itemsSubtotal + deliveryFee;
+  const total = totalWithoutTip + tipAmount;
   const assignedTotal = splitPayments.reduce(
     (acc, curr) => acc + (parseFloat(curr.amount) || 0),
     0,
@@ -2162,7 +2539,11 @@ const POS = () => {
     if (!customerNumber.trim()) {
       errors.push("Ingresar número de cliente");
     }
-    if (deliveryMethod === "delivery" && !address.trim()) {
+    if (
+      deliveryMethod === "delivery" &&
+      !address.trim() &&
+      !deliveryDestination
+    ) {
       errors.push("Ingresar dirección de entrega");
     }
     if (deliveryMethod === "delivery" && !deliveryOrigin) {
@@ -2446,6 +2827,7 @@ const POS = () => {
   };
 
   const crearPedidoPOS = async () => {
+    if (submittingOrderRef.current) return;
     const validationErrors = getOrderValidationErrors();
     if (validationErrors.length > 0) {
       addToast(validationErrors.join(" · "), "error");
@@ -2599,7 +2981,7 @@ const POS = () => {
       delivery_fee: deliveryFee,
       tax_amount: 0,
       discount_amount: 0,
-      tip_amount: 0,
+      tip_amount: tipAmount,
       payment_method: paymentMethodText || null,
       payment_status: paymentStatus,
       order_type: orderTypeMap[deliveryMethod] || "pickup",
@@ -2623,6 +3005,7 @@ const POS = () => {
         tiendaSlug: null,
         canal: "pos",
         createdFrom: "pos_app",
+        tip_percent: tipPercent,
         metodoEntrega: deliveryMethodKey,
         tracking_token: trackingToken,
         business_whatsapp: normalizeWhatsappNumber("") || null,
@@ -2678,6 +3061,8 @@ const POS = () => {
       notes: item.notas || null,
     }));
 
+    submittingOrderRef.current = true;
+    setIsSubmittingOrder(true);
     try {
       if (isEditingTableOrder && editingOrder?.orderId) {
         const { error: replaceOrderError } = await supabase.rpc(
@@ -2691,8 +3076,17 @@ const POS = () => {
 
         if (replaceOrderError) throw replaceOrderError;
 
-        setShowUpdateSuccessModal(true);
+        const updatedOrderForInvoice = {
+          ...orderPayload,
+          items,
+          orderNumber: orderPayload.order_number,
+          trackingToken,
+          total,
+          paymentMethods: paymentMethodsPayload,
+        };
         cancelEditingOrder();
+        setSentOrder(updatedOrderForInvoice);
+        setShowUpdateSuccessModal(true);
         return;
       }
 
@@ -2731,150 +3125,90 @@ const POS = () => {
       resetAllPOSState(true);
     } catch (error) {
       console.error("Error guardando orden desde POS:", error);
+    } finally {
+      submittingOrderRef.current = false;
+      setIsSubmittingOrder(false);
     }
   };
 
-  const buildSentOrderText = (order) => {
-    if (!order) return "";
-    const lines = [
-      `Pedido Nº: ${order.orderNumber}`,
-      `Total: $ ${formatPrice(order.total || 0)}`,
-      `Cliente: ${order.customer_name || "Consumidor"}`,
-      `Teléfono: ${order.customer_phone || "Sin teléfono"}`,
-      `Método de entrega: ${order.metadata?.metodoEntrega || "No definido"}`,
-      `Método de pago: ${order.payment_method || "No especificado"}`,
-      "",
-      "Productos:",
-    ];
-
-    (order.items || []).forEach((item) => {
-      lines.push(
-        `- ${item.nombre} x${item.cantidad} = $ ${formatPrice(item.precio * item.cantidad)}`,
-      );
-      if (item.notas) {
-        lines.push(`  Nota: ${item.notas}`);
-      }
-    });
-
-    if (order.notes) {
-      lines.push("", `Observaciones: ${order.notes}`);
-    }
-
-    return lines.join("\n");
-  };
-
-  const openOrderPrintWindow = (order) => {
+  const getSentOrderInvoice = (order) => {
     if (!order) return;
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
-
-    const formatPriceLocal = (price) =>
-      Math.round(price)
-        .toString()
-        .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-
-    const orderItems = (order.items || [])
-      .map(
-        (item) => `
-          <tr>
-            <td>${item.nombre}</td>
-            <td>${item.cantidad}</td>
-            <td class="text-right">$ ${formatPriceLocal(item.precio)}</td>
-            <td class="text-right">$ ${formatPriceLocal(item.precio * item.cantidad)}</td>
-          </tr>`,
-      )
-      .join("");
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Factura ${order.orderNumber}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
-            h1, h2, h3, h4, h5, h6 { margin: 0; }
-            .invoice-header { text-align: center; margin-bottom: 24px; }
-            .invoice-section { margin-bottom: 18px; }
-            .invoice-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-            .invoice-table th, .invoice-table td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-            .invoice-table th { background: #f5f5f5; }
-            .text-right { text-align: right; }
-            .small { font-size: 12px; color: #555; }
-          </style>
-        </head>
-        <body>
-          <div class="invoice-header">
-            <h1>Factura</h1>
-            <p class="small">Pedido Nº ${order.orderNumber}</p>
-            <p class="small">Canal: ${order.metadata?.canal || "POS"}</p>
-          </div>
-          <div class="invoice-section">
-            <p><strong>Cliente:</strong> ${order.customer_name || "Consumidor"}</p>
-            <p><strong>Teléfono:</strong> ${order.customer_phone || "Sin teléfono"}</p>
-            ${order.metadata?.cliente?.direccion ? `<p><strong>Dirección:</strong> ${order.metadata.cliente.direccion}</p>` : ""}
-            <p><strong>Método de entrega:</strong> ${order.metadata?.metodoEntrega || "No definido"}</p>
-            <p><strong>Método de pago:</strong> ${order.payment_method || "No especificado"}</p>
-          </div>
-          <table class="invoice-table">
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th>Cant.</th>
-                <th class="text-right">Precio</th>
-                <th class="text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${orderItems}
-            </tbody>
-          </table>
-          <div class="mt-4 text-right">
-            <p><strong>Total:</strong> $ ${formatPriceLocal(order.total || 0)}</p>
-          </div>
-        </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-    printWindow.focus();
-    return printWindow;
+    const metadata = order.metadata || {};
+    const customer = metadata.cliente || {};
+    return {
+      numeroFactura: order.orderNumber || order.order_number || "Pedido",
+      horaIngreso: new Date(
+        order.updated_at || order.created_at || Date.now(),
+      ).toLocaleString("es-CO"),
+      metodoEntrega: metadata.metodoEntrega || order.order_type,
+      cliente: order.customer_name || customer.nombre || "Consumidor final",
+      telefono: order.customer_phone || customer.telefono || "",
+      deliveryAddress:
+        order.delivery_address || customer.direccion || "",
+      deliveryInstructions:
+        order.delivery_instructions || customer.referencia || "",
+      punto: order.punto || metadata.puntoRetiro || "",
+      mesa: order.mesa || "",
+      deliveryMapLink: metadata.linkmaps || "",
+      deliveryLocation: metadata.delivery_location || null,
+      deliveryFee: Number(order.delivery_fee || 0),
+      tipAmount: Number(order.tip_amount || 0),
+      tipPercent: Number(metadata.tip_percent || 0),
+      total: Number(order.total || 0),
+      metodoPago: order.payment_method || "",
+      paymentMethods: order.paymentMethods || metadata.payment_methods || [],
+      observaciones: order.notes || "",
+      items: (order.items || []).map((item) => ({
+        product_name: item.name || item.nombre || "Producto",
+        quantity: Number(item.qty ?? item.cantidad ?? 0),
+        unit_price: Number(item.price ?? item.precio ?? 0),
+        subtotal:
+          Number(item.price ?? item.precio ?? 0) *
+          Number(item.qty ?? item.cantidad ?? 0),
+        unit_name: item.unit?.name || item.unit_name || "",
+        options: item.optionNames || item.opciones || item.options || [],
+        notes: item.note || item.notas || "",
+      })),
+    };
   };
+
+  const sentOrderInvoiceBusiness = () => ({
+    ...deliveryBusinessDetails,
+    logoUrl: deliveryBusinessLogoUrl,
+  });
 
   const handlePrintSentOrder = (order) => {
-    const printWindow = openOrderPrintWindow(order);
-    if (!printWindow) return;
-    printWindow.print();
-    printWindow.close();
+    const invoiceOrder = getSentOrderInvoice(order);
+    if (!invoiceOrder) return;
+    printOrderInvoice(invoiceOrder, sentOrderInvoiceBusiness());
   };
 
-  const handleSavePdfSentOrder = (order) => {
-    const printWindow = openOrderPrintWindow(order);
-    if (!printWindow) return;
-    printWindow.print();
-    printWindow.close();
+  const handleSavePdfSentOrder = async (order) => {
+    const invoiceOrder = getSentOrderInvoice(order);
+    if (!invoiceOrder) return;
+    try {
+      await downloadOrderInvoicePdf(invoiceOrder, sentOrderInvoiceBusiness());
+    } catch (error) {
+      console.error("Error generando el PDF de la factura:", error);
+      alert("No se pudo generar el PDF de la factura.");
+    }
   };
 
   const handleShareSentOrder = async (order) => {
-    if (!order) return;
-    const text = buildSentOrderText(order);
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `Pedido ${order.orderNumber}`,
-          text,
-        });
-      } catch (error) {
-        console.error("Error compartiendo pedido:", error);
-      }
-      return;
-    }
-
+    const invoiceOrder = getSentOrderInvoice(order);
+    if (!invoiceOrder) return;
     try {
-      await navigator.clipboard.writeText(text);
-      alert("Resumen del pedido copiado al portapapeles.");
+      const result = await shareOrderInvoicePdf(
+        invoiceOrder,
+        sentOrderInvoiceBusiness(),
+      );
+      if (result === "downloaded") {
+        alert("El PDF quedó descargado y listo para compartir.");
+      }
     } catch (error) {
-      console.error("Error al copiar pedido:", error);
-      alert("No se pudo compartir el pedido. Intenta copiar manualmente.");
+      if (error?.name === "AbortError") return;
+      console.error("Error compartiendo el PDF de la factura:", error);
+      alert("No se pudo generar o compartir el PDF de la factura.");
     }
   };
 
@@ -3116,65 +3450,139 @@ const POS = () => {
   );
 
   const deliveryAddressField = (
+    <div className="relative z-30">
+      <TextField
+        label="Dirección"
+        value={address}
+        setValue={setAddress}
+        placeholder="Ingresa la dirección"
+        size={isDeliveryMapFullscreen ? "md" : "compact"}
+        onChange={(event) => {
+          const value = event.target.value;
+          setAddress(value);
+          if (deliveryDestinationRef.current) {
+            handleDeliveryDestinationChange(null);
+          }
+        }}
+        onClear={() => {
+          setDeliveryPlaceSuggestions([]);
+          setDeliveryPlaceSearchError("");
+          handleDeliveryDestinationChange(null);
+        }}
+      />
+      {!deliveryDestination &&
+        (address.trim().length === 1 ||
+          deliveryPlaceSuggestions.length > 0 ||
+          isSearchingDeliveryPlaces ||
+          deliveryPlaceSearchError) && (
+        <div
+          className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-outline bg-surface shadow-xl"
+          role="listbox"
+          aria-label="Sugerencias de direcciones"
+        >
+          {isSearchingDeliveryPlaces && (
+            <p className="px-3 py-2 text-xs text-on-surface-variant">
+              {isLoadingDeliverySettings
+                ? "Cargando ubicación de la tienda..."
+                : "Buscando direcciones cercanas..."}
+            </p>
+          )}
+          {address.trim().length === 1 &&
+            !isSearchingDeliveryPlaces &&
+            !deliveryPlaceSearchError && (
+              <p className="px-3 py-2 text-xs text-on-surface-variant">
+                Escribe otro carácter para ver sugerencias cercanas.
+              </p>
+            )}
+          {deliveryPlaceSearchError && (
+            <p className="px-3 py-2 text-xs text-red-300">
+              {deliveryPlaceSearchError}
+            </p>
+          )}
+          {!isSearchingDeliveryPlaces &&
+            deliveryPlaceSuggestions.map((suggestion) => (
+              <button
+                key={suggestion.id}
+                type="button"
+                role="option"
+                aria-selected="false"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  suppressDeliveryPlaceSearchRef.current = suggestion.label;
+                  skipReverseGeocodeRef.current = `${suggestion.latitude.toFixed(6)},${suggestion.longitude.toFixed(6)}`;
+                  setDeliveryPlaceSuggestions([]);
+                  setDeliveryPlaceSearchError("");
+                  handleDeliveryDestinationChange({
+                    latitude: suggestion.latitude,
+                    longitude: suggestion.longitude,
+                  });
+                  setAddress(suggestion.label);
+                }}
+                className="block w-full border-b border-outline/40 px-3 py-2 text-left text-xs text-on-surface transition last:border-b-0 hover:bg-surface-hover"
+              >
+                {suggestion.label}
+              </button>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const deliveryCoordinatesField = (
     <TextField
-      label="Dirección"
-      value={address}
-      setValue={setAddress}
-      placeholder="Ingresa la dirección"
+      label="Coordenadas o enlace de Google Maps"
+      value={deliveryCoordinatesInput}
+      setValue={setDeliveryCoordinatesInput}
+      placeholder="Pega el enlace o escribe latitud, longitud"
       size={isDeliveryMapFullscreen ? "md" : "compact"}
       onChange={(event) => {
         const value = event.target.value;
-        setAddress(value);
-        if (!parseMapCoordinates(value) && deliveryDestinationRef.current) {
+        setDeliveryCoordinatesInput(value);
+        const coordinates = parseMapCoordinates(value);
+        if (coordinates) {
+          handleDeliveryDestinationChange(coordinates);
+        } else if (deliveryDestinationRef.current) {
           handleDeliveryDestinationChange(null);
+          setDeliveryCoordinatesInput(value);
         }
       }}
       onPaste={(event) => {
-        const coordinates = parseMapCoordinates(
-          event.clipboardData.getData("text"),
-        );
-        if (!coordinates) return;
-        event.preventDefault();
-        handleDeliveryDestinationChange(coordinates);
-      }}
-      onPasteValue={(pastedText) => {
+        const pastedText = event.clipboardData.getData("text");
         const coordinates = parseMapCoordinates(pastedText);
         if (coordinates) {
+          event.preventDefault();
           handleDeliveryDestinationChange(coordinates);
-        } else {
-          setAddress(pastedText);
         }
       }}
-      onBlur={() => {
-        const coordinates = parseMapCoordinates(address);
+      onPasteValue={(pastedText) => {
+        setDeliveryCoordinatesInput(pastedText);
+        const coordinates = parseMapCoordinates(pastedText);
         if (coordinates) handleDeliveryDestinationChange(coordinates);
       }}
-      onClear={() => handleDeliveryDestinationChange(null)}
+      onBlur={() => {
+        const coordinates = parseMapCoordinates(deliveryCoordinatesInput);
+        if (coordinates) handleDeliveryDestinationChange(coordinates);
+      }}
+      onClear={() => {
+        setDeliveryCoordinatesInput("");
+        handleDeliveryDestinationChange(null);
+      }}
     />
   );
 
-  const deliveryMapContent =
-    isLoadingDeliverySettings ? null : deliverySettingsError ? (
-      <div className="flex h-48 items-center justify-center rounded-lg border border-red-500/20 bg-red-500/5 px-4 text-center text-xs text-red-300">
-        {deliverySettingsError}
-      </div>
-    ) : !deliveryOrigin ? (
-      <div className="flex h-48 items-center justify-center rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 text-center text-xs text-amber-200">
-        Configura la ubicación del negocio para calcular rutas de domicilio.
-      </div>
-    ) : (
-      <DeliveryMap
-        origin={deliveryOrigin}
-        destination={deliveryDestination}
-        originLogoUrl={deliveryBusinessLogoUrl}
-        onDestinationChange={handleDeliveryDestinationChange}
-        onRouteChange={setDeliveryRouteDistanceMeters}
-        onRoutingChange={setIsCalculatingDeliveryRoute}
-        onRouteErrorChange={setDeliveryRouteError}
-        fullHeight={isDeliveryMapFullscreen}
-        compact={!isDeliveryMapFullscreen}
-      />
-    );
+  const deliveryMapContent = (
+    <DeliveryMap
+      origin={deliveryOrigin}
+      destination={deliveryDestination}
+      originLogoUrl={deliveryBusinessLogoUrl}
+      onDestinationChange={handleDeliveryDestinationChange}
+      onRouteChange={setDeliveryRouteDistanceMeters}
+      onRoutingChange={setIsCalculatingDeliveryRoute}
+      onRouteErrorChange={setDeliveryRouteError}
+      fullHeight={isDeliveryMapFullscreen}
+      compact={!isDeliveryMapFullscreen}
+    />
+  );
 
   const deliveryMapStatus = (
     <>
@@ -3209,6 +3617,16 @@ const POS = () => {
           {deliveryBaseFee === null ? "—" : `$ ${formatPrice(deliveryBaseFee)}`}
         </span>
       </div>
+      {nightDeliverySurcharge > 0 && (
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold text-amber-200">
+            RECARGO NOCTURNO ({nightSurchargePercent}%)
+          </span>
+          <span className="text-[10px] font-black text-amber-100">
+            + $ {formatPrice(nightDeliverySurcharge)}
+          </span>
+        </div>
+      )}
       <div className="h-px bg-primary-container/20" />
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -3269,6 +3687,7 @@ const POS = () => {
               </div>
               <aside className="flex min-h-0 w-full flex-[2] flex-col gap-3 overflow-y-auto pr-1 md:w-[340px] md:flex-none">
                 {deliveryAddressField}
+                {deliveryCoordinatesField}
                 <TextField
                   label="Punto de Referencia"
                   value={referencePoint}
@@ -3400,13 +3819,13 @@ const POS = () => {
 
           <div className="flex-1 flex flex-col p-4">
             {isLoadingProducts && filteredProducts.length === 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
                 {[...Array(8)].map((_, idx) => (
                   <div
                     key={idx}
-                    className="group relative bg-surface rounded-[2.5rem] p-3 flex flex-col animate-pulse"
+                    className="group relative bg-surface rounded-[1.25rem] p-2 flex flex-col animate-pulse"
                   >
-                    <div className="bg-surface-hover/50 rounded-[1.8rem] h-32 mb-4 border border-outline/[0.03]" />
+                    <div className="bg-surface-hover/50 rounded-[1rem] h-24 mb-3 border border-outline/[0.03]" />
                     <div className="px-1 flex-1">
                       <div className="h-4 bg-white/10 rounded-full w-3/4 mb-3" />
                       <div className="h-5 bg-white/10 rounded-full w-1/2" />
@@ -3429,20 +3848,20 @@ const POS = () => {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
                 {filteredProducts.map((product) => (
                   <div
                     key={product.id}
                     onClick={() => addToCart(product)}
                     aria-disabled={!isProductCatalogReady}
-                    className={`group relative flex flex-col rounded-[25px] bg-surface transition-all duration-500 hover:bg-surface-hover/50 hover:border-primary-container/40 active:scale-[0.97] ${
+                    className={`group relative flex flex-col rounded-[1.25rem] bg-surface transition-all duration-500 hover:bg-surface-hover/50 hover:border-primary-container/40 active:scale-[0.97] ${
                       isProductCatalogReady
                         ? "cursor-pointer"
                         : "cursor-wait opacity-80"
                     }`}
                   >
                     <div
-                      className={`absolute top-2 left-2 z-10 px-2 py-1 rounded-full text-white text-xs font-bold uppercase tracking-wider ${
+                      className={`absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-full text-white text-[10px] font-bold uppercase tracking-wider ${
                         product.soldOut || Number(product.stock) <= 0
                           ? "bg-red-600"
                           : "bg-green-600"
@@ -3462,7 +3881,7 @@ const POS = () => {
                           showInfo === product.id ? null : product.id,
                         );
                       }}
-                      className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-300 bg-primary-container/50 text-primary border-primary/30 hover:bg-primary-container hover:text-on-surface z-10"
+                      className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all duration-300 bg-primary-container/50 text-primary border-primary/30 hover:bg-primary-container hover:text-on-surface z-10"
                     >
                       <span className="material-symbols-outlined text-sm">
                         info
@@ -3470,7 +3889,7 @@ const POS = () => {
                     </button>
 
                     {/* Contenedor del icono image */}
-                    <div className="bg-surface-hover/50 rounded-t-[1.8rem] h-32  flex items-center justify-center border border-outline/[0.03] overflow-hidden relative">
+                    <div className="bg-surface-hover/50 rounded-t-[1rem] h-24 flex items-center justify-center border border-outline/[0.03] overflow-hidden relative">
                       {hasUsableProductImage(product.image_url) ? (
                         <>
                           <div className="absolute inset-0 bg-gradient-to-br from-primary-container/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
@@ -3485,7 +3904,7 @@ const POS = () => {
                           className="flex h-full w-full items-center justify-center bg-neutral-200 px-3"
                           aria-label={product.name}
                         >
-                          <span className="truncate text-center text-2xl text-neutral-500">
+                          <span className="truncate text-center text-lg text-neutral-500">
                             {product.name}
                           </span>
                         </div>
@@ -3493,13 +3912,13 @@ const POS = () => {
                     </div>
 
                     {/* Información de Producto */}
-                    <div className="px-1">
-                      <p className="font-bold text-on-surface text-sl px-2 group-hover:text-primary transition-colors">
+                    <div className="px-2 pt-1">
+                      <p className="font-bold text-on-surface text-sm group-hover:text-primary transition-colors">
                         {product.name}
                       </p>
 
-                      <div className="flex items-center justify-between  pr-2 pl-2 pb-2">
-                        <p className="text-primary font-black text-ml md:text-lg tracking-tight">
+                      <div className="flex items-center justify-between gap-1 pb-2">
+                        <p className="text-primary font-black text-sm tracking-tight">
                           $ {formatPrice(product.price)} /{" "}
                           {product.unit?.name || "UNIDAD"}
                         </p>
@@ -3742,6 +4161,7 @@ const POS = () => {
                 }
               />
               {deliveryAddressField}
+              {deliveryCoordinatesField}
               <TextField
                 label="Punto de Referencia"
                 value={referencePoint}
@@ -3750,22 +4170,20 @@ const POS = () => {
                 size={isDeliveryMapFullscreen ? "md" : "compact"}
               />
 
-              {!isDeliveryMapFullscreen &&
-                !isLoadingDeliverySettings &&
-                deliveryOrigin && (
-                  <div className="relative">
-                    {deliveryMapContent}
-                    <button
-                      type="button"
-                      onClick={() => setIsDeliveryMapFullscreen(true)}
-                      className="absolute bottom-2 right-2 z-20 flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 bg-neutral-950/90 text-white shadow-lg transition hover:bg-neutral-800"
-                      aria-label="Mostrar mapa en pantalla completa"
-                      title="Mostrar mapa en pantalla completa"
-                    >
-                      <Maximize2 size={15} />
-                    </button>
-                  </div>
-                )}
+              {!isDeliveryMapFullscreen && (
+                <div className="relative">
+                  {deliveryMapContent}
+                  <button
+                    type="button"
+                    onClick={() => setIsDeliveryMapFullscreen(true)}
+                    className="absolute bottom-2 right-2 z-20 flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 bg-neutral-950/90 text-white shadow-lg transition hover:bg-neutral-800"
+                    aria-label="Mostrar mapa en pantalla completa"
+                    title="Mostrar mapa en pantalla completa"
+                  >
+                    <Maximize2 size={15} />
+                  </button>
+                </div>
+              )}
               {!isDeliveryMapFullscreen && deliveryMapStatus}
               {!isDeliveryMapFullscreen && deliveryCostSummary}
             </div>
@@ -4027,12 +4445,53 @@ const POS = () => {
                 </span>
               </div>
               {deliveryMethod === "delivery" && deliveryBaseFee !== null && (
-                <div className="flex justify-between items-center opacity-70">
+                <>
+                  <div className="flex justify-between items-center opacity-70">
+                    <span className="text-[10px] font-bold uppercase tracking-widest">
+                      Domicilio
+                    </span>
+                    <span className="text-sm font-bold">
+                      $ {formatPrice(deliveryBaseCharge)}
+                    </span>
+                  </div>
+                  {nightDeliverySurcharge > 0 && (
+                    <div className="flex justify-between items-center text-amber-200">
+                      <span className="text-[10px] font-bold uppercase tracking-widest">
+                        Recargo nocturno ({nightSurchargePercent}%)
+                      </span>
+                      <span className="text-sm font-bold">
+                        + $ {formatPrice(nightDeliverySurcharge)}
+                      </span>
+                    </div>
+                  )}
+                  {nightDeliverySurcharge > 0 && (
+                    <div className="flex justify-between items-center font-bold">
+                      <span className="text-[10px] uppercase tracking-widest">
+                        Domicilio total
+                      </span>
+                      <span className="text-sm">
+                        $ {formatPrice(deliveryFee)}
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="flex justify-between items-center opacity-70">
+                <span className="text-[10px] font-bold uppercase tracking-widest">
+                  Total sin propina
+                </span>
+                <span className="text-sm font-bold">
+                  $ {formatPrice(totalWithoutTip)}
+                </span>
+              </div>
+              {tipAmount > 0 && (
+                <div className="flex justify-between items-center text-emerald-300">
                   <span className="text-[10px] font-bold uppercase tracking-widest">
-                    Domicilio
+                    Propina ({tipPercent}%)
                   </span>
                   <span className="text-sm font-bold">
-                    $ {formatPrice(deliveryFee)}
+                    + $ {formatPrice(tipAmount)}
                   </span>
                 </div>
               )}
@@ -4092,11 +4551,25 @@ const POS = () => {
             <button
               onClick={crearPedidoPOS}
               disabled={
-                cart.length === 0 || (isEditingTableOrder && !hasEditChanges)
+                isSubmittingOrder ||
+                cart.length === 0 ||
+                (isEditingTableOrder && !hasEditChanges)
               }
+              aria-busy={isSubmittingOrder}
               className="w-full bg-primary-container hover:bg-success active:scale-[0.98] text-on-surface font-black py-4 rounded-2xl transition-all uppercase text-[11px] tracking-[0.2em] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isEditingTableOrder ? "Actualizar" : "Confirmar"}
+              {isSubmittingOrder ? (
+                <>
+                  <span className="material-symbols-outlined mr-2 animate-spin align-middle">
+                    progress_activity
+                  </span>
+                  Procesando...
+                </>
+              ) : isEditingTableOrder ? (
+                "Actualizar"
+              ) : (
+                "Confirmar"
+              )}
             </button>
           </div>
         </div>
@@ -4329,12 +4802,53 @@ const POS = () => {
                 </span>
               </div>
               {deliveryMethod === "delivery" && deliveryBaseFee !== null && (
-                <div className="flex justify-between items-center opacity-70">
+                <>
+                  <div className="flex justify-between items-center opacity-70">
+                    <span className="text-[10px] font-bold uppercase tracking-widest">
+                      Domicilio
+                    </span>
+                    <span className="text-sm font-bold">
+                      $ {formatPrice(deliveryBaseCharge)}
+                    </span>
+                  </div>
+                  {nightDeliverySurcharge > 0 && (
+                    <div className="flex justify-between items-center text-amber-200">
+                      <span className="text-[10px] font-bold uppercase tracking-widest">
+                        Recargo nocturno ({nightSurchargePercent}%)
+                      </span>
+                      <span className="text-sm font-bold">
+                        + $ {formatPrice(nightDeliverySurcharge)}
+                      </span>
+                    </div>
+                  )}
+                  {nightDeliverySurcharge > 0 && (
+                    <div className="flex justify-between items-center font-bold">
+                      <span className="text-[10px] uppercase tracking-widest">
+                        Domicilio total
+                      </span>
+                      <span className="text-sm">
+                        $ {formatPrice(deliveryFee)}
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="flex justify-between items-center opacity-70">
+                <span className="text-[10px] font-bold uppercase tracking-widest">
+                  Total sin propina
+                </span>
+                <span className="text-sm font-bold">
+                  $ {formatPrice(totalWithoutTip)}
+                </span>
+              </div>
+              {tipAmount > 0 && (
+                <div className="flex justify-between items-center text-emerald-300">
                   <span className="text-[10px] font-bold uppercase tracking-widest">
-                    Domicilio
+                    Propina ({tipPercent}%)
                   </span>
                   <span className="text-sm font-bold">
-                    $ {formatPrice(deliveryFee)}
+                    + $ {formatPrice(tipAmount)}
                   </span>
                 </div>
               )}
@@ -4395,11 +4909,25 @@ const POS = () => {
             <button
               onClick={crearPedidoPOS}
               disabled={
-                cart.length === 0 || (isEditingTableOrder && !hasEditChanges)
+                isSubmittingOrder ||
+                cart.length === 0 ||
+                (isEditingTableOrder && !hasEditChanges)
               }
+              aria-busy={isSubmittingOrder}
               className="w-full bg-primary-container hover:bg-success active:scale-[0.98] text-on-surface font-black py-3 rounded-2xl transition-all uppercase text-[10px] tracking-[0.2em] shadow-xl shadow-primary-container/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isEditingTableOrder ? "Actualizar" : "Confirmar"}
+              {isSubmittingOrder ? (
+                <>
+                  <span className="material-symbols-outlined mr-2 animate-spin align-middle">
+                    progress_activity
+                  </span>
+                  Procesando...
+                </>
+              ) : isEditingTableOrder ? (
+                "Actualizar"
+              ) : (
+                "Confirmar"
+              )}
             </button>
           </div>
         </div>
@@ -4714,6 +5242,7 @@ const POS = () => {
                       -
                     </button>
                     <input
+                      ref={optionQuantityInputRef}
                       type="text"
                       inputMode={
                         activeProduct?.unit?.allows_fraction
@@ -4730,6 +5259,12 @@ const POS = () => {
                         } else {
                           const digits = value.replace(/\D/g, "");
                           setOptionQuantity(digits || "1");
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          confirmOptionSelection();
                         }
                       }}
                       className="w-12 bg-transparent text-center text-[16px] font-semibold text-on-surface outline-none"
@@ -4904,25 +5439,61 @@ const POS = () => {
       )}
       {showUpdateSuccessModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-success/30 bg-surface p-8 text-center shadow-2xl">
-            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-success/20">
-              <span className="material-symbols-outlined text-5xl text-success">
-                check_circle
-              </span>
+          <div className="w-full max-w-md rounded-2xl border border-success/30 bg-surface p-8 shadow-2xl">
+            <div className="text-center">
+              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-success/20">
+                <span className="material-symbols-outlined text-5xl text-success">
+                  check_circle
+                </span>
+              </div>
+              <h3 className="mt-5 text-2xl font-bold text-on-surface">
+                Orden actualizada correctamente
+              </h3>
+              <p className="mt-2 text-on-surface-variant">
+                Los cambios de la orden se guardaron correctamente.
+              </p>
             </div>
-            <h3 className="mt-5 text-2xl font-bold text-on-surface">
-              Orden actualizada correctamente
-            </h3>
-            <p className="mt-2 text-on-surface-variant">
-              Los cambios de la orden se guardaron correctamente.
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowUpdateSuccessModal(false)}
-              className="mt-6 w-full rounded-xl bg-primary-container px-5 py-3 font-bold uppercase tracking-widest text-on-primary transition-colors hover:bg-success"
-            >
-              Continuar
-            </button>
+            <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => handleShareSentOrder(sentOrder)}
+                className="flex items-center justify-center gap-3 rounded-2xl border border-outline bg-surface px-6 py-3 text-sm font-bold text-on-surface shadow-sm transition-all hover:bg-surface-hover sm:text-base"
+                aria-label="Compartir factura"
+              >
+                <span className="material-symbols-outlined">share</span>
+                <span>Compartir</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSavePdfSentOrder(sentOrder)}
+                className="flex items-center justify-center gap-3 rounded-2xl border border-outline bg-surface px-6 py-3 text-sm font-bold text-on-surface shadow-sm transition-all hover:bg-surface-hover sm:text-base"
+                aria-label="Guardar factura en PDF"
+              >
+                <span className="material-symbols-outlined">save</span>
+                <span>Guardar PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePrintSentOrder(sentOrder)}
+                className="flex items-center justify-center gap-3 rounded-2xl bg-primary-container/50 px-6 py-3 text-sm font-bold text-on-primary shadow-lg transition-all hover:bg-primary-container sm:text-base"
+                aria-label="Imprimir factura"
+              >
+                <span className="material-symbols-outlined">print</span>
+                <span>Imprimir</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUpdateSuccessModal(false);
+                  setSentOrder(null);
+                }}
+                className="flex items-center justify-center gap-3 rounded-2xl bg-primary/20 px-6 py-3 text-sm font-bold text-on-surface shadow-sm transition-all hover:bg-primary/50 sm:text-base"
+                aria-label="Continuar"
+              >
+                <span className="material-symbols-outlined">done</span>
+                <span>Continuar</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -17,6 +17,15 @@ import SubLoading from "./SubLoading";
 
 const formatNumber = (value) =>
   Number(value || 0).toLocaleString("es-CO", { maximumFractionDigits: 3 });
+const combineMovements = (...groups) =>
+  groups
+    .flat()
+    .sort(
+      (first, second) =>
+        new Date(second.created_at).getTime() -
+        new Date(first.created_at).getTime(),
+    )
+    .slice(0, 100);
 
 export default function InventarioMovimientos() {
   const { user } = useAuth();
@@ -46,17 +55,78 @@ export default function InventarioMovimientos() {
       .limit(100);
     if (error) {
       console.error("Error cargando movimientos:", error);
-      setMovements([]);
-      setLoadError(
-        `No se pudieron cargar los movimientos: ${error.message}`,
-      );
-      return;
     }
 
     const rows = data || [];
+    const {
+      data: productStockRows,
+      error: productStockError,
+    } = await supabase
+      .from("product_stock_movements")
+      .select(
+        "id,product_name,unit_name,quantity_delta,reason,order_id,created_at",
+      )
+      .eq("business_id", id)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (productStockError) {
+      console.error("Error cargando movimientos de stock de productos:", productStockError);
+      setLoadError(
+        `No se pudieron cargar los movimientos de stock de productos: ${productStockError.message}. Verifica que la migración 108 esté aplicada.`,
+      );
+    }
+    let ordersById = {};
+    const productOrderIds = [
+      ...new Set((productStockRows || []).map((movement) => movement.order_id).filter(Boolean)),
+    ];
+    if (productOrderIds.length > 0) {
+      const { data: orders, error: ordersError } = await supabase
+        .from("orders")
+        .select("id,order_number")
+        .in("id", productOrderIds);
+      if (ordersError) {
+        console.error("Error cargando órdenes de los movimientos de productos:", ordersError);
+        setLoadError(
+          `Los movimientos de productos se cargaron, pero no se pudo asociar el número de orden: ${ordersError.message}`,
+        );
+      } else {
+        ordersById = Object.fromEntries(
+          (orders || []).map((order) => [order.id, order]),
+        );
+      }
+    }
     setLastUpdated(new Date());
+    const formattedProductRows = (productStockRows || []).map((movement) => ({
+      ...movement,
+      movement_source: "product_stock",
+    }));
+    const formattedInventoryRows = rows.map((movement) => ({
+      ...movement,
+      movement_source: "inventory",
+    }));
+    if (error) {
+      setMovements(
+        combineMovements(
+          formattedProductRows.map((movement) => ({
+            ...movement,
+            orders: ordersById[movement.order_id] || null,
+          })),
+        ),
+      );
+      setLoadError(
+        `No se pudieron cargar los movimientos de insumos: ${error.message}`,
+      );
+      return;
+    }
     if (rows.length === 0) {
-      setMovements([]);
+      setMovements(
+        combineMovements(
+          formattedProductRows.map((movement) => ({
+            ...movement,
+            orders: ordersById[movement.order_id] || null,
+          })),
+        ),
+      );
       return;
     }
 
@@ -69,7 +139,15 @@ export default function InventarioMovimientos() {
       );
     if (linkError) {
       console.error("Error cargando vínculos de movimientos:", linkError);
-      setMovements(rows);
+      setMovements(
+        combineMovements(
+          formattedInventoryRows,
+          formattedProductRows.map((movement) => ({
+            ...movement,
+            orders: ordersById[movement.order_id] || null,
+          })),
+        ),
+      );
       setLoadError(
         "Los movimientos se cargaron, pero no fue posible obtener el vínculo con las órdenes. Verifica que la migración 007 esté aplicada y vuelve a cargar.",
       );
@@ -87,8 +165,6 @@ export default function InventarioMovimientos() {
       ),
     ];
     let orderItemsById = {};
-    let ordersById = {};
-
     if (linkedOrderItemIds.length > 0) {
       const { data: orderItems, error: orderItemsError } = await supabase
         .from("order_items")
@@ -103,40 +179,58 @@ export default function InventarioMovimientos() {
         orderItemsById = Object.fromEntries(
           (orderItems || []).map((item) => [item.id, item]),
         );
-        const orderIds = [
-          ...new Set((orderItems || []).map((item) => item.order_id).filter(Boolean)),
-        ];
-        if (orderIds.length > 0) {
-          const { data: orders, error: ordersError } = await supabase
-            .from("orders")
-            .select("id,order_number,channel")
-            .in("id", orderIds);
-          if (ordersError) {
-            console.error("Error cargando órdenes de los movimientos:", ordersError);
-          } else {
-            ordersById = Object.fromEntries(
-              (orders || []).map((order) => [order.id, order]),
-            );
-          }
-        }
+      }
+    }
+
+    const orderIds = [
+      ...new Set(
+        [
+          ...(linkRows || []).map((row) => row.order_id),
+          ...Object.values(orderItemsById).map((item) => item.order_id),
+        ].filter(Boolean),
+      ),
+    ];
+    if (orderIds.length > 0) {
+      const { data: orders, error: ordersError } = await supabase
+        .from("orders")
+        .select("id,order_number")
+        .in("id", orderIds);
+      if (ordersError) {
+        console.error("Error cargando órdenes de los movimientos:", ordersError);
+        setLoadError(
+          `Los movimientos se cargaron, pero no se pudo asociar el número de orden: ${ordersError.message}`,
+        );
+      } else {
+        ordersById = {
+          ...ordersById,
+          ...Object.fromEntries(
+            (orders || []).map((order) => [order.id, order]),
+          ),
+        };
       }
     }
 
     setMovements(
-      rows.map((movement) => {
-        const link = linksById[movement.id] || {};
-        const orderItem = orderItemsById[link.order_item_id];
-        return {
+      combineMovements(
+        formattedInventoryRows.map((movement) => {
+          const link = linksById[movement.id] || {};
+          const orderItem = orderItemsById[link.order_item_id];
+          return {
+            ...movement,
+            ...link,
+            order_items: orderItem
+              ? {
+                  ...orderItem,
+                  orders: ordersById[orderItem.order_id] || null,
+                }
+              : null,
+          };
+        }),
+        formattedProductRows.map((movement) => ({
           ...movement,
-          ...link,
-          order_items: orderItem
-            ? {
-                ...orderItem,
-                orders: ordersById[orderItem.order_id] || null,
-              }
-            : null,
-        };
-      }),
+          orders: ordersById[movement.order_id] || null,
+        })),
+      ),
     );
   }, []);
 
@@ -191,9 +285,14 @@ export default function InventarioMovimientos() {
       const delta = Number(movement.quantity_delta || 0);
       const createdAt = new Date(movement.created_at);
       const product = movement.order_items;
+      const isProductStockMovement =
+        movement.movement_source === "product_stock";
       const name = movement.inventory_items?.name || "";
-      const productName = product?.product_name || "";
-      const orderNumber = product?.orders?.order_number || "";
+      const productName = isProductStockMovement
+        ? movement.product_name || ""
+        : product?.product_name || "";
+      const orderNumber =
+        movement.orders?.order_number || product?.orders?.order_number || "";
       const matchesSearch =
         !normalizedSearch ||
         name.toLowerCase().includes(normalizedSearch) ||
@@ -224,18 +323,31 @@ export default function InventarioMovimientos() {
 
     const groups = new Map();
     filtered.forEach((movement) => {
-      const isSale = movement.movement_type === "sale";
+      const isProductStockMovement =
+        movement.movement_source === "product_stock";
+      const isSale =
+        !isProductStockMovement && movement.movement_type === "sale";
+      const isProductSale =
+        isProductStockMovement && movement.reason === "sale";
       const groupKey =
-        isSale && movement.order_item_id
-          ? `sale-line:${movement.order_item_id}`
-          : isSale && movement.order_id
-            ? `sale-order:${movement.order_id}`
-            : `movement:${movement.id}`;
+        isProductStockMovement
+          ? `product-stock:${movement.id}`
+          : isSale && movement.order_item_id
+            ? `sale-line:${movement.order_item_id}`
+            : isSale && movement.order_id
+              ? `sale-order:${movement.order_id}`
+              : `movement:${movement.id}`;
       const group = groups.get(groupKey);
       if (group) {
         group.movements.push(movement);
       } else {
-        groups.set(groupKey, { id: groupKey, movements: [movement], isSale });
+        groups.set(groupKey, {
+          id: groupKey,
+          movements: [movement],
+          isSale,
+          isProductSale,
+          isProductStock: isProductStockMovement,
+        });
       }
     });
 
@@ -371,14 +483,22 @@ export default function InventarioMovimientos() {
               {movementGroups.map((group) => {
                 const isEntry = group.delta > 0;
                 const expanded = Boolean(expandedMovements[group.id]);
-                const productName = group.product?.product_name;
-                const orderNumber = group.product?.orders?.order_number;
-                const productQuantity = Number(group.product?.quantity || 0);
-                const productUnit = group.product?.unit_name || "";
                 const singleMovement = group.movements[0];
+                const productName = group.isProductStock
+                  ? singleMovement.product_name
+                  : group.product?.product_name;
+                const orderNumber = group.isProductStock
+                  ? singleMovement.orders?.order_number
+                  : group.product?.orders?.order_number;
+                const productQuantity = Number(group.product?.quantity || 0);
+                const productUnit = group.isProductStock
+                  ? singleMovement.unit_name
+                  : group.product?.unit_name || "";
                 const title = group.isSale
                   ? productName || "Salida por venta"
-                  : singleMovement.inventory_items?.name || "Insumo";
+                  : group.isProductStock
+                    ? productName || "Producto"
+                    : singleMovement.inventory_items?.name || "Insumo";
                 return (
                   <article
                     key={group.id}
@@ -414,12 +534,34 @@ export default function InventarioMovimientos() {
                           {isEntry ? "Entrada" : "Salida"}
                           {group.isSale &&
                             ` · Venta${productQuantity ? ` de ${formatNumber(productQuantity)} ${productUnit}` : ""}`}
+                          {group.isProductStock &&
+                            (group.isProductSale
+                              ? " · Venta de producto"
+                              : " · Producto")}
+                          {group.isProductStock &&
+                            singleMovement.reason === "correction" &&
+                            " · Corrección de orden"}
+                          {group.isProductStock &&
+                            singleMovement.reason === "opening_balance" &&
+                            " · Saldo inicial"}
                           {orderNumber ? ` · Orden #${orderNumber}` : ""}
                         </span>
                         <span className="block text-[10px] uppercase tracking-widest text-neutral-500">
                           {group.isSale
                             ? `${group.movements.length} insumo${group.movements.length === 1 ? "" : "s"} descontado${group.movements.length === 1 ? "" : "s"}`
-                            : group.reason}
+                            : group.isProductStock
+                              ? singleMovement.reason === "initial_stock"
+                                ? "Entrada de stock"
+                                : singleMovement.reason === "opening_balance"
+                                  ? "Saldo existente al activar historial"
+                                  : singleMovement.reason === "stock_added"
+                                    ? "Entrada de stock"
+                                    : singleMovement.reason === "sale"
+                                      ? "Descuento por venta"
+                                      : singleMovement.reason === "correction"
+                                        ? "Restitución de stock al editar la orden"
+                                    : "Ajuste de stock del producto"
+                              : group.reason}
                           {" · "}
                           {new Date(group.createdAt).toLocaleString("es-CO")}
                         </span>
@@ -430,7 +572,9 @@ export default function InventarioMovimientos() {
                         >
                           {isEntry ? "+" : ""}
                           {formatNumber(group.delta)}{" "}
-                          {singleMovement.inventory_items?.unit || ""}
+                          {group.isProductStock
+                            ? productUnit
+                            : singleMovement.inventory_items?.unit || ""}
                         </span>
                       )}
                       <ChevronDown
@@ -448,14 +592,31 @@ export default function InventarioMovimientos() {
                               className="flex items-center justify-between gap-3 text-xs"
                             >
                               <span className="min-w-0 truncate text-neutral-300">
-                                {movement.inventory_items?.name || "Insumo"}
+                                {movement.movement_source === "product_stock"
+                                  ? `${movement.product_name || "Producto"} · ${
+                                      movement.reason === "opening_balance"
+                                        ? "Saldo inicial"
+                                        : movement.reason === "initial_stock" ||
+                                            movement.reason === "stock_added"
+                                          ? "Entrada de stock"
+                                          : movement.reason === "sale"
+                                            ? "Salida por venta"
+                                            : movement.reason === "correction"
+                                              ? "Corrección de orden"
+                                          : movement.reason === "stock_adjustment"
+                                            ? "Ajuste de stock"
+                                            : "Salida de stock"
+                                    }`
+                                  : movement.inventory_items?.name || "Insumo"}
                               </span>
                               <span
                                 className={`shrink-0 font-bold ${delta > 0 ? "text-emerald-400" : "text-red-400"}`}
                               >
                                 {delta > 0 ? "+" : ""}
                                 {formatNumber(delta)}{" "}
-                                {movement.inventory_items?.unit || ""}
+                                {movement.movement_source === "product_stock"
+                                  ? movement.unit_name
+                                  : movement.inventory_items?.unit || ""}
                               </span>
                             </div>
                           );

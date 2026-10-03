@@ -19,6 +19,9 @@ import { supabase } from "./lib/supabaseClient";
 const POS = lazy(() => import("../modulos/pos/POS"));
 const Mesas = lazy(() => import("../modulos/pos/Mesas"));
 const Ordenes = lazy(() => import("../modulos/pos/Ordenes"));
+const OrdenesEliminadas = lazy(
+  () => import("../modulos/pos/OrdenesEliminadas"),
+);
 const Cocina = lazy(() => import("../modulos/pos/Cocina"));
 const Caja = lazy(() => import("../modulos/pos/Caja"));
 const CierresEliminados = lazy(
@@ -308,6 +311,10 @@ function App() {
             <Route path="pos" element={<POS />} />
             <Route path="mesas" element={<Mesas />} />
             <Route path="ordenes" element={<Ordenes />} />
+            <Route
+              path="ordenes/eliminadas"
+              element={<OrdenesEliminadas />}
+            />
             <Route path="cocina" element={<Cocina />} />
             <Route
               path="productos"

@@ -9,6 +9,7 @@ import {
   Trash2,
   FileText,
   Printer,
+  Save,
   Calendar as CalendarIcon,
   Filter,
   X,
@@ -23,6 +24,11 @@ import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 import { useNavigate } from "react-router-dom";
 import SubLoading from "./SubLoading";
+import OrderInvoice, { printOrderInvoice } from "./OrderInvoice";
+import {
+  downloadOrderInvoicePdf,
+  shareOrderInvoicePdf,
+} from "./OrderInvoicePdf";
 
 // --- CONFIGURACIÓN DE CONSTANTES ---
 const ORIGEN_CONFIG = {
@@ -260,6 +266,7 @@ const OrderCard = memo(
     onDelete,
     onInvoice,
     onPrint,
+    onSavePdf,
     onShare,
     onEdit,
     onOpenMap,
@@ -507,22 +514,28 @@ const OrderCard = memo(
                     onClick={() => onInvoice(orden)}
                   />
                   <ActionButton
-                    icon={Edit3}
-                    label="Editar"
-                    color="border-sky-500/20 bg-sky-500/5 text-sky-400 hover:bg-sky-500 hover:text-white"
-                    onClick={() => onEdit(orden)}
+                    icon={Clipboard}
+                    label="Compartir"
+                    color="border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:bg-emerald-500 hover:text-white"
+                    onClick={() => onShare(orden)}
+                  />
+                  <ActionButton
+                    icon={Save}
+                    label="Guardar PDF"
+                    color="border-amber-500/20 bg-amber-500/5 text-amber-400 hover:bg-amber-500 hover:text-white"
+                    onClick={() => onSavePdf(orden)}
                   />
                   <ActionButton
                     icon={Printer}
                     label="Imprimir"
                     color="border-violet-500/20 bg-violet-600/10 text-violet-400 hover:bg-violet-600 hover:text-white"
-                    onClick={() => onPrint(orden.id)}
+                    onClick={() => onPrint(orden)}
                   />
                   <ActionButton
-                    icon={Clipboard}
-                    label="Compartir"
-                    color="border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:bg-emerald-500 hover:text-white"
-                    onClick={() => onShare(orden)}
+                    icon={Edit3}
+                    label="Editar"
+                    color="border-sky-500/20 bg-sky-500/5 text-sky-400 hover:bg-sky-500 hover:text-white"
+                    onClick={() => onEdit(orden)}
                   />
                 </div>
               </div>
@@ -543,8 +556,10 @@ const DetailBox = ({ label, value, color = "text-neutral-300" }) => (
   </div>
 );
 
-const InvoicePreview = ({ order, onClose, onPrint }) => {
+const InvoicePreview = ({ order, business, onClose, onPrint }) => {
   if (!order) return null;
+  const itemsSubtotal = getInvoiceItemsSubtotal(order);
+  const paymentDetails = getInvoicePaymentDetails(order);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
@@ -569,11 +584,31 @@ const InvoicePreview = ({ order, onClose, onPrint }) => {
 
         <div className="overflow-y-auto bg-white p-5 text-black sm:p-8">
           <div className="border-b border-dashed border-black pb-4 text-center">
-            <h1 className="text-2xl font-black uppercase tracking-tight">
+            {business.logoUrl && (
+              <img
+                src={business.logoUrl}
+                alt={`Logo de ${business.name || "la tienda"}`}
+                className="mx-auto mb-3 max-h-20 max-w-36 object-contain grayscale contrast-125"
+              />
+            )}
+            {business.name && (
+              <h1 className="text-xl font-black uppercase tracking-tight">
+                {business.name}
+              </h1>
+            )}
+            {business.address && (
+              <p className="mt-1 text-[11px]">{business.address}</p>
+            )}
+            {business.phone && (
+              <p className="text-[11px]">Tel. {business.phone}</p>
+            )}
+            <h2 className="mt-3 text-lg font-black uppercase tracking-tight">
               Factura
-            </h1>
+            </h2>
             <p className="mt-1 text-xs font-bold">N.º {order.numeroFactura}</p>
-            <p className="text-[11px]">{order.horaIngreso}</p>
+            <p className="text-[11px]">
+              {order.horaIngreso} · Canal: {order.canal || "POS"}
+            </p>
           </div>
 
           <div className="border-b border-dashed border-black py-4 text-[11px] leading-5">
@@ -601,6 +636,19 @@ const InvoicePreview = ({ order, onClose, onPrint }) => {
                 <strong>Referencia:</strong> {order.deliveryInstructions}
               </p>
             )}
+            {order.punto && (
+              <p>
+                <strong>Punto:</strong> {order.punto}
+              </p>
+            )}
+            {order.deliveryMapLink && (
+              <p>
+                <strong>Ubicación:</strong> {order.deliveryMapLink}
+              </p>
+            )}
+            <p>
+              <strong>Estado:</strong> {order.status}
+            </p>
           </div>
 
           <table className="w-full border-collapse text-[11px]">
@@ -608,6 +656,7 @@ const InvoicePreview = ({ order, onClose, onPrint }) => {
               <tr className="border-b border-dashed border-black text-left uppercase">
                 <th className="py-2">Producto</th>
                 <th className="py-2 text-center">Cant.</th>
+                <th className="py-2 text-right">Precio</th>
                 <th className="py-2 text-right">Total</th>
               </tr>
             </thead>
@@ -629,6 +678,9 @@ const InvoicePreview = ({ order, onClose, onPrint }) => {
                     )}
                   </td>
                   <td className="py-2 text-center">{item.quantity}</td>
+                  <td className="py-2 text-right">
+                    {formatMoney(item.unit_price)}
+                  </td>
                   <td className="py-2 text-right font-bold">
                     {formatMoney(
                       item.subtotal || item.unit_price * item.quantity,
@@ -641,16 +693,23 @@ const InvoicePreview = ({ order, onClose, onPrint }) => {
 
           <div className="space-y-1 border-t border-black pt-4 text-right text-xs">
             <p>
-              Subtotal: <strong>{formatMoney(order.total)}</strong>
+              Subtotal: <strong>{formatMoney(itemsSubtotal)}</strong>
             </p>
+            {order.deliveryFee > 0 && (
+              <p>Domicilio: <strong>{formatMoney(order.deliveryFee)}</strong></p>
+            )}
             <p className="text-base font-black">
               TOTAL A PAGAR: {formatMoney(order.total)}
             </p>
           </div>
           <div className="mt-4 border-t border-dashed border-black pt-3 text-[11px]">
-            <p>
-              <strong>Método de pago:</strong> {order.metodoPago}
-            </p>
+            <p className="mb-1"><strong>Método(s) de pago:</strong></p>
+            {paymentDetails.map((payment, index) => (
+              <p key={`${payment.method}-${index}`}>
+                {payment.method}
+                {payment.amount !== null ? `: ${formatMoney(payment.amount)}` : ""}
+              </p>
+            ))}
             {order.observaciones && (
               <p className="mt-2">
                 <strong>Observaciones:</strong> {order.observaciones}
@@ -847,6 +906,114 @@ const getOptionLabel = (option) => {
   );
 };
 
+const ORDER_DELETE_REASONS = [
+  { value: "cancelled_by_customer", label: "Pedido cancelado por el cliente" },
+  { value: "duplicate_order", label: "Orden duplicada" },
+  { value: "entered_in_error", label: "Orden ingresada por error" },
+  { value: "items_unavailable", label: "Productos no disponibles" },
+  { value: "payment_issue", label: "Problema con el pago" },
+  { value: "other", label: "Otro motivo" },
+];
+
+const escapeInvoiceHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+const getInvoiceItemsSubtotal = (order) =>
+  (order.items || []).reduce(
+    (sum, item) =>
+      sum +
+      Number(
+        item.subtotal ||
+          Number(item.unit_price || 0) * Number(item.quantity || 0),
+      ),
+    0,
+  );
+
+const getInvoicePaymentDetails = (order) =>
+  order.paymentMethods?.length
+    ? order.paymentMethods.map((payment) => ({
+        method: normalizePaymentMethod(payment.metodo || payment.method),
+        amount: Number(payment.monto ?? payment.amount ?? 0),
+      }))
+    : [{ method: order.metodoPago || "Sin pago", amount: null }];
+
+const buildInvoicePrintHtml = (order, business = {}) => {
+  const items = (order.items || [])
+    .map((item) => {
+      const options = (item.options || [])
+        .map(getOptionLabel)
+        .filter(Boolean)
+        .join(" · ");
+      const unit = getSpecificUnitName(item.unit_name);
+      const quantity = `${formatQuantity(item.quantity)}${unit ? ` ${unit}` : ""}`;
+      const subtotal =
+        Number(item.subtotal) ||
+        Number(item.unit_price || 0) * Number(item.quantity || 0);
+      return `<tr>
+        <td><strong>${escapeInvoiceHtml(item.product_name)}</strong>${options ? `<small>${escapeInvoiceHtml(options)}</small>` : ""}${item.notes ? `<small>Nota: ${escapeInvoiceHtml(item.notes)}</small>` : ""}</td>
+        <td class="center">${escapeInvoiceHtml(quantity)}</td>
+        <td class="right">${formatMoney(item.unit_price)}</td>
+        <td class="right">${formatMoney(subtotal)}</td>
+      </tr>`;
+    })
+    .join("");
+  const subtotal = getInvoiceItemsSubtotal(order);
+  const deliveryFee = Number(order.deliveryFee || 0);
+  const logoUrl = /^https?:\/\//i.test(String(business.logoUrl || ""))
+    ? `<img class="logo" src="${escapeInvoiceHtml(business.logoUrl)}" alt="${escapeInvoiceHtml(business.name || "Logo de la tienda")}">`
+    : "";
+  const paymentDetails = getInvoicePaymentDetails(order)
+    .map(
+      (payment) =>
+        `<p><strong>${escapeInvoiceHtml(payment.method)}:</strong> ${payment.amount === null ? "Sin detalle de pago" : formatMoney(payment.amount)}</p>`,
+    )
+    .join("");
+  const deliveryDetails = [
+    order.deliveryAddress && `<p><strong>Dirección:</strong> ${escapeInvoiceHtml(order.deliveryAddress)}</p>`,
+    order.deliveryInstructions && `<p><strong>Referencia:</strong> ${escapeInvoiceHtml(order.deliveryInstructions)}</p>`,
+    order.mesa && `<p><strong>Mesa:</strong> ${escapeInvoiceHtml(order.mesa)}</p>`,
+    order.punto && `<p><strong>Punto:</strong> ${escapeInvoiceHtml(order.punto)}</p>`,
+  ]
+    .filter(Boolean)
+    .join("");
+  const mapsLink = /^https?:\/\//i.test(String(order.deliveryMapLink || ""))
+    ? `<p><strong>Ubicación:</strong> <a href="${escapeInvoiceHtml(order.deliveryMapLink)}">Ver en Google Maps</a></p>`
+    : "";
+
+  return `<!doctype html>
+    <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Factura ${escapeInvoiceHtml(order.numeroFactura)}</title>
+    <style>
+      *{box-sizing:border-box}body{font:12px Arial,sans-serif;color:#111;margin:0;padding:24px}
+      .invoice{max-width:760px;margin:0 auto}.header{text-align:center;border-bottom:1px dashed #555;padding-bottom:16px}
+      .logo{display:block;max-width:150px;max-height:90px;object-fit:contain;margin:0 auto 10px;filter:grayscale(1) contrast(1.15)}
+      h1{font-size:20px;margin:8px 0 4px}.muted,small{color:#444}.muted{margin:3px 0}
+      .columns{display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:14px 0;border-bottom:1px dashed #555}
+      h2{font-size:11px;text-transform:uppercase;margin:0 0 7px}p{margin:4px 0;line-height:1.4}
+      table{width:100%;border-collapse:collapse;margin-top:12px}th,td{padding:8px 5px;border-bottom:1px solid #bbb;text-align:left;vertical-align:top}
+      th{border-top:1px solid #333;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px}
+      td small{display:block;margin-top:3px}.right{text-align:right}.center{text-align:center;white-space:nowrap}
+      .totals{width:min(100%,320px);margin:14px 0 0 auto}.totals p{display:flex;justify-content:space-between}
+      .grand{border-top:1px solid #111;padding-top:8px;font-size:16px;font-weight:bold}
+      .notes{border-top:1px dashed #555;margin-top:16px;padding-top:12px}.footer{text-align:center;margin-top:22px;font-size:10px}
+      @media print{body{padding:0}.invoice{max-width:none}.logo{filter:grayscale(1) contrast(1.3);print-color-adjust:exact;-webkit-print-color-adjust:exact}a{color:#111;text-decoration:none}}
+    </style></head><body><main class="invoice">
+      <header class="header">${logoUrl}${business.name ? `<h1>${escapeInvoiceHtml(business.name)}</h1>` : "<h1>Factura</h1>"}${business.address ? `<p class="muted">${escapeInvoiceHtml(business.address)}</p>` : ""}${business.phone ? `<p class="muted">Tel. ${escapeInvoiceHtml(business.phone)}</p>` : ""}
+      <p><strong>Factura N.º ${escapeInvoiceHtml(order.numeroFactura)}</strong></p><p class="muted">${escapeInvoiceHtml(order.horaIngreso)} · ${escapeInvoiceHtml(displayOrderType(order.metodoEntrega))}</p></header>
+      <section class="columns"><div><h2>Cliente</h2><p><strong>${escapeInvoiceHtml(order.cliente)}</strong></p><p>${escapeInvoiceHtml(order.telefono)}</p>${deliveryDetails}${mapsLink}</div>
+      <div><h2>Orden y pago</h2><p><strong>Estado:</strong> ${escapeInvoiceHtml(order.status || "pendiente")}</p><p><strong>Canal:</strong> ${escapeInvoiceHtml(order.canal || "POS")}</p>${paymentDetails}</div></section>
+      <table><thead><tr><th>Producto</th><th class="center">Cantidad</th><th class="right">Precio</th><th class="right">Total</th></tr></thead><tbody>${items || '<tr><td colspan="4">Sin productos</td></tr>'}</tbody></table>
+      <section class="totals"><p><span>Subtotal</span><strong>${formatMoney(subtotal)}</strong></p>${deliveryFee > 0 ? `<p><span>Domicilio</span><strong>${formatMoney(deliveryFee)}</strong></p>` : ""}<p class="grand"><span>Total a pagar</span><span>${formatMoney(order.total)}</span></p></section>
+      ${order.observaciones ? `<section class="notes"><h2>Observaciones</h2><p>${escapeInvoiceHtml(order.observaciones)}</p></section>` : ""}
+      <footer class="footer">Gracias por tu compra</footer>
+    </main></body></html>`;
+};
+
 const mapDatabaseOrderToUi = (order) => {
   const createdAt = order.created_at ? new Date(order.created_at) : new Date();
   const items = Array.isArray(order.order_items) ? order.order_items : [];
@@ -872,6 +1039,9 @@ const mapDatabaseOrderToUi = (order) => {
       (order.mesa ? `Mesa ${order.mesa}` : "Sin detalle"),
     deliveryDetails: getDeliveryDetails(order),
     total: Number(order.total || 0),
+    deliveryFee: Number(order.delivery_fee || 0),
+    tipAmount: Number(order.tip_amount || 0),
+    tipPercent: Number(metadata.tip_percent || 0),
     status: normalizeStatus(order.status),
     databaseStatus: String(order.status || "pending").toLowerCase(),
     origen: "pos",
@@ -879,9 +1049,16 @@ const mapDatabaseOrderToUi = (order) => {
     telefono: order.customer_phone || "Sin teléfono",
     mesa: order.mesa || "",
     deliveryAddress: order.delivery_address || "",
-    deliveryInstructions: order.delivery_instructions || "",
+    deliveryInstructions:
+      order.delivery_instructions ||
+      order.delivery_reference ||
+      order.reference ||
+      metadata.referencia ||
+      metadata.reference ||
+      "",
     deliveryMapLink: order.linkmaps || metadata.linkmaps || "",
     deliveryLocation: metadata.delivery_location || null,
+    canal: metadata.canal || "POS",
     punto: order.punto || "",
     paymentMethods: Array.isArray(metadata.payment_methods)
       ? metadata.payment_methods
@@ -928,11 +1105,24 @@ const Ordenes = () => {
   const [hasMoreOrders, setHasMoreOrders] = useState(true);
   const [loadingMoreOrders, setLoadingMoreOrders] = useState(false);
   const [invoiceOrder, setInvoiceOrder] = useState(null);
+  const [orderPendingDeletion, setOrderPendingDeletion] = useState(null);
+  const [deleteConfirmationNumber, setDeleteConfirmationNumber] = useState("");
+  const [deleteReasonCode, setDeleteReasonCode] = useState("");
+  const [deleteReasonDetails, setDeleteReasonDetails] = useState("");
+  const [isDeletingOrder, setIsDeletingOrder] = useState(false);
+  const [deleteOrderError, setDeleteOrderError] = useState("");
+  const [invoiceBusiness, setInvoiceBusiness] = useState({
+    name: "",
+    logoUrl: "",
+    address: "",
+    phone: "",
+  });
   const businessIdRef = useRef(null);
 
   const loadBusinessOrders = async () => {
     if (!user?.id) {
       setOrders([]);
+      setInvoiceBusiness({ name: "", logoUrl: "", address: "", phone: "" });
       setOrdersError("");
       setLoadingOrders(false);
       return;
@@ -971,13 +1161,27 @@ const Ordenes = () => {
       ].includes(String(profile.role || "").toLowerCase());
       setCanDelete(isAdminRole);
 
-      const { data, error } = await supabase
-        .from("orders")
-        .select("*, order_items(*)")
-        .eq("business_id", profile.business_id)
-        .eq("is_reservation", false)
-        .order("created_at", { ascending: false })
-        .range(0, 29);
+      const [ordersResult, businessResult, businessInfoResult] =
+        await Promise.all([
+          supabase
+            .from("orders")
+            .select("*, order_items(*)")
+            .eq("business_id", profile.business_id)
+            .eq("is_reservation", false)
+            .order("created_at", { ascending: false })
+            .range(0, 29),
+          supabase
+            .from("businesses")
+            .select("name,logo_url")
+            .eq("id", profile.business_id)
+            .maybeSingle(),
+          supabase
+            .from("business_info")
+            .select("address,whatsapp_phone")
+            .eq("business_id", profile.business_id)
+            .maybeSingle(),
+        ]);
+      const { data, error } = ordersResult;
 
       if (error) {
         console.error("Error cargando órdenes por negocio:", error);
@@ -985,6 +1189,19 @@ const Ordenes = () => {
         setOrdersError(error.message || "No se pudieron cargar las órdenes.");
         return;
       }
+
+      if (businessResult.error) {
+        console.error("Error cargando datos de la tienda para la factura:", businessResult.error);
+      }
+      if (businessInfoResult.error) {
+        console.error("Error cargando contacto de la tienda para la factura:", businessInfoResult.error);
+      }
+      setInvoiceBusiness({
+        name: businessResult.data?.name || "",
+        logoUrl: businessResult.data?.logo_url || "",
+        address: businessInfoResult.data?.address || "",
+        phone: businessInfoResult.data?.whatsapp_phone || "",
+      });
 
       businessIdRef.current = profile.business_id;
       const ordersWithUnits = await hydrateOrderItemUnits(data || []);
@@ -1157,87 +1374,76 @@ const Ordenes = () => {
       return;
     }
 
-    const nombre = orden.cliente || "Cliente";
-    const numeroOrden = orden.numeroFactura || orden.id;
-    if (!window.confirm(`¿Eliminar la orden ${numeroOrden} de ${nombre}?`)) {
+    setOrderPendingDeletion(orden);
+    setDeleteConfirmationNumber("");
+    setDeleteReasonCode("");
+    setDeleteReasonDetails("");
+    setDeleteOrderError("");
+  };
+
+  const confirmDeleteOrder = async (event) => {
+    event.preventDefault();
+    if (
+      !orderPendingDeletion ||
+      deleteConfirmationNumber !== String(orderPendingDeletion.numeroFactura || orderPendingDeletion.id) ||
+      !deleteReasonCode ||
+      (deleteReasonCode === "other" && !deleteReasonDetails.trim())
+    ) {
       return;
     }
 
-    const { error } = await supabase.from("orders").delete().eq("id", orden.id);
-    if (error) {
+    setIsDeletingOrder(true);
+    setDeleteOrderError("");
+    try {
+      const { error } = await supabase.rpc("archive_and_delete_order", {
+        p_order_id: orderPendingDeletion.id,
+        p_reason_code: deleteReasonCode,
+        p_reason_details: deleteReasonDetails.trim() || null,
+      });
+      if (error) throw error;
+
+      setOrders((current) =>
+        current.filter(
+          (currentOrder) => currentOrder.id !== orderPendingDeletion.id,
+        ),
+      );
+      setOrderPendingDeletion(null);
+      setDeleteConfirmationNumber("");
+      setDeleteReasonCode("");
+      setDeleteReasonDetails("");
+    } catch (error) {
       console.error("Error eliminando orden:", error);
-      alert("No se pudo eliminar la orden.");
-      return;
+      setDeleteOrderError("No se pudo eliminar la orden. Inténtalo de nuevo.");
+    } finally {
+      setIsDeletingOrder(false);
     }
-
-    setOrders((current) =>
-      current.filter((currentOrder) => currentOrder.id !== orden.id),
-    );
   };
 
   const handlePrint = (orden) => {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      alert("Permite las ventanas emergentes para imprimir la orden.");
-      return;
-    }
-
-    const escaparHtml = (value) =>
-      String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-    const itemsHtml = (orden.items || [])
-      .map(
-        (item) => {
-          const unitName = getSpecificUnitName(item.unit_name);
-          const quantityLabel = `${formatQuantity(item.quantity)}${
-            unitName ? ` ${escaparHtml(unitName)}` : ""
-          }`;
-          return `<tr><td>${escaparHtml(item.product_name)}</td><td>${quantityLabel}</td><td>${formatMoney(item.subtotal || item.unit_price * item.quantity)}</td></tr>`;
-        },
-      )
-      .join("");
-
-    printWindow.document.write(`
-      <html><head><title>Factura ${escaparHtml(orden.numeroFactura)}</title>
-      <style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1{text-align:center}p{margin:6px 0}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #ccc;padding:8px;text-align:left}th{background:#f3f3f3}.total{text-align:right;font-size:18px;font-weight:bold;margin-top:20px}</style>
-      </head><body>
-      <h1>Factura</h1>
-      <p><strong>Orden:</strong> ${escaparHtml(orden.numeroFactura)}</p>
-      <p><strong>Cliente:</strong> ${escaparHtml(orden.cliente)}</p>
-      <p><strong>Entrega:</strong> ${escaparHtml(displayOrderType(orden.metodoEntrega))}</p>
-      <p><strong>Pago:</strong> ${escaparHtml(orden.metodoPago)}</p>
-      <table><thead><tr><th>Producto</th><th>Cantidad</th><th>Total</th></tr></thead><tbody>${itemsHtml}</tbody></table>
-      <p class="total">Total: ${formatMoney(orden.total)}</p>
-      </body></html>`);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
+    printOrderInvoice(orden, invoiceBusiness);
   };
 
   const handleInvoice = (orden) => setInvoiceOrder(orden);
 
   const handleShare = async (orden) => {
-    const text = `Factura ${orden.numeroFactura}\nCliente: ${orden.cliente}\nTotal: ${formatMoney(orden.total)}\nEntrega: ${orden.metodoEntrega}\nPago: ${orden.metodoPago}`;
-
     try {
-      if (navigator?.share) {
-        await navigator.share({
-          title: `Factura ${orden.numeroFactura}`,
-          text,
-        });
-        return;
-      }
-
-      if (navigator?.clipboard) {
-        await navigator.clipboard.writeText(text);
-        alert("Datos compartidos copiados al portapapeles");
+      const result = await shareOrderInvoicePdf(orden, invoiceBusiness);
+      if (result === "downloaded") {
+        alert("El PDF quedó descargado y listo para compartir.");
       }
     } catch (error) {
+      if (error?.name === "AbortError") return;
       console.error("Error al compartir:", error);
+      alert("No se pudo generar o compartir el PDF de la factura.");
+    }
+  };
+
+  const handleSavePdf = async (orden) => {
+    try {
+      await downloadOrderInvoicePdf(orden, invoiceBusiness);
+    } catch (error) {
+      console.error("Error guardando el PDF de la factura:", error);
+      alert("No se pudo guardar el PDF de la factura.");
     }
   };
 
@@ -1623,6 +1829,7 @@ const Ordenes = () => {
                                     onDelete={handleDelete}
                                     onInvoice={handleInvoice}
                                     onPrint={handlePrint}
+                                    onSavePdf={handleSavePdf}
                                     onShare={handleShare}
                                     onEdit={handleEdit}
                                     onOpenMap={handleOpenMap}
@@ -1665,11 +1872,102 @@ const Ordenes = () => {
           </>
         )}
       </main>
-      <InvoicePreview
+      <OrderInvoice
         order={invoiceOrder}
+        business={invoiceBusiness}
         onClose={() => setInvoiceOrder(null)}
         onPrint={handlePrint}
       />
+      {orderPendingDeletion && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <form
+            onSubmit={confirmDeleteOrder}
+            className="w-full max-w-md rounded-2xl border border-red-500/20 bg-neutral-900 p-6 shadow-2xl"
+          >
+            <h2 className="text-lg font-black text-white">
+              ¿Confirmas que deseas eliminar esta orden?
+            </h2>
+            <p className="mt-2 text-sm text-neutral-400">
+              Esta acción no se puede deshacer. Para confirmar, escribe
+              exactamente el número de la orden:
+            </p>
+            <p className="mt-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-center font-mono font-bold text-red-300">
+              {orderPendingDeletion.numeroFactura || orderPendingDeletion.id}
+            </p>
+            <label className="mt-4 block text-sm font-bold text-neutral-200">
+              Motivo de eliminación
+              <select
+                value={deleteReasonCode}
+                onChange={(event) => setDeleteReasonCode(event.target.value)}
+                className="mt-2 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-red-500/50"
+                required
+              >
+                <option value="">Selecciona un motivo</option>
+                {ORDER_DELETE_REASONS.map((reason) => (
+                  <option key={reason.value} value={reason.value}>
+                    {reason.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {deleteReasonCode === "other" && (
+              <label className="mt-3 block text-sm font-bold text-neutral-200">
+                Describe el motivo
+                <textarea
+                  value={deleteReasonDetails}
+                  onChange={(event) => setDeleteReasonDetails(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-red-500/50"
+                  rows={3}
+                  required
+                />
+              </label>
+            )}
+            <input
+              autoFocus
+              type="text"
+              value={deleteConfirmationNumber}
+              onChange={(event) => setDeleteConfirmationNumber(event.target.value)}
+              placeholder="Escribe el número de la orden"
+              aria-label="Escribe el número de la orden para confirmar la eliminación"
+              className="mt-4 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-red-500/50"
+            />
+            {deleteOrderError && (
+              <p role="alert" className="mt-2 text-sm text-red-300">
+                {deleteOrderError}
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={isDeletingOrder}
+                onClick={() => {
+                  setOrderPendingDeletion(null);
+                  setDeleteConfirmationNumber("");
+                  setDeleteReasonCode("");
+                  setDeleteReasonDetails("");
+                  setDeleteOrderError("");
+                }}
+                className="rounded-lg border border-white/10 px-4 py-2 text-sm font-bold text-neutral-300 hover:bg-white/10 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  isDeletingOrder ||
+                  deleteConfirmationNumber !==
+                    String(orderPendingDeletion.numeroFactura || orderPendingDeletion.id) ||
+                  !deleteReasonCode ||
+                  (deleteReasonCode === "other" && !deleteReasonDetails.trim())
+                }
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-black text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isDeletingOrder ? "Eliminando..." : "Eliminar orden"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };

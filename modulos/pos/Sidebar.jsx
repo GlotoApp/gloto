@@ -29,6 +29,7 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
   const [cajaOpen, setCajaOpen] = useState(false);
   const [catalogoOpen, setCatalogoOpen] = useState(false);
   const [inventarioOpen, setInventarioOpen] = useState(false);
+  const [ordersOpen, setOrdersOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [finanzasOpen, setFinanzasOpen] = useState(false);
   const [selectedMenuGroup, setSelectedMenuGroup] = useState(null);
@@ -38,6 +39,7 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
   const [businessName, setBusinessName] = useState("Gloto");
   const [businessLogo, setBusinessLogo] = useState(logoPng);
   const [planName, setPlanName] = useState("Sin plan");
+  const isOrdersActive = location.pathname.startsWith("/pos/ordenes");
 
   useEffect(() => {
     if (!isExpanded) setUserMenuOpen(false);
@@ -75,6 +77,11 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
     { name: "Cierres Eliminados", path: "/pos/caja/CierresEliminados" },
   ];
 
+  const ordersSubMenu = [
+    { name: "Órdenes activas", path: "/pos/ordenes" },
+    { name: "Órdenes eliminadas", path: "/pos/ordenes/eliminadas" },
+  ];
+
   const catalogoSubMenu = [
     { name: "Categorías", path: "/pos/categorias" },
     { name: "Productos", path: "/pos/productos" },
@@ -109,6 +116,7 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
     setCajaOpen(false);
     setCatalogoOpen(false);
     setInventarioOpen(false);
+    setOrdersOpen(false);
     setConfigOpen(false);
     setFinanzasOpen(false);
     setSelectedMenuGroup(null);
@@ -159,6 +167,10 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
   useEffect(() => {
     if (isInventarioActive) setInventarioOpen(true);
   }, [isInventarioActive]);
+
+  useEffect(() => {
+    if (isOrdersActive && isExpanded) setOrdersOpen(true);
+  }, [isOrdersActive, isExpanded]);
 
   useEffect(() => {
     if (isConfigSectionActive) setConfigOpen(true);
@@ -310,6 +322,7 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
     setCajaOpen(group === "caja");
     setCatalogoOpen(group === "catalogo");
     setInventarioOpen(group === "inventario");
+    setOrdersOpen(group === "ordenes");
     setConfigOpen(group === "configuracion");
     setFinanzasOpen(group === "finanzas");
   };
@@ -332,6 +345,9 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
 
   const handleToggleClickInventario = (e) => {
     handleSubmenuToggle(e, "inventario", inventarioOpen);
+  };
+  const handleToggleClickOrders = (e) => {
+    handleSubmenuToggle(e, "ordenes", ordersOpen);
   };
 
   const handleToggleClickConfig = (e) => {
@@ -502,6 +518,79 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
                                   : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
                               }`}
                             />
+                            {sub.name}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            if (item.name === "Órdenes") {
+              return (
+                <div
+                  key={item.path}
+                  className="flex flex-col transition-all duration-300"
+                >
+                  <button
+                    type="button"
+                    onClick={handleToggleClickOrders}
+                    className={`group relative flex h-10 w-full items-center rounded-default transition-all duration-300 ${
+                      isExpanded ? "gap-3 px-3" : "justify-center gap-0 px-0"
+                    } ${
+                      isOrdersActive
+                        ? "text-primary"
+                        : "text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
+                    }`}
+                  >
+                    <span
+                      className={`absolute left-0 h-6 w-1 rounded-r-full bg-primary-container transition-all duration-300 ${
+                        isOrdersActive
+                          ? "scale-y-100 opacity-100"
+                          : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
+                      }`}
+                    />
+                    <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center ${isOrdersActive ? "text-primary-container" : ""}`}>
+                      <ClipboardList size={20} strokeWidth={isOrdersActive ? 2.5 : 2} />
+                    </div>
+                    <span
+                      className={`truncate text-left text-xs font-bold uppercase tracking-tight transition-all ${
+                        isExpanded
+                          ? "flex-1 opacity-100"
+                          : "pointer-events-none w-0 -translate-x-4 opacity-0"
+                      }`}
+                    >
+                      Órdenes
+                    </span>
+                    {isExpanded && (
+                      <ChevronDown
+                        size={14}
+                        className={`flex-shrink-0 text-primary/50 transition-transform ${ordersOpen ? "rotate-180" : ""}`}
+                      />
+                    )}
+                    {!isExpanded && (
+                      <div className="fixed left-20 ml-2 rounded bg-primary-container px-3 py-1 text-[10px] font-black uppercase tracking-widest text-on-primary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                        Órdenes
+                      </div>
+                    )}
+                  </button>
+                  {ordersOpen && isExpanded && (
+                    <div className="ml-5 mt-1 flex flex-col space-y-0.5 border-l border-white/30 pl-2">
+                      {ordersSubMenu.map((sub) => {
+                        const isSubActive = location.pathname === sub.path;
+                        return (
+                          <Link
+                            key={sub.path}
+                            to={sub.path}
+                            onClick={handleItemClick}
+                            className={`rounded-default px-2 py-1.5 text-[11px] font-bold uppercase tracking-tight transition-all ${
+                              isSubActive
+                                ? "bg-primary-container/10 text-primary"
+                                : "text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
+                            }`}
+                          >
                             {sub.name}
                           </Link>
                         );
