@@ -16,6 +16,10 @@ import {
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 import SubLoading from "./SubLoading";
+import {
+  formatKitchenOption as formatOption,
+  printKitchenComanda,
+} from "./KitchenComanda";
 
 const normalizeDeliveryType = (order) => {
   const metadataMethod = order.metadata?.metodoEntrega;
@@ -45,32 +49,6 @@ const normalizeKitchenStatus = (status) => {
   return null;
 };
 
-const getOptionLabel = (option) => {
-  if (typeof option === "string") return option;
-  if (!option || typeof option !== "object") return "Opción";
-  return (
-    option.name ||
-    option.nombre ||
-    option.label ||
-    option.option_name ||
-    option.title ||
-    option.text ||
-    option.value ||
-    "Opción"
-  );
-};
-
-const formatOption = (option) => {
-  const label = getOptionLabel(option);
-  const extraPrice =
-    typeof option === "object" ? Number(option.precio_extra || 0) : 0;
-  return extraPrice > 0
-    ? `${label} (+$${new Intl.NumberFormat("es-CO", {
-        maximumFractionDigits: 0,
-      }).format(extraPrice)})`
-    : label;
-};
-
 const mapOrderToKitchen = (
   order,
   optionPricesByProduct = {},
@@ -79,6 +57,12 @@ const mapOrderToKitchen = (
   id: order.order_number || order.id,
   databaseId: order.id,
   cliente: order.customer_name || "Consumidor Final",
+  hora: new Date(order.created_at).toLocaleTimeString("es-CO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }),
   mesa: order.mesa || order.punto || order.metadata?.puntoRetiro || "-",
   minutos: Math.max(
     0,
@@ -116,6 +100,7 @@ export default function KitchenPanel() {
   const [timeUpdate, setTimeUpdate] = useState(0);
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(false);
+  const [businessLogoUrl, setBusinessLogoUrl] = useState("");
   const [soundModalOpen, setSoundModalOpen] = useState(false);
   const soundEnabledRef = useRef(false);
   const businessIdRef = useRef(null);
@@ -236,6 +221,7 @@ export default function KitchenPanel() {
   const cargarOrdenes = async () => {
     if (!user?.id) {
       setOrdenes([]);
+      setBusinessLogoUrl("");
       setLoadingOrders(false);
       return;
     }
@@ -249,21 +235,25 @@ export default function KitchenPanel() {
 
       if (profileError || !profile?.business_id) {
         setOrdenes([]);
+        setBusinessLogoUrl("");
         return;
       }
       businessIdRef.current = profile.business_id;
 
       const { data: business, error: businessError } = await supabase
         .from("businesses")
-        .select("sound_enabled")
+        .select("sound_enabled, logo_url")
         .eq("id", profile.business_id)
         .maybeSingle();
 
       if (businessError) {
         console.error("Error cargando preferencia de sonido:", businessError);
-      } else if (typeof business?.sound_enabled === "boolean") {
-        soundEnabledRef.current = business.sound_enabled;
-        setSoundEnabled(business.sound_enabled);
+      } else {
+        setBusinessLogoUrl(business?.logo_url || "");
+        if (typeof business?.sound_enabled === "boolean") {
+          soundEnabledRef.current = business.sound_enabled;
+          setSoundEnabled(business.sound_enabled);
+        }
       }
 
       const { data, error } = await supabase
@@ -808,6 +798,7 @@ export default function KitchenPanel() {
                         key={o.id}
                         orden={o}
                         labelData={deliveryLabels[o.tipoEntrega]}
+                        businessLogoUrl={businessLogoUrl}
                         colorData={
                           colorMap[deliveryLabels[o.tipoEntrega]?.color]
                         }
@@ -886,6 +877,7 @@ export default function KitchenPanel() {
 const TicketCard = ({
   orden,
   labelData,
+  businessLogoUrl,
   colorData,
   onNext,
   onPrev,
@@ -894,120 +886,8 @@ const TicketCard = ({
 }) => {
   const isForwardLoading = pendingDirection === "forward";
   const isBackwardLoading = pendingDirection === "backward";
-  const handlePrint = () => {
-    const escaparHtml = (value) =>
-      String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-    const formatoPrecio = (value) =>
-      new Intl.NumberFormat("es-CO", {
-        style: "currency",
-        currency: "COP",
-        maximumFractionDigits: 0,
-      }).format(Number(value) || 0);
-    const totalOrden = orden.items.reduce(
-      (total, item) =>
-        total + (Number(item.price) || 0) * (Number(item.qty) || 0),
-      0,
-    );
-    const itemsHtml = orden.items
-      .map((item) => {
-        const opciones = (item.opciones || [])
-          .map(
-            (opcion) =>
-              `<div class="option">+ ${escaparHtml(formatOption(opcion))}</div>`,
-          )
-          .join("");
-        const instrucciones = item.nota
-          ? `<div class="instruction">Instrucción: ${escaparHtml(item.nota)}</div>`
-          : "";
-        const subtotal = (Number(item.price) || 0) * (Number(item.qty) || 0);
-
-        return `<tr>
-        <td class="quantity">
-          ${escaparHtml(item.qty)}
-          <span class="unit">${escaparHtml(item.unit || "UNIDAD")}</span>
-        </td>
-        <td class="product">
-          <div class="product-name">${escaparHtml(item.name)}</div>
-          ${opciones}
-          ${instrucciones}
-        </td>
-        <td class="price">${formatoPrecio(subtotal)}</td>
-      </tr>`;
-      })
-      .join("");
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Comanda ${orden.id}</title>
-          <style>
-            body { font-family: 'Courier New', monospace; width: 80mm; margin: 0; padding: 8mm; background: white; color: black; }
-            .logo-space { height: 24mm; border: 1px dashed #999; display: flex; align-items: center; justify-content: center; color: #999; font-size: 10px; margin-bottom: 8px; }
-            .header { text-align: center; border-bottom: 2px solid black; padding-bottom: 8px; margin-bottom: 10px; }
-            .order-id { font-size: 24px; font-weight: bold; margin: 6px 0; }
-            .order-info { font-size: 13px; margin: 3px 0; }
-            .customer { font-size: 16px; font-weight: bold; margin: 5px 0; }
-            .notes-block { border: 1px dashed black; padding: 6px; margin: 10px 0; font-size: 11px; }
-            table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-            th { text-align: left; padding: 5px 3px; border-bottom: 2px solid black; font-weight: bold; font-size: 10px; }
-            td { padding: 7px 3px; border-bottom: 1px solid #ddd; vertical-align: top; font-size: 11px; }
-            .quantity { width: 12%; font-size: 22px; font-weight: bold; }
-            .unit { display: block; font-size: 9px; font-weight: 600; text-transform: uppercase; }
-            .product { width: 58%; }
-            .product-name { font-weight: bold; }
-            .option, .instruction { font-size: 10px; margin-top: 3px; }
-            .option { color: #245b75; }
-            .instruction { color: #795500; font-weight: bold; }
-            .price { width: 30%; text-align: right; font-weight: bold; white-space: nowrap; }
-            .total { text-align: right; font-size: 15px; font-weight: bold; border-top: 2px solid black; padding-top: 8px; }
-            .footer { text-align: center; margin-top: 15px; font-size: 11px; border-top: 2px solid black; padding-top: 10px; }
-          </style>
-        </head>
-        <body>
-          <div class="logo-space">LOGO DEL NEGOCIO</div>
-          <div class="header">
-            <div class="order-id">PEDIDO #${escaparHtml(orden.id)}</div>
-            <div class="customer">${escaparHtml(orden.cliente)}</div>
-            <div class="order-info"><strong>${escaparHtml(labelData?.label || "Mesa")}</strong></div>
-            ${orden.tipoEntrega === "table" && orden.mesa !== "-" ? `<div class="order-info"><strong>${escaparHtml(orden.mesa)}</strong></div>` : ""}
-          </div>
-          ${orden.notasGenerales ? `<div class="notes-block"><strong>OBSERVACIONES GENERALES:</strong><br>${escaparHtml(orden.notasGenerales)}</div>` : ""}
-          <table>
-            <thead><tr><th>CANT.</th><th>PRODUCTO</th><th>PRECIO</th></tr></thead>
-            <tbody>
-              ${itemsHtml}
-            </tbody>
-          </table>
-          <div class="total">TOTAL: ${formatoPrecio(totalOrden)}</div>
-          <div class="footer">
-            <p>------- HECHO CON SISTEMA GLOTO -------</p>
-            <p>------- FIN DE LA COMANDA -------</p>
-          </div>
-        </body>
-      </html>
-    `;
-
-    const iframe = document.createElement("iframe");
-    iframe.style.display = "none";
-    document.body.appendChild(iframe);
-    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-    iframeDoc.open();
-    iframeDoc.write(html);
-    iframeDoc.close();
-
-    iframe.onload = () => {
-      iframe.contentWindow.print();
-      setTimeout(() => {
-        document.body.removeChild(iframe);
-      }, 100);
-    };
-  };
+  const handlePrint = () =>
+    printKitchenComanda(orden, labelData, businessLogoUrl);
 
   return (
     <motion.div
@@ -1047,9 +927,11 @@ const TicketCard = ({
 
           <div className="flex items-center gap-2 self-center">
             <button
+              type="button"
               onClick={handlePrint}
-              className="flex items-center justify-center p-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-slate-500 hover:text-slate-300 transition-all border border-white/5"
+              aria-label="Imprimir comanda"
               title="Imprimir comanda"
+              className="flex items-center justify-center p-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-slate-500 hover:text-slate-300 transition-all border border-white/5"
             >
               <Printer size={14} />
             </button>

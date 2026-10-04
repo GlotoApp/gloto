@@ -16,6 +16,7 @@ import {
   Navigation,
   X,
   Star,
+  MessageCircle,
 } from "lucide-react";
 import { supabase } from "../../../src/lib/supabaseClient";
 import { useCart } from "./CartContext";
@@ -201,14 +202,23 @@ const SeguimientoPedido = ({ onCerrar }) => {
           const productIds = orderItems
             .map((item) => item.product_id)
             .filter(Boolean);
-          let optionPricesByName = {};
+          const optionPricesByProductAndName = new Map();
 
           if (productIds.length > 0) {
-            const { data: productOptions } = await supabase
+            const {
+              data: productOptions,
+              error: productOptionsError,
+            } = await supabase
               .from("products_items")
               .select("*")
               .in("product_id", productIds);
 
+            if (productOptionsError) {
+              console.error(
+                "No se pudieron cargar los precios de las opciones del pedido:",
+                productOptionsError,
+              );
+            }
             (productOptions || []).forEach((option) => {
               const optionName = String(
                 option.nombre ||
@@ -220,14 +230,17 @@ const SeguimientoPedido = ({ onCerrar }) => {
                 .trim()
                 .toLowerCase();
               if (!optionName) return;
-              optionPricesByName[optionName] = Number(
-                option.precio_extra ??
-                  option.precioExtra ??
-                  option.price_extra ??
-                  option.extra_price ??
-                  option.price ??
-                  option.monto ??
-                  0,
+              optionPricesByProductAndName.set(
+                `${option.product_id}:${optionName}`,
+                Number(
+                  option.precio_extra ??
+                    option.precioExtra ??
+                    option.price_extra ??
+                    option.extra_price ??
+                    option.price ??
+                    option.monto ??
+                    0,
+                ),
               );
             });
           }
@@ -266,11 +279,31 @@ const SeguimientoPedido = ({ onCerrar }) => {
               precio: item.unit_price,
               notas: item.notes || "",
               opciones: (item.options || []).map((option) => {
-                if (typeof option !== "string") return option;
+                const name =
+                  typeof option === "string"
+                    ? option
+                    : option?.nombre ||
+                      option?.name ||
+                      option?.label ||
+                      "Opción";
+                const storedPrice =
+                  typeof option === "string"
+                    ? null
+                    : (option?.precioExtra ??
+                      option?.precio_extra ??
+                      option?.price_extra ??
+                      option?.extra_price ??
+                      option?.price ??
+                      option?.monto);
                 return {
-                  nombre: option,
+                  ...(typeof option === "string" ? {} : option),
+                  nombre: name,
                   precioExtra:
-                    optionPricesByName[option.trim().toLowerCase()] || 0,
+                    storedPrice == null
+                      ? optionPricesByProductAndName.get(
+                          `${item.product_id}:${name.trim().toLowerCase()}`,
+                        ) || 0
+                      : Number(storedPrice) || 0,
                 };
               }),
             })),
@@ -398,6 +431,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
   const indiceActual = ETAPAS.findIndex((e) => e.id === estadoPedidoActual);
   const esEtapaFinal = indiceActual === ETAPAS.length - 1;
   const { datosCliente, metodoEntrega, metodoPago } = pedido;
+  const etapaActual = ETAPAS[indiceActual];
 
   const whatsappDestino = String(pedido?.businessWhatsapp || "").replace(
     /\D/g,
@@ -530,7 +564,8 @@ const SeguimientoPedido = ({ onCerrar }) => {
       style={{
         position: "fixed",
         inset: 0,
-        background: "#0a0a0a",
+        background:
+          "radial-gradient(ellipse at top, rgba(124,58,237,0.12), transparent 38%), #09090b",
         color: "#fff",
         zIndex: 200,
         display: "flex",
@@ -545,8 +580,10 @@ const SeguimientoPedido = ({ onCerrar }) => {
           alignItems: "center",
           justifyContent: "space-between",
           gap: "12px",
-          padding: "16px 20px",
-          borderBottom: "1px solid #1a1a1a",
+          padding: "14px max(20px, calc((100vw - 920px) / 2))",
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(9,9,11,0.86)",
+          backdropFilter: "blur(18px)",
           flexShrink: 0,
         }}
       >
@@ -554,10 +591,11 @@ const SeguimientoPedido = ({ onCerrar }) => {
           type="button"
           onClick={cerrar}
           style={{
-            width: "36px",
-            height: "36px",
-            borderRadius: "50%",
-            border: "none",
+            width: "40px",
+            height: "40px",
+            borderRadius: "14px",
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.08)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -566,25 +604,37 @@ const SeguimientoPedido = ({ onCerrar }) => {
           }}
           aria-label="Cerrar seguimiento"
         >
-          <Store size={18} color="#fff" />
+          <X size={18} color="#fff" />
         </button>
 
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "12px",
+            gap: "14px",
             marginLeft: "auto",
           }}
         >
           <div style={{ textAlign: "right", minWidth: 0 }}>
-            <h2 style={{ fontSize: "16px", fontWeight: 800, margin: 0 }}>
-              PEDIDO Nº: {pedido.numero}
+            <p
+              style={{
+                color: "#a78bfa",
+                fontSize: "10px",
+                fontWeight: 800,
+                letterSpacing: "0.16em",
+                margin: "0 0 3px",
+                textTransform: "uppercase",
+              }}
+            >
+              Seguimiento del pedido
+            </p>
+            <h2 style={{ fontSize: "14px", fontWeight: 800, margin: 0 }}>
+              Nº {pedido.numero}
             </h2>
             <p
               style={{
-                fontSize: "12px",
-                color: "rgba(255,255,255,0.45)",
+                fontSize: "11px",
+                color: "rgba(255,255,255,0.52)",
                 margin: 0,
               }}
             >
@@ -594,10 +644,11 @@ const SeguimientoPedido = ({ onCerrar }) => {
 
           <div
             style={{
-              width: "40px",
-              height: "40px",
-              borderRadius: "12px",
-              background: "#131313",
+              width: "44px",
+              height: "44px",
+              borderRadius: "15px",
+              background: "linear-gradient(145deg, #1c1c22, #111114)",
+              border: "1px solid rgba(255,255,255,0.08)",
               overflow: "hidden",
               display: "flex",
               alignItems: "center",
@@ -623,9 +674,117 @@ const SeguimientoPedido = ({ onCerrar }) => {
       </div>
 
       {/* Cuerpo */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px" }}>
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          width: "100%",
+          maxWidth: "960px",
+          margin: "0 auto",
+          padding: "clamp(16px, 3vw, 30px) clamp(16px, 3vw, 28px)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            marginBottom: "16px",
+            padding: "16px 18px",
+            border: "1px solid rgba(167,139,250,0.18)",
+            borderRadius: "20px",
+            background:
+              "linear-gradient(120deg, rgba(124,58,237,0.16), rgba(19,19,24,0.92) 62%)",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <p
+              style={{
+                margin: "0 0 4px",
+                color: "rgba(255,255,255,0.48)",
+                fontSize: "10px",
+                fontWeight: 800,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+              }}
+            >
+              Estado actual
+            </p>
+            <h1
+              style={{
+                margin: 0,
+                fontSize: "clamp(18px, 3vw, 23px)",
+                lineHeight: 1.2,
+                fontWeight: 850,
+                letterSpacing: "-0.03em",
+              }}
+            >
+              {etapaActual?.label || "Pedido recibido"}
+            </h1>
+            <p
+              style={{
+                margin: "5px 0 0",
+                color: "rgba(255,255,255,0.6)",
+                fontSize: "12px",
+              }}
+            >
+              {etapaActual?.desc || "La tienda tiene tu pedido."}
+            </p>
+          </div>
+          <div
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: "7px",
+              border: "1px solid rgba(167,139,250,0.24)",
+              borderRadius: "999px",
+              background: "rgba(124,58,237,0.16)",
+              padding: "8px 11px",
+              color: "#c4b5fd",
+              fontSize: "10px",
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            <span
+              style={{
+                width: "7px",
+                height: "7px",
+                borderRadius: "50%",
+                background: "#a78bfa",
+                boxShadow: "0 0 10px rgba(167,139,250,0.8)",
+              }}
+            />
+            {esEtapaFinal ? "Listo" : "En proceso"}
+          </div>
+        </div>
+
         {/* Línea de tiempo */}
-        <div style={{ marginBottom: "28px" }}>
+        <div
+          style={{
+            marginBottom: "16px",
+            padding: "20px 18px 4px",
+            border: "1px solid rgba(255,255,255,0.07)",
+            borderRadius: "20px",
+            background: "linear-gradient(145deg, #151519, #101013)",
+            boxShadow: "0 14px 35px rgba(0,0,0,0.16)",
+          }}
+        >
+          <p
+            style={{
+              margin: "0 0 18px",
+              color: "rgba(255,255,255,0.48)",
+              fontSize: "10px",
+              fontWeight: 800,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+            }}
+          >
+            Progreso de tu pedido
+          </p>
           {ETAPAS.map((etapa, i) => {
             const completada = i < indiceActual;
             const activa = i === indiceActual;
@@ -648,22 +807,22 @@ const SeguimientoPedido = ({ onCerrar }) => {
                 >
                   <div
                     style={{
-                      width: "40px",
-                      height: "40px",
-                      borderRadius: "50%",
+                      width: "42px",
+                      height: "42px",
+                      borderRadius: "15px",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       background: completada
-                        ? "rgba(124,58,237,0.18)"
+                        ? "rgba(124,58,237,0.14)"
                         : activa
-                          ? "#7c3aed"
-                          : "#131313",
+                          ? "linear-gradient(145deg, #8b5cf6, #6d28d9)"
+                          : "#1a1a20",
                       border: pendiente
-                        ? "1px solid rgba(255,255,255,0.08)"
-                        : "none",
+                        ? "1px solid rgba(255,255,255,0.07)"
+                        : "1px solid rgba(167,139,250,0.22)",
                       boxShadow: activa
-                        ? "0 0 0 4px rgba(124,58,237,0.18)"
+                        ? "0 0 0 4px rgba(124,58,237,0.16), 0 8px 22px rgba(124,58,237,0.22)"
                         : "none",
                       transition: "all 0.3s",
                     }}
@@ -697,22 +856,22 @@ const SeguimientoPedido = ({ onCerrar }) => {
                 <div style={{ paddingBottom: "28px" }}>
                   <p
                     style={{
-                      fontSize: "14px",
+                      fontSize: "13px",
                       fontWeight: 800,
                       margin: 0,
                       marginBottom: "2px",
-                      color: pendiente ? "rgba(255,255,255,0.35)" : "#fff",
+                      color: pendiente ? "rgba(255,255,255,0.32)" : "#fff",
                     }}
                   >
                     {etapa.label}
                   </p>
                   <p
                     style={{
-                      fontSize: "12px",
+                      fontSize: "11px",
                       margin: 0,
                       color: pendiente
-                        ? "rgba(255,255,255,0.25)"
-                        : "rgba(255,255,255,0.45)",
+                        ? "rgba(255,255,255,0.28)"
+                        : "rgba(255,255,255,0.5)",
                     }}
                   >
                     {activa ? etapa.desc : pendiente ? "Pendiente" : etapa.desc}
@@ -726,19 +885,22 @@ const SeguimientoPedido = ({ onCerrar }) => {
         {/* Datos de entrega */}
         <div
           style={{
-            background: "#131313",
-            borderRadius: "16px",
-            border: "1px solid rgba(255,255,255,0.06)",
-            padding: "16px",
-            marginBottom: "16px",
+            background: "linear-gradient(145deg, #151519, #101013)",
+            borderRadius: "20px",
+            border: "1px solid rgba(255,255,255,0.07)",
+            padding: "20px",
+            marginBottom: "14px",
+            boxShadow: "0 14px 35px rgba(0,0,0,0.14)",
           }}
         >
           <p
             style={{
-              fontSize: "12px",
-              fontWeight: 700,
-              color: "rgba(255,255,255,0.7)",
-              marginBottom: "12px",
+              fontSize: "10px",
+              fontWeight: 800,
+              color: "rgba(255,255,255,0.48)",
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              marginBottom: "16px",
             }}
           >
             {ENTREGA_LABEL[metodoEntrega] || "Entrega"}
@@ -746,12 +908,20 @@ const SeguimientoPedido = ({ onCerrar }) => {
 
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <User size={14} color="rgba(255,255,255,0.4)" />
-              <span style={{ fontSize: "13px" }}>{datosCliente?.nombre}</span>
+              <User size={15} color="#a78bfa" />
+              <span
+                style={{ fontSize: "13px", color: "rgba(255,255,255,0.86)" }}
+              >
+                {datosCliente?.nombre}
+              </span>
             </div>
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <Phone size={14} color="rgba(255,255,255,0.4)" />
-              <span style={{ fontSize: "13px" }}>{datosCliente?.telefono}</span>
+              <Phone size={15} color="#a78bfa" />
+              <span
+                style={{ fontSize: "13px", color: "rgba(255,255,255,0.86)" }}
+              >
+                {datosCliente?.telefono}
+              </span>
             </div>
             {metodoEntrega === "mesa" && datosCliente?.mesa && (
               <div
@@ -805,18 +975,21 @@ const SeguimientoPedido = ({ onCerrar }) => {
         {/* Resumen del pedido */}
         <div
           style={{
-            background: "#131313",
-            borderRadius: "16px",
-            border: "1px solid rgba(255,255,255,0.06)",
-            padding: "16px",
+            background: "linear-gradient(145deg, #151519, #101013)",
+            borderRadius: "20px",
+            border: "1px solid rgba(255,255,255,0.07)",
+            padding: "20px",
+            boxShadow: "0 14px 35px rgba(0,0,0,0.14)",
           }}
         >
           <p
             style={{
-              fontSize: "12px",
-              fontWeight: 700,
-              color: "rgba(255,255,255,0.7)",
-              marginBottom: "12px",
+              fontSize: "10px",
+              fontWeight: 800,
+              color: "rgba(255,255,255,0.48)",
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              marginBottom: "16px",
             }}
           >
             Tu pedido
@@ -826,7 +999,9 @@ const SeguimientoPedido = ({ onCerrar }) => {
             <div
               key={it.id}
               style={{
-                marginBottom: "10px",
+                marginBottom: "12px",
+                paddingBottom: "10px",
+                borderBottom: "1px solid rgba(255,255,255,0.05)",
               }}
             >
               <div
@@ -957,19 +1132,22 @@ const SeguimientoPedido = ({ onCerrar }) => {
         {/* Información de pago */}
         <div
           style={{
-            background: "#131313",
-            borderRadius: "16px",
-            border: "1px solid rgba(255,255,255,0.06)",
-            padding: "16px",
-            marginTop: "16px",
+            background: "linear-gradient(145deg, #151519, #101013)",
+            borderRadius: "20px",
+            border: "1px solid rgba(255,255,255,0.07)",
+            padding: "20px",
+            marginTop: "14px",
+            boxShadow: "0 14px 35px rgba(0,0,0,0.14)",
           }}
         >
           <p
             style={{
-              fontSize: "12px",
-              fontWeight: 700,
-              color: "rgba(255,255,255,0.7)",
-              marginBottom: "12px",
+              fontSize: "10px",
+              fontWeight: 800,
+              color: "rgba(255,255,255,0.48)",
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              marginBottom: "16px",
             }}
           >
             Método(s) de pago
@@ -1029,11 +1207,11 @@ const SeguimientoPedido = ({ onCerrar }) => {
         {!calificacionEnviada ? (
           <div
             style={{
-              background: "#131313",
-              border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: "16px",
-              padding: "14px 12px 12px",
-              marginTop: "16px",
+              background: "linear-gradient(145deg, #17171c, #101013)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              borderRadius: "20px",
+              padding: "18px 16px 16px",
+              marginTop: "14px",
             }}
           >
             <p
@@ -1108,11 +1286,11 @@ const SeguimientoPedido = ({ onCerrar }) => {
         ) : (
           <div
             style={{
-              background: "#131313",
-              border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: "16px",
-              padding: "16px 12px",
-              marginTop: "16px",
+              background: "linear-gradient(145deg, #17171c, #101013)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              borderRadius: "20px",
+              padding: "18px 16px",
+              marginTop: "14px",
               textAlign: "center",
             }}
           >
@@ -1133,9 +1311,12 @@ const SeguimientoPedido = ({ onCerrar }) => {
       {/* Footer: siempre visible, sin importar en qué paso esté la línea de tiempo */}
       <div
         style={{
-          padding: "16px 20px",
-          paddingBottom: "calc(16px + env(safe-area-inset-bottom))",
-          borderTop: "1px solid #1a1a1a",
+          width: "100%",
+          maxWidth: "960px",
+          margin: "0 auto",
+          padding: "12px clamp(16px, 3vw, 28px)",
+          paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
+          borderTop: "1px solid rgba(255,255,255,0.08)",
           flexShrink: 0,
         }}
       >
@@ -1145,8 +1326,8 @@ const SeguimientoPedido = ({ onCerrar }) => {
           style={{
             width: "100%",
             padding: "14px",
-            borderRadius: "100px",
-            background: "#7c3aed",
+            borderRadius: "16px",
+            background: "linear-gradient(100deg, #7c3aed, #6d28d9)",
             color: "#fff",
             fontWeight: 800,
             fontSize: "14px",
@@ -1156,10 +1337,10 @@ const SeguimientoPedido = ({ onCerrar }) => {
             alignItems: "center",
             justifyContent: "center",
             gap: "8px",
-            boxShadow: "0 8px 32px rgba(124,58,237,0.45)",
+            boxShadow: "0 8px 28px rgba(124,58,237,0.3)",
           }}
         >
-          <Store size={18} />
+          <MessageCircle size={18} />
           Comunicarme con la tienda
         </button>
       </div>

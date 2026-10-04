@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Search,
@@ -24,6 +24,8 @@ import {
   Motorbike,
   ClockFading,
   Star,
+  LoaderCircle,
+  MapPin,
 } from "lucide-react";
 import {
   resolveCategoryIconUrl,
@@ -65,6 +67,7 @@ const FILTROS = [
   "Menor domicilio",
   "Con promociones",
 ];
+const TIENDAS_POR_TANDA = 24;
 
 const SkeletonBlock = ({ className = "", rounded = "rounded-2xl" }) => (
   <div
@@ -72,7 +75,93 @@ const SkeletonBlock = ({ className = "", rounded = "rounded-2xl" }) => (
   />
 );
 
-const Home = () => {
+const formatHourLabel = (value) => {
+  if (!value) return "";
+  const [hours, minutes] = String(value).split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return "";
+  const suffix = hours >= 12 ? "PM" : "AM";
+  const normalizedHours = hours % 12 || 12;
+  return `${normalizedHours}:${String(minutes).padStart(2, "0")} ${suffix}`;
+};
+
+const distanceInKm = (first, second) => {
+  const radians = (degrees) => (degrees * Math.PI) / 180;
+  const latitudeDelta = radians(second.latitude - first.latitude);
+  const longitudeDelta = radians(second.longitude - first.longitude);
+  const value =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(radians(first.latitude)) *
+      Math.cos(radians(second.latitude)) *
+      Math.sin(longitudeDelta / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+};
+
+const getBusinessHoursStatus = (rows, now) => {
+  if (!Array.isArray(rows)) return null;
+
+  const minutesPerWeek = 7 * 1440;
+  const todayWeekday = ((now.getDay() + 6) % 7) + 1;
+  const currentWeekMinute =
+    (todayWeekday - 1) * 1440 + now.getHours() * 60 + now.getMinutes();
+  const intervals = rows
+    .filter((row) => row.is_open && row.open_time && row.close_time)
+    .map((row) => {
+      const [openHours, openMinutes] = row.open_time.split(":").map(Number);
+      const [closeHours, closeMinutes] = row.close_time.split(":").map(Number);
+      const day = Number(row.day_of_week);
+      if (
+        !Number.isInteger(day) ||
+        day < 1 ||
+        day > 7 ||
+        ![openHours, openMinutes, closeHours, closeMinutes].every(Number.isFinite)
+      ) {
+        return null;
+      }
+
+      const openMinute = openHours * 60 + openMinutes;
+      const closeMinute = closeHours * 60 + closeMinutes;
+      const duration =
+        row.close_day === "next"
+          ? closeMinute - openMinute + 1440
+          : closeMinute - openMinute;
+      if (duration <= 0 || duration > 1440) return null;
+
+      return {
+        row,
+        start: (day - 1) * 1440 + openMinute,
+        duration,
+      };
+    })
+    .filter(Boolean);
+
+  const activeInterval = intervals.find((interval) =>
+    [interval.start - minutesPerWeek, interval.start, interval.start + minutesPerWeek]
+      .some(
+        (start) =>
+          currentWeekMinute >= start &&
+          currentWeekMinute < start + interval.duration,
+      ),
+  );
+  if (activeInterval) return { isOpen: true, opensAt: null };
+
+  const nextInterval = intervals
+    .map((interval) => ({
+      ...interval,
+      distance:
+        (interval.start - currentWeekMinute + minutesPerWeek) % minutesPerWeek ||
+        minutesPerWeek,
+    }))
+    .sort((a, b) => a.distance - b.distance)[0];
+
+  return {
+    isOpen: false,
+    opensAt: nextInterval
+      ? formatHourLabel(nextInterval.row.open_time)
+      : null,
+  };
+};
+
+const Home = ({ userLocation }) => {
   const navigate = useNavigate();
 
   const [busqueda, setBusqueda] = useState("");
@@ -83,82 +172,91 @@ const Home = () => {
   const [verTodasPromos, setVerTodasPromos] = useState(false);
   const [busquedaPromo, setBusquedaPromo] = useState("");
   const [tiendas, setTiendas] = useState([]);
+  const [cantidadTiendasVisibles, setCantidadTiendasVisibles] =
+    useState(TIENDAS_POR_TANDA);
   const [categorias, setCategorias] = useState([]);
   const [promociones, setPromociones] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [frasesInicio, setFrasesInicio] = useState(FRASES_FALLBACK_MARKETPLACE);
+  const [horaActual, setHoraActual] = useState(() => new Date());
+  const portadasAlternativasSolicitadas = useRef(new Set());
   const frasesLoop = [...frasesInicio, ...frasesInicio];
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setHoraActual(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
 
-    const obtenerFrases = async () => {
-      const { data, error } = await supabase
-        .from("frases")
-        .select("texto")
-        .eq("is_active", true)
-        .order("order_index", { ascending: true })
-        .order("created_at", { ascending: true });
-
-      if (!isMounted) return;
-      if (error) {
-        console.error(
-          "No se pudieron cargar las frases del Marketplace:",
-          error,
-        );
-        return;
-      }
-
-      setFrasesInicio((data || []).map((frase) => frase.texto));
-    };
-
-    obtenerFrases();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Obtener negocios de Supabase
-  useEffect(() => {
-    const obtenerTiendas = async () => {
+    const cargarMarketplace = async () => {
       try {
-        const { data, error } = await supabase
-          .from("businesses")
-          .select(
-            `
-            id, 
-            name, 
-            slug, 
-            logo_url,
-            cover_url,
-            is_active,
-            admin_suspended,
-            created_at,
-            business_info (
-              category_id,
-              categoria,
-              rating,
-              rating_count,
-              delivery_time_min,
-              delivery_time_max,
-              min_delivery_fee,
-              free_delivery_min_order,
-              categoria
+        const [
+          { data: negociosData, error: negociosError },
+          { data: categoriasData, error: categoriasError },
+          { data: promocionesData, error: promocionesError },
+          { data: frasesData, error: frasesError },
+          { data: horariosData, error: horariosError },
+        ] = await Promise.all([
+          supabase
+            .from("businesses")
+            .select(
+              `
+              id,
+              name,
+              slug,
+              logo_url,
+              cover_url,
+              is_active,
+              admin_suspended,
+              created_at,
+              business_info (
+                category_id,
+                categoria,
+                rating,
+                rating_count,
+                delivery_time_min,
+                delivery_time_max,
+                min_delivery_fee,
+                free_delivery_min_order,
+                latitude,
+                longitude
+              )
+            `,
             )
-          `,
-          )
-          .eq("is_active", true)
-          .eq("admin_suspended", false)
-          .order("created_at", { ascending: true });
+            .eq("is_active", true)
+            .eq("admin_suspended", false)
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("categories")
+            .select("id,name,icon_url,order_index")
+            .order("order_index", { ascending: true })
+            .order("name", { ascending: true }),
+          supabase
+            .from("promotions")
+            .select(
+              "id,tag,offer_text,title,cover_path,order_index,business_id,businesses(slug,name,is_active,admin_suspended)",
+            )
+            .eq("is_active", true)
+            .eq("payment_status", "paid")
+            .order("order_index", { ascending: true }),
+          supabase
+            .from("frases")
+            .select("texto")
+            .eq("is_active", true)
+            .order("order_index", { ascending: true })
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("business_hours")
+            .select(
+              "business_id,day_of_week,shift_index,is_open,open_time,close_time,close_day",
+            )
+            .order("day_of_week", { ascending: true })
+            .order("shift_index", { ascending: true }),
+        ]);
 
-        if (error) throw error;
-
-        const { data: categoriasData, error: categoriasError } = await supabase
-          .from("categories")
-          .select("id,name,icon_url,order_index")
-          .order("order_index", { ascending: true })
-          .order("name", { ascending: true });
-
+        if (negociosError) throw negociosError;
         if (categoriasError) throw categoriasError;
 
         const categoriasUnicas = Array.from(
@@ -175,43 +273,44 @@ const Home = () => {
               ]),
           ).values(),
         );
-        const categoriasConIconos = await Promise.all(
-          categoriasUnicas.map(async (categoria) => {
-            try {
-              return {
-                ...categoria,
-                iconUrl: await resolveCategoryIconUrl(categoria.iconUrl),
-              };
-            } catch (iconError) {
-              console.warn(
-                "No se pudo resolver el icono de categoría:",
-                iconError,
-              );
-              return { ...categoria, iconUrl: null };
-            }
-          }),
+        const categoriasPorId = new Map(
+          (categoriasData || []).map((categoria) => [categoria.id, categoria]),
         );
-        setCategorias(categoriasConIconos);
-
-        const { data: promocionesData, error: promocionesError } =
-          await supabase
-            .from("promotions")
-            .select(
-              "id,tag,offer_text,title,cover_path,order_index,business_id,businesses(slug,name,is_active,admin_suspended)",
-            )
-            .eq("is_active", true)
-            .eq("payment_status", "paid")
-            .order("order_index", { ascending: true });
+        const categoriasPorNombre = new Map();
+        (categoriasData || []).forEach((categoria) => {
+          const nombreNormalizado = normalizarTexto(categoria.name);
+          if (!categoriasPorNombre.has(nombreNormalizado)) {
+            categoriasPorNombre.set(nombreNormalizado, categoria);
+          }
+        });
 
         if (promocionesError) {
           console.error(
             "No se pudieron cargar las promociones:",
             promocionesError,
           );
-          setPromociones([]);
-        } else {
-          setPromociones(
-            (promocionesData || [])
+        }
+        if (frasesError) {
+          console.error(
+            "No se pudieron cargar las frases del Marketplace:",
+            frasesError,
+          );
+        }
+        if (horariosError) {
+          console.error(
+            "No se pudieron cargar los horarios de las tiendas:",
+            horariosError,
+          );
+        }
+        const horariosPorTienda = new Map();
+        (horariosData || []).forEach((horario) => {
+          const horarios = horariosPorTienda.get(horario.business_id) || [];
+          horarios.push(horario);
+          horariosPorTienda.set(horario.business_id, horarios);
+        });
+        const promocionesMapeadas = promocionesError
+          ? []
+          : (promocionesData || [])
               .filter(
                 (promocion) =>
                   promocion.businesses?.is_active &&
@@ -228,26 +327,18 @@ const Home = () => {
                       .from("business-assets")
                       .getPublicUrl(promocion.cover_path).data.publicUrl
                   : null,
-              })),
-          );
-        }
+              }));
 
         // Mapear datos de Supabase al formato esperado
-        const tiendasMapeadas = data.map((negocio) => {
+        const tiendasMapeadas = (negociosData || []).map((negocio) => {
           // La relación retorna un array, acceder al primer elemento
           const info = Array.isArray(negocio.business_info)
             ? negocio.business_info[0]
             : negocio.business_info || {};
 
           const businessCategory =
-            (categoriasData || []).find(
-              (category) => category.id === info?.category_id,
-            ) ||
-            (categoriasData || []).find(
-              (category) =>
-                normalizarTexto(category.name) ===
-                normalizarTexto(info?.categoria),
-            );
+            categoriasPorId.get(info?.category_id) ||
+            categoriasPorNombre.get(normalizarTexto(info?.categoria));
           const ratingValue = info?.rating;
           const reviews = Number(info?.rating_count ?? 0);
           const ratingNumber =
@@ -282,6 +373,14 @@ const Home = () => {
             id: negocio.id,
             slug: negocio.slug,
             nombre: negocio.name,
+            latitude:
+              info?.latitude == null || info.latitude === ""
+                ? null
+                : Number(info.latitude),
+            longitude:
+              info?.longitude == null || info.longitude === ""
+                ? null
+                : Number(info.longitude),
             tipo: businessCategory?.name || info?.categoria || "Tienda",
             categoryId: businessCategory?.id || null,
             // guardamos la ruta original en `logo` y la resolveremos abajo
@@ -300,54 +399,70 @@ const Home = () => {
                   : `$${deliveryFee.toLocaleString("es-CO")}`,
             distancia: "—",
             badge: null,
+            businessHours: horariosError
+              ? null
+              : horariosPorTienda.get(negocio.id) || [],
           };
         });
 
-        // Si alguna tienda no tiene `cover`, intentar obtener la primera
-        // imagen de producto disponible como fallback antes de resolver URLs.
-        const tiendasConPortada = await Promise.all(
-          tiendasMapeadas.map(async (t) => {
-            if (t.cover) return t;
+        const categoriasConIconos = await Promise.all(
+          categoriasUnicas.map(async (categoria) => {
             try {
-              const prodRes = await supabase
-                .from("products")
-                .select("image_url")
-                .eq("business_id", t.id)
-                .eq("is_active", true)
-                .order("created_at", { ascending: true })
-                .limit(1);
-
-              const firstImg =
-                Array.isArray(prodRes.data) && prodRes.data[0]
-                  ? prodRes.data[0].image_url
-                  : null;
-
-              return { ...t, cover: firstImg || null };
-            } catch (e) {
-              return t;
+              return {
+                ...categoria,
+                iconUrl: await resolveCategoryIconUrl(categoria.iconUrl),
+              };
+            } catch (iconError) {
+              console.warn(
+                "No se pudo resolver el icono de categoría:",
+                iconError,
+              );
+              return { ...categoria, iconUrl: null };
             }
           }),
         );
 
-        // Resolver URLs públicas para las imágenes (si vienen de Supabase Storage)
         const tiendasConUrls = await Promise.all(
-          tiendasConPortada.map(async (t) => ({
-            ...t,
-            logo: t.logo ? await resolveImageUrl(t.logo) : "/default.png",
-            cover: t.cover ? await resolveImageUrl(t.cover) : "/default.png",
-          })),
+          tiendasMapeadas.map(async (tienda) => {
+            return {
+              ...tienda,
+              logo: tienda.logo
+                ? await resolveImageUrl(tienda.logo)
+                : "/default.png",
+              cover: tienda.cover
+                ? await resolveImageUrl(tienda.cover)
+                : null,
+            };
+          }),
         );
 
+        if (!isMounted) return;
+        setCategorias(categoriasConIconos);
+        setPromociones(promocionesMapeadas);
         setTiendas(tiendasConUrls);
+        if (!frasesError) {
+          const frases = (frasesData || [])
+            .map((frase) => frase.texto)
+            .filter(Boolean);
+          if (frases.length > 0) setFrasesInicio(frases);
+        }
       } catch (error) {
         console.error("Error al obtener tiendas:", error);
-        setTiendas([]);
+        if (isMounted) {
+          setTiendas([]);
+          setCategorias([]);
+          setPromociones([]);
+        }
       } finally {
-        setCargando(false);
+        if (isMounted) setCargando(false);
       }
     };
 
-    obtenerTiendas();
+    cargarMarketplace();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -440,31 +555,134 @@ const Home = () => {
             slugsConPromocion.has(tienda.slug),
           )
         : tiendasFiltradas;
-    const copia = [...tiendasDisponibles];
+    const copia = tiendasDisponibles.map((tienda) => {
+      const latitude =
+        tienda.latitude == null || tienda.latitude === ""
+          ? NaN
+          : Number(tienda.latitude);
+      const longitude =
+        tienda.longitude == null || tienda.longitude === ""
+          ? NaN
+          : Number(tienda.longitude);
+      const tieneCoordenadas =
+        Number.isFinite(latitude) &&
+        latitude >= -90 &&
+        latitude <= 90 &&
+        Number.isFinite(longitude) &&
+        longitude >= -180 &&
+        longitude <= 180;
+
+      return {
+        ...tienda,
+        distanciaKm:
+          userLocation && tieneCoordenadas
+            ? distanceInKm(userLocation, { latitude, longitude })
+            : null,
+      };
+    });
+    const compararDistancia = (first, second) =>
+      (first.distanciaKm ?? Infinity) - (second.distanciaKm ?? Infinity);
 
     switch (filtroActivo) {
       case "Mejor calificadas":
         return copia.sort((a, b) => {
           const ratingA = a.rating == null ? -Infinity : Number(a.rating);
           const ratingB = b.rating == null ? -Infinity : Number(b.rating);
-          return ratingB - ratingA || b.reviews - a.reviews;
+          return (
+            ratingB - ratingA ||
+            b.reviews - a.reviews ||
+            compararDistancia(a, b)
+          );
         });
       case "Entrega rápida":
         return copia.sort((a, b) => {
           const entregaA = a.deliveryMin ?? Infinity;
           const entregaB = b.deliveryMin ?? Infinity;
-          return entregaA - entregaB;
+          return entregaA - entregaB || compararDistancia(a, b);
         });
       case "Menor domicilio":
         return copia.sort((a, b) => {
           const tarifaA = a.deliveryFee ?? Infinity;
           const tarifaB = b.deliveryFee ?? Infinity;
-          return tarifaA - tarifaB;
+          return tarifaA - tarifaB || compararDistancia(a, b);
         });
       default:
-        return copia;
+        return userLocation
+          ? copia.sort(compararDistancia)
+          : copia;
     }
   })();
+  const tiendasVisibles = tiendasOrdenadas.slice(0, cantidadTiendasVisibles);
+  const visibleShopIds = tiendasVisibles.map((tienda) => tienda.id).join("|");
+
+  useEffect(() => {
+    setCantidadTiendasVisibles(TIENDAS_POR_TANDA);
+  }, [busqueda, categoriaActiva, filtroActivo]);
+
+  useEffect(() => {
+    const idsTiendasVisibles = new Set(
+      visibleShopIds.split("|").filter(Boolean),
+    );
+    const tiendasSinPortada = tiendas.filter(
+      (tienda) =>
+        idsTiendasVisibles.has(tienda.id) &&
+        !tienda.cover &&
+        !portadasAlternativasSolicitadas.current.has(tienda.id),
+    );
+    tiendasSinPortada.forEach((tienda) =>
+      portadasAlternativasSolicitadas.current.add(tienda.id),
+    );
+
+    if (tiendasSinPortada.length === 0) {
+      return;
+    }
+
+    const cargarPortadasAlternativas = async () => {
+      const portadas = await Promise.all(
+        tiendasSinPortada.map(async (tienda) => {
+          try {
+            const { data, error } = await supabase
+              .from("products")
+              .select("image_url")
+              .eq("business_id", tienda.id)
+              .eq("is_active", true)
+              .order("created_at", { ascending: true })
+              .limit(1);
+
+            if (error) throw error;
+            const imageUrl = data?.[0]?.image_url;
+            return imageUrl
+              ? [tienda.id, await resolveImageUrl(imageUrl)]
+              : [tienda.id, null];
+          } catch (error) {
+            console.warn(
+              "No se pudo cargar la portada alternativa de la tienda:",
+              error,
+            );
+            return [tienda.id, null];
+          }
+        }),
+      );
+
+      const portadasDisponibles = new Map(
+        portadas.filter(([, imageUrl]) => imageUrl),
+      );
+      if (portadasDisponibles.size > 0) {
+        setTiendas((current) =>
+          current.map((tienda) =>
+            portadasDisponibles.has(tienda.id)
+              ? {
+                  ...tienda,
+                  cover: portadasDisponibles.get(tienda.id),
+                }
+              : tienda,
+          ),
+        );
+      }
+    };
+
+    cargarPortadasAlternativas();
+  }, [tiendas, visibleShopIds]);
 
   // Selecciona/deselecciona una categoría (toggle)
   const toggleCategoria = (idCategoria) => {
@@ -472,77 +690,96 @@ const Home = () => {
   };
 
   const renderLoadingState = () => (
-    <div className="max-w-6xl mx-auto bg-background min-h-screen px-4 pt-4 pb-8">
-      <section className="mb-6 space-y-4">
-        <SkeletonBlock className="h-4 w-28" />
-        <SkeletonBlock className="h-14 w-full rounded-3xl" />
-        <div className="flex items-center gap-3">
-          <SkeletonBlock className="h-10 w-full rounded-3xl" />
-          <SkeletonBlock className="h-10 w-10 rounded-full" />
-        </div>
-      </section>
+    <>
+      <div
+        aria-hidden="true"
+        className="max-w-6xl mx-auto min-h-screen bg-background px-4 pt-4 pb-8"
+      >
+        <section className="mb-6 space-y-4">
+          <SkeletonBlock className="h-4 w-28" />
+          <SkeletonBlock className="h-14 w-full rounded-3xl" />
+          <div className="flex items-center gap-3">
+            <SkeletonBlock className="h-10 w-full rounded-3xl" />
+            <SkeletonBlock className="h-10 w-10 rounded-full" />
+          </div>
+        </section>
 
-      <section className="mb-5">
-        <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
-          {Array.from({ length: 8 }).map((_, idx) => (
-            <div
-              key={`cat-skeleton-${idx}`}
-              className="flex-shrink-0 flex flex-col items-center gap-2"
-            >
-              <SkeletonBlock className="h-14 w-14" rounded="rounded-2xl" />
-              <SkeletonBlock className="h-3 w-10" />
-            </div>
-          ))}
-        </div>
-      </section>
+        <section className="mb-5">
+          <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+            {Array.from({ length: 8 }).map((_, idx) => (
+              <div
+                key={`cat-skeleton-${idx}`}
+                className="flex-shrink-0 flex flex-col items-center gap-2"
+              >
+                <SkeletonBlock className="h-14 w-14" rounded="rounded-2xl" />
+                <SkeletonBlock className="h-3 w-10" />
+              </div>
+            ))}
+          </div>
+        </section>
 
-      <section className="mb-5">
-        <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
-          {Array.from({ length: 3 }).map((_, idx) => (
-            <div
-              key={`promo-skeleton-${idx}`}
-              className="w-[140px] sm:w-[160px] md:w-[190px]"
-            >
+        <section className="mb-5">
+          <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+            {Array.from({ length: 3 }).map((_, idx) => (
+              <div
+                key={`promo-skeleton-${idx}`}
+                className="w-[140px] sm:w-[160px] md:w-[190px]"
+              >
+                <SkeletonBlock className="h-24 w-full rounded-3xl" />
+              </div>
+            ))}
+            <div className="flex-shrink-0 w-[110px] sm:w-[120px]">
               <SkeletonBlock className="h-24 w-full rounded-3xl" />
             </div>
-          ))}
-          <div className="flex-shrink-0 w-[110px] sm:w-[120px]">
-            <SkeletonBlock className="h-24 w-full rounded-3xl" />
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="sticky top-0 z-10 mb-5 bg-background pt-4">
-        <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-          {Array.from({ length: 5 }).map((_, idx) => (
-            <SkeletonBlock
-              key={`filter-skeleton-${idx}`}
-              className="h-8 w-20 rounded-full"
-            />
-          ))}
-        </div>
-      </section>
+        <section className="sticky top-0 z-10 mb-5 bg-background pt-4">
+          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+            {Array.from({ length: 5 }).map((_, idx) => (
+              <SkeletonBlock
+                key={`filter-skeleton-${idx}`}
+                className="h-8 w-20 rounded-full"
+              />
+            ))}
+          </div>
+        </section>
 
-      <section>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 8 }).map((_, idx) => (
-            <div
-              key={`tienda-skeleton-${idx}`}
-              className="flex flex-col rounded-3xl bg-transparent p-3"
-            >
-              <SkeletonBlock className="h-24 w-full mb-3 rounded-3xl" />
-              <SkeletonBlock className="h-3.5 w-3/4 mb-2 rounded-full" />
-              <SkeletonBlock className="h-2.5 w-1/2 mb-3 rounded-full" />
-              <SkeletonBlock className="h-2.5 w-full rounded-full" />
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <div className="mt-6 text-center text-sm font-medium text-on-surface-variant/70">
-        Estamos preparando todo para ti...
+        <section>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Array.from({ length: 8 }).map((_, idx) => (
+              <div
+                key={`tienda-skeleton-${idx}`}
+                className="flex flex-col rounded-3xl bg-transparent p-3"
+              >
+                <SkeletonBlock className="h-24 w-full mb-3 rounded-3xl" />
+                <SkeletonBlock className="h-3.5 w-3/4 mb-2 rounded-full" />
+                <SkeletonBlock className="h-2.5 w-1/2 mb-3 rounded-full" />
+                <SkeletonBlock className="h-2.5 w-full rounded-full" />
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
-    </div>
+
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 px-5 backdrop-blur-md"
+        role="status"
+        aria-live="polite"
+      >
+        <div className="flex max-w-sm flex-col items-center text-center">
+          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-primary/10 text-primary shadow-lg shadow-primary/10">
+            <LoaderCircle size={34} strokeWidth={2.5} className="animate-spin" />
+          </div>
+          <p className="text-lg font-black tracking-tight text-on-surface sm:text-xl">
+            Gloto está buscando algo bueno para ti
+          </p>
+          <p className="mt-2 text-sm text-on-surface-variant">
+            Estamos preparando las mejores opciones cerca de ti...
+          </p>
+        </div>
+      </div>
+    </>
   );
 
   if (cargando) return renderLoadingState();
@@ -644,6 +881,8 @@ const Home = () => {
                     <img
                       src={cat.iconUrl}
                       alt=""
+                      loading="lazy"
+                      decoding="async"
                       className={`h-12 w-12 flex-shrink-0 object-contain transition-all sm:h-14 sm:w-14 ${
                         activa
                           ? "scale-110 drop-shadow-[0_0_14px_rgba(168,85,247,0.7)]"
@@ -693,6 +932,8 @@ const Home = () => {
                     <img
                       src={promo.coverUrl}
                       alt=""
+                      loading="lazy"
+                      decoding="async"
                       className="absolute inset-0 h-full w-full object-cover"
                     />
                   )}
@@ -797,6 +1038,8 @@ const Home = () => {
                       <img
                         src={promo.coverUrl}
                         alt=""
+                        loading="lazy"
+                        decoding="async"
                         className="absolute inset-0 h-full w-full object-cover"
                       />
                     )}
@@ -823,6 +1066,18 @@ const Home = () => {
 
       {!verTodasPromos && (
         <section className="px-5">
+          {userLocation && (
+            <div className="mb-3">
+              <h2 className="text-base font-black text-on-surface">
+                Tiendas cerca de ti
+              </h2>
+              <p className="mt-0.5 text-[11px] text-on-surface-variant">
+                {filtroActivo === "Todas"
+                  ? "Las más cercanas aparecen primero."
+                  : `Negocios en ${userLocation.city}.`}
+              </p>
+            </div>
+          )}
           {tiendasOrdenadas.length === 0 ? (
             <div className="flex flex-col items-center justify-center text-center py-16 text-on-surface-variant/60">
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-surface border border-outline/20">
@@ -856,7 +1111,7 @@ const Home = () => {
           ) : buscando ? (
             // ── MODO BÚSQUEDA: tarjetas horizontales, compitiendo por la mirada del usuario ──
             <div className="flex flex-col gap-3 pb-8">
-              {tiendasOrdenadas.map((t) => (
+              {tiendasVisibles.map((t) => (
                 <Link
                   key={t.slug}
                   to={`/marketplace/tienda/${t.slug}`}
@@ -867,6 +1122,8 @@ const Home = () => {
                     <img
                       src={t.cover || t.logo}
                       alt={t.nombre}
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-cover"
                       onError={(e) => {
                         e.currentTarget.onerror = null;
@@ -874,10 +1131,31 @@ const Home = () => {
                       }}
                     />
 
-                    <div className="absolute bottom-0 right-0 w-8 h-8 overflow-hidden shadow-md rounded-full border border-white/20 bg-background">
+                    {(() => {
+                      const status = getBusinessHoursStatus(
+                        t.businessHours,
+                        horaActual,
+                      );
+                      return status && !status.isOpen ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-black/65 px-1 text-center text-white">
+                          <span className="text-[8px] font-black uppercase tracking-wider">
+                            Cerrado
+                          </span>
+                          {status.opensAt && (
+                            <span className="text-[8px] font-semibold leading-tight">
+                              Abre {status.opensAt}
+                            </span>
+                          )}
+                        </div>
+                      ) : null;
+                    })()}
+
+                    <div className="absolute bottom-0 right-0 z-10 w-8 h-8 overflow-hidden shadow-md rounded-full border border-white/20 bg-background">
                       <img
                         src={t.logo || t.cover}
                         alt={t.nombre}
+                        loading="lazy"
+                        decoding="async"
                         className="w-full h-full object-cover rounded-full"
                         onError={(e) => {
                           e.currentTarget.onerror = null;
@@ -902,7 +1180,7 @@ const Home = () => {
                       {t.tipo}
                     </p>
 
-                    {(t.rating || t.tiempo) && (
+                    {(t.rating || t.tiempo || t.distanciaKm != null) && (
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         {t.rating && (
                           <div className="flex items-center gap-1 rounded-md border border-outline/10 bg-background px-2 py-0.5 text-[10px] font-bold text-on-surface">
@@ -913,6 +1191,14 @@ const Home = () => {
                         {t.tiempo && (
                           <div className="rounded-md border border-outline/10 bg-background px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
                             {t.tiempo}
+                          </div>
+                        )}
+                        {t.distanciaKm != null && (
+                          <div className="flex items-center gap-1 rounded-md border border-outline/10 bg-background px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
+                            <MapPin size={10} />
+                            {t.distanciaKm < 1
+                              ? `${Math.round(t.distanciaKm * 1000)} m`
+                              : `${t.distanciaKm.toFixed(1)} km`}
                           </div>
                         )}
                       </div>
@@ -944,7 +1230,7 @@ const Home = () => {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 pb-8 sm:grid-cols-2 lg:grid-cols-3">
-              {tiendasOrdenadas.map((t) => (
+              {tiendasVisibles.map((t) => (
                 <Link
                   key={t.slug}
                   to={`/marketplace/tienda/${t.slug}`}
@@ -955,6 +1241,8 @@ const Home = () => {
                     <img
                       src={t.cover || t.logo}
                       alt={t.nombre}
+                      loading="lazy"
+                      decoding="async"
                       className="h-full w-full object-cover"
                       onError={(e) => {
                         e.currentTarget.onerror = null;
@@ -962,10 +1250,31 @@ const Home = () => {
                       }}
                     />
 
-                    <div className="absolute bottom-2 right-2 h-8 w-8 overflow-hidden shadow-md">
+                    {(() => {
+                      const status = getBusinessHoursStatus(
+                        t.businessHours,
+                        horaActual,
+                      );
+                      return status && !status.isOpen ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/65 px-2 text-center text-white">
+                          <span className="text-[10px] font-black uppercase tracking-wider">
+                            Cerrado
+                          </span>
+                          {status.opensAt && (
+                            <span className="text-[10px] font-semibold">
+                              Abre a las {status.opensAt}
+                            </span>
+                          )}
+                        </div>
+                      ) : null;
+                    })()}
+
+                    <div className="absolute bottom-2 right-2 z-10 h-8 w-8 overflow-hidden shadow-md">
                       <img
                         src={t.logo || t.cover}
                         alt={t.nombre}
+                        loading="lazy"
+                        decoding="async"
                         className="h-full w-full rounded-[9px] object-cover"
                         onError={(e) => {
                           e.currentTarget.onerror = null;
@@ -990,7 +1299,10 @@ const Home = () => {
                     <p className="mt-0.5 text-[11px] font-medium text-on-surface-variant">
                       {t.tipo}
                     </p>
-                    {(t.rating || t.tiempo || t.domicilio) && (
+                    {(t.rating ||
+                      t.tiempo ||
+                      t.domicilio ||
+                      t.distanciaKm != null) && (
                       <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[8px] text-white/50 sm:text-[9px]">
                         {t.rating && (
                           <div className="flex items-center gap-0.5">
@@ -1020,11 +1332,43 @@ const Home = () => {
                             </span>
                           </div>
                         )}
+                        {t.distanciaKm != null && (
+                          <div className="flex items-center gap-0.5">
+                            <MapPin size={10} />
+                            <span>
+                              {t.distanciaKm < 1
+                                ? `${Math.round(t.distanciaKm * 1000)} m`
+                                : `${t.distanciaKm.toFixed(1)} km`}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
                 </Link>
               ))}
+            </div>
+          )}
+          {tiendasVisibles.length < tiendasOrdenadas.length && (
+            <div className="flex flex-col items-center gap-2 pb-8">
+              <p className="text-xs text-on-surface-variant">
+                Mostrando {tiendasVisibles.length} de {tiendasOrdenadas.length}{" "}
+                tiendas
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  setCantidadTiendasVisibles((actual) =>
+                    Math.min(
+                      actual + TIENDAS_POR_TANDA,
+                      tiendasOrdenadas.length,
+                    ),
+                  )
+                }
+                className="rounded-full border border-outline/20 bg-surface px-6 py-2.5 text-sm font-bold text-on-surface transition-colors hover:bg-surface/80"
+              >
+                Mostrar más tiendas
+              </button>
             </div>
           )}
         </section>

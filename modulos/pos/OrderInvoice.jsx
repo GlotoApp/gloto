@@ -1,5 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 
 const formatMoney = (value) =>
@@ -93,7 +94,11 @@ const getItemsSubtotal = (order) =>
     0,
   );
 
-export const getInvoiceHtml = (order, business = {}, { receipt = false } = {}) => {
+export const getInvoiceHtml = (
+  order,
+  business = {},
+  { receipt = false, showBackButton = false } = {},
+) => {
   const items = (order.items || [])
     .map((item) => {
       const options = (item.options || [])
@@ -105,12 +110,12 @@ export const getInvoiceHtml = (order, business = {}, { receipt = false } = {}) =
       const subtotal =
         Number(item.subtotal) ||
         Number(item.unit_price || 0) * Number(item.quantity || 0);
-      return `<tr>
-        <td><strong>${escapeHtml(item.product_name)}</strong>${options ? `<small>${escapeHtml(options)}</small>` : ""}${item.notes ? `<small>Nota: ${escapeHtml(item.notes)}</small>` : ""}</td>
+      return `<tr${item.notes ? ' class="invoice-item-with-note"' : ""}>
+        <td><strong>${escapeHtml(item.product_name)}</strong>${options ? `<small>${escapeHtml(options)}</small>` : ""}</td>
         <td class="center">${escapeHtml(quantity)}</td>
         <td class="right">${formatMoney(item.unit_price)}</td>
         <td class="right">${formatMoney(subtotal)}</td>
-      </tr>`;
+      </tr>${item.notes ? `<tr class="invoice-item-note-row"><td colspan="4"><strong>Nota:</strong> ${escapeHtml(item.notes)}</td></tr>` : ""}`;
     })
     .join("");
   const logoUrl = /^https?:\/\//i.test(String(business.logoUrl || ""))
@@ -168,16 +173,38 @@ export const getInvoiceHtml = (order, business = {}, { receipt = false } = {}) =
   const tipPercent = Math.max(0, Number(order.tipPercent || 0));
   const totalWithTip = Number(order.total || 0);
   const totalWithoutTip = Math.max(0, totalWithTip - tipAmount);
-  const paymentMethods = order.paymentMethods?.length
+  const paymentDetails = (Array.isArray(order.paymentMethods)
     ? order.paymentMethods
-        .map((payment) =>
-          displayPaymentMethod(payment.metodo || payment.method),
+    : []
+  )
+    .map((payment) => ({
+      method:
+        typeof payment === "string"
+          ? displayPaymentMethod(payment)
+          : displayPaymentMethod(payment?.metodo || payment?.method),
+      amount:
+        typeof payment === "object" && payment !== null
+          ? Number(payment.monto ?? payment.amount)
+          : Number.NaN,
+    }))
+    .filter((payment) => payment.method);
+  const isSplitPayment =
+    paymentDetails.length > 1 ||
+    ["split", "dividir", "dividido"].includes(
+      String(order.metodoPago || "").trim().toLowerCase(),
+    );
+  const paymentMethodMarkup = isSplitPayment && paymentDetails.length
+    ? `<div class="payment-methods"><p class="payment-method-heading"><strong>Método de pago:</strong> Dividido</p>${paymentDetails
+        .map(
+          (payment) =>
+            `<p class="payment-method-row"><span>${escapeHtml(payment.method)}:</span><strong>${Number.isFinite(payment.amount) ? formatMoney(payment.amount) : ""}</strong></p>`,
         )
-        .filter(Boolean)
-    : [displayPaymentMethod(order.metodoPago)].filter(Boolean);
-  const paymentMethodMarkup = paymentMethods.length
-    ? `<p class="payment-method"><strong>Método${paymentMethods.length > 1 ? "s" : ""} de pago:</strong> ${escapeHtml(paymentMethods.join(" + "))}</p>`
-    : "";
+        .join("")}</div>`
+    : paymentDetails.length
+      ? `<p class="payment-method"><strong>Método de pago</strong> ${escapeHtml(paymentDetails.map((payment) => payment.method).join(" + "))}</p>`
+      : displayPaymentMethod(order.metodoPago)
+        ? `<p class="payment-method"><strong>Método de pago</strong> ${escapeHtml(displayPaymentMethod(order.metodoPago))}</p>`
+        : "";
 
   return `<!doctype html>
     <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -192,10 +219,16 @@ export const getInvoiceHtml = (order, business = {}, { receipt = false } = {}) =
       table{width:100%;border-collapse:collapse;margin-top:12px;break-inside:auto}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}th,td{padding:8px 5px;border-bottom:1px solid #bbb;text-align:left;vertical-align:top}
       th{border-top:1px solid #333;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px}
       td small{display:block;margin-top:3px}.right{text-align:right}.center{text-align:center;white-space:nowrap}
+      .invoice-item-with-note td{border-bottom:0}
+      .invoice-item-note-row td{padding:5px 8px 8px;border-bottom:1px solid #bbb;font-size:11px;line-height:1.4;overflow-wrap:anywhere;word-break:break-word}
       .totals{width:100%;margin:14px 0 0}.totals p{display:flex;justify-content:space-between}
       .totals .before-tip{font-size:14px;font-weight:bold}
       .grand{border-top:1px solid #111;padding-top:8px;font-size:16px;font-weight:bold}
       .payment-method{margin-top:8px;font-family:Arial,sans-serif;font-size:12px;font-weight:bold;text-transform:uppercase}
+      .payment-methods{margin-top:8px;font-family:Arial,sans-serif;font-size:12px}
+      .payment-method-heading{margin-bottom:5px;font-weight:normal}
+      .payment-method-row{display:flex;justify-content:space-between;gap:12px;margin:3px 0}
+      .payment-method-row strong{text-align:right;white-space:nowrap}
       .notes{border-top:1px dashed #555;border-bottom:1px dashed #555;margin-top:16px;padding:12px 0}.footer{text-align:center;margin-top:22px;font-size:10px}
       .map-qr{text-align:center;margin:20px auto 0;break-inside:avoid}.map-qr svg{display:block;width:150px;height:150px;margin:8px auto 0}
       .map-link{display:block;margin:8px auto 0;max-width:100%;font-size:9px;color:#111;overflow-wrap:anywhere;word-break:break-word}
@@ -205,9 +238,10 @@ export const getInvoiceHtml = (order, business = {}, { receipt = false } = {}) =
       .gloto-brand{display:flex;align-items:center;justify-content:center;gap:6px;margin:8px auto 0;color:#111;font-size:14px;font-weight:900;letter-spacing:1px}
       .gloto-logo{display:block!important;flex:0 0 28px;width:28px!important;height:28px!important;max-width:28px;object-fit:contain;margin:0;filter:grayscale(1) invert(1) contrast(1.4);print-color-adjust:exact;-webkit-print-color-adjust:exact}
       .footer{text-align:center;margin-top:10px;font-size:10px}
+      .back-button{position:fixed;top:16px;left:16px;padding:8px 12px;border:1px solid #777;border-radius:6px;background:#fff;color:#111;font:bold 12px Arial,sans-serif;cursor:pointer}
       ${receipt ? "body{padding:3mm}.invoice{width:100%;max-width:none;margin:0}table{table-layout:fixed}th,td{overflow-wrap:anywhere;word-break:break-word}.center{white-space:normal}.map-link{overflow-wrap:anywhere;word-break:break-all}.map-qr,.document-footer{break-inside:auto}" : ""}
-      @media print{body{padding:0}.invoice{max-width:none}.logo{filter:grayscale(1) contrast(1.3);print-color-adjust:exact;-webkit-print-color-adjust:exact}a{color:#111;text-decoration:none}}
-    </style></head><body><main class="invoice">
+      @media print{body{padding:0}.back-button{display:none!important}.invoice{max-width:none}.logo{filter:grayscale(1) contrast(1.3);print-color-adjust:exact;-webkit-print-color-adjust:exact}a{color:#111;text-decoration:none}}
+    </style></head><body>${showBackButton ? '<button class="back-button" type="button" aria-label="Volver a la pestaña anterior" onclick="window.close()">Volver</button>' : ""}<main class="invoice">
       <header class="header">${logoUrl}${business.name ? `<h1>${escapeHtml(business.name)}</h1>` : "<h1>Factura</h1>"}${business.address ? `<p class="muted">${escapeHtml(business.address)}</p>` : ""}${business.phone ? `<p class="muted">Tel. ${escapeHtml(business.phone)}</p>` : ""}
       <p><strong>Factura N.º ${escapeHtml(order.numeroFactura)}</strong></p><p class="muted">${escapeHtml(order.horaIngreso)} · ${escapeHtml(displayDeliveryMethod(order.metodoEntrega))}</p></header>
       <section class="columns"><div><p><strong>Cliente:</strong> ${escapeHtml(order.cliente || "Consumidor final")}</p><p><strong>Teléfono:</strong> ${escapeHtml(order.telefono || "No registrado")}</p></div>
@@ -237,7 +271,10 @@ export const printOrderInvoice = (order, business) => {
           new Promise((resolve) => {
             if (image.complete) {
               if (image.naturalWidth === 0) {
-                console.warn("No se pudo cargar una imagen de la factura:", image.src);
+                console.warn(
+                  "No se pudo cargar una imagen de la factura:",
+                  image.src,
+                );
               }
               resolve();
               return;
@@ -246,7 +283,10 @@ export const printOrderInvoice = (order, business) => {
             image.addEventListener(
               "error",
               () => {
-                console.warn("No se pudo cargar una imagen de la factura:", image.src);
+                console.warn(
+                  "No se pudo cargar una imagen de la factura:",
+                  image.src,
+                );
                 resolve();
               },
               { once: true },
@@ -262,7 +302,9 @@ export const printOrderInvoice = (order, business) => {
   };
 
   printWindow.addEventListener("load", startPrint, { once: true });
-  printWindow.document.write(getInvoiceHtml(order, business));
+  printWindow.document.write(
+    getInvoiceHtml(order, business, { showBackButton: true }),
+  );
   printWindow.document.close();
   window.setTimeout(() => {
     if (printWindow.document.readyState === "complete") startPrint();
@@ -288,9 +330,10 @@ const OrderInvoice = ({ order, business, onClose, onPrint }) => {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-3 py-2 text-xs font-bold text-neutral-400 hover:bg-white/10 hover:text-white"
+            aria-label="Cerrar vista previa"
+            className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white"
           >
-            Cerrar
+            <X size={18} />
           </button>
         </div>
 

@@ -117,14 +117,14 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
       </div>
       {open && (
         <div className="space-y-4 border-t border-white/5 p-4">
-          <div className="flex items-center justify-center gap-4 rounded-lg bg-neutral-800/40 p-4">
+          <div className="flex items-center justify-center gap-3 rounded-lg bg-neutral-800/40 p-4">
             <button
               type="button"
               onClick={() =>
                 setValue(String(Number((numericValue - stockStep).toFixed(3))))
               }
               aria-label="Disminuir stock"
-              className="rounded-lg p-2 text-neutral-500 hover:bg-neutral-700 hover:text-red-400"
+              className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-red-400"
             >
               <ArrowDownRight size={18} />
             </button>
@@ -134,7 +134,9 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
               value={value}
               onChange={(event) => setValue(event.target.value)}
               aria-label={`Stock de ${item.name}`}
-              className="w-28 rounded-lg border border-white/10 bg-neutral-700 px-3 py-2 text-center text-xl font-black outline-none focus:border-violet-500"
+              className={`w-32 appearance-none rounded-lg border border-white/10 bg-neutral-700 px-3 py-2 text-center text-xl font-bold tabular-nums outline-none focus:border-violet-500 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
+                numericValue < 0 ? "text-red-400" : "text-white"
+              }`}
             />
             <button
               type="button"
@@ -142,7 +144,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
                 setValue(String(Number((numericValue + stockStep).toFixed(3))))
               }
               aria-label="Aumentar stock"
-              className="rounded-lg p-2 text-neutral-500 hover:bg-neutral-700 hover:text-emerald-400"
+              className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-emerald-400"
             >
               <ArrowUpRight size={18} />
             </button>

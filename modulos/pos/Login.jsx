@@ -2,6 +2,11 @@ import { useState } from "react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
 import { User, Lock, Loader2, Eye, EyeOff, AlertCircle } from "lucide-react";
+import {
+  getLoginFailureMessage,
+  getLoginLockMessage,
+  useLoginAttemptLimit,
+} from "../../src/hooks/useLoginAttemptLimit";
 
 const Login = () => {
   const [username, setUsername] = useState("");
@@ -9,12 +14,24 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const {
+    isLocked,
+    lockedUntil,
+    recordFailedAttempt,
+    refreshState,
+    resetAttempts,
+  } = useLoginAttemptLimit();
 
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setErrorMsg("");
+    const currentAttemptState = refreshState();
+    if (currentAttemptState.lockedUntil > Date.now()) {
+      setErrorMsg(getLoginLockMessage(currentAttemptState));
+      return;
+    }
     setLoading(true);
 
     try {
@@ -23,9 +40,10 @@ const Login = () => {
         .select("email")
         .eq("username", username.trim());
 
-      if (profileError || !profiles || profiles.length === 0) {
-        setErrorMsg("Usuario o contraseña incorrectos");
-        setLoading(false);
+      if (profileError) throw profileError;
+
+      if (!profiles || profiles.length === 0) {
+        setErrorMsg(getLoginFailureMessage(recordFailedAttempt()));
         return;
       }
 
@@ -37,8 +55,9 @@ const Login = () => {
       });
 
       if (error) {
-        setErrorMsg("Usuario o contraseña incorrectos");
+        setErrorMsg(getLoginFailureMessage(recordFailedAttempt()));
       } else {
+        resetAttempts();
         navigate("/pos");
       }
     } catch (err) {
@@ -185,7 +204,7 @@ const Login = () => {
           border-radius: 12px;
           color: var(--text);
           font-family: system-ui, -apple-system, sans-serif;
-          font-size: 15px;
+          font-size: 16px;
           outline: none;
           transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
         }
@@ -363,9 +382,15 @@ const Login = () => {
             </button>
           </div>
 
-          <button type="submit" className="gloto-button" disabled={loading}>
+          <button
+            type="submit"
+            className="gloto-button"
+            disabled={loading || isLocked}
+          >
             {loading ? (
               <Loader2 className="animate-spin" size={19} />
+            ) : isLocked ? (
+              getLoginLockMessage({ lockedUntil })
             ) : (
               "ENTRAR"
             )}

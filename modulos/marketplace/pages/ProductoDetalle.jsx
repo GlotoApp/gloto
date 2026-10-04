@@ -52,6 +52,7 @@ const ProductoDetalle = ({
   tiendaLogo,
   tiendaSlug,
   onAddedToCart,
+  tiendaAbierta,
 }) => {
   const {
     agregarConVariante,
@@ -68,6 +69,19 @@ const ProductoDetalle = ({
   const [notas, setNotas] = useState("");
   const [cantidad, setCantidad] = useState(1);
   const [cantidadMedida, setCantidadMedida] = useState("1");
+
+  useEffect(() => {
+    const bodyOverflow = document.body.style.overflow;
+    const rootOverflow = document.documentElement.style.overflow;
+
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = rootOverflow;
+    };
+  }, []);
 
   // Única fuente de verdad: las opciones ya vienen cargadas en
   // `producto.variantes` desde la consulta en bloque que hace
@@ -321,6 +335,7 @@ const ProductoDetalle = ({
   const alcanzoStock =
     restanteParaAgregar <= 0 || cantidadAgregada >= restanteParaAgregar;
   const noSePuedeAgregar =
+    !tiendaAbierta ||
     agotado ||
     limiteAlcanzado ||
     cantidadAgregada <= 0 ||
@@ -366,6 +381,7 @@ const ProductoDetalle = ({
         style={{
           flex: 1,
           overflowY: "auto",
+          overscrollBehaviorY: "contain",
           display: "flex",
           flexDirection: "column",
         }}
@@ -936,13 +952,15 @@ const ProductoDetalle = ({
                 : "0 8px 32px rgba(124,58,237,0.45)",
           }}
         >
-          {agotado
-            ? "Agotado"
-            : limiteAlcanzado
-              ? "Máximo alcanzado"
-              : requiereSeleccionarVariante
-                ? "Selecciona una opción"
-                : `Agregar · ${fmt(precioTotal)}`}
+          {!tiendaAbierta
+            ? "Tienda cerrada"
+            : agotado
+              ? "Agotado"
+              : limiteAlcanzado
+                ? "Máximo alcanzado"
+                : requiereSeleccionarVariante
+                  ? "Selecciona una opción"
+                  : `Agregar · ${fmt(precioTotal)}`}
         </button>
       </div>
     </div>,

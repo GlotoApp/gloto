@@ -31,6 +31,7 @@ import {
   supabase,
 } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
+import ImageCropEditor from "./ImageCropEditor";
 import SubLoading from "./SubLoading";
 
 const formatSentenceText = (value) => {
@@ -293,6 +294,10 @@ const Productos = ({ section = "productos" }) => {
     unitId: "",
     image: "",
   });
+  const [initialProductFormSnapshot, setInitialProductFormSnapshot] =
+    useState(null);
+  const [imageEditor, setImageEditor] = useState(null);
+  const [imageEditorError, setImageEditorError] = useState("");
   const [optionGroups, setOptionGroups] = useState([]);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [expandedOptionGroups, setExpandedOptionGroups] = useState(new Set());
@@ -300,9 +305,30 @@ const Productos = ({ section = "productos" }) => {
   const [selectedIngredients, setSelectedIngredients] = useState([]);
   const [expandedIngredientCategories, setExpandedIngredientCategories] =
     useState(new Set());
+  const [inventoryCategories, setInventoryCategories] = useState([]);
+  const [quickInventoryForm, setQuickInventoryForm] = useState(null);
+  const [quickInventoryCategoryLocked, setQuickInventoryCategoryLocked] =
+    useState(false);
+  const [quickInventoryCategoryName, setQuickInventoryCategoryName] =
+    useState("");
+  const [quickInventoryItem, setQuickInventoryItem] = useState({
+    name: "",
+    categoryId: "",
+    unit: "",
+    stock: "",
+  });
+  const [savingQuickInventory, setSavingQuickInventory] = useState(false);
+  const [quickInventoryError, setQuickInventoryError] = useState("");
 
   // Estado inicial del catálogo
   const [products, setProducts] = useState([]);
+
+  useEffect(
+    () => () => {
+      if (imageEditor?.url) URL.revokeObjectURL(imageEditor.url);
+    },
+    [imageEditor?.url],
+  );
 
   const mapProduct = (product, categoryMap) => ({
     ...product,
@@ -349,6 +375,7 @@ const Productos = ({ section = "productos" }) => {
         setCategories(cachedCatalog.categories);
         setProducts(cachedCatalog.products);
         setAvailableIngredients(cachedCatalog.ingredients || []);
+        setInventoryCategories(cachedCatalog.inventoryCategories || []);
         setLoadingProducts(false);
       }
 
@@ -418,6 +445,7 @@ const Productos = ({ section = "productos" }) => {
             category.name,
           ]),
         );
+        setInventoryCategories(ingredientCategoriesData || []);
         const normalizedIngredients = (ingredientsData || []).map(
           (ingredient) => ({
             ...ingredient,
@@ -431,6 +459,7 @@ const Productos = ({ section = "productos" }) => {
           categoryRecords: records,
           products: normalizedProducts,
           ingredients: normalizedIngredients,
+          inventoryCategories: ingredientCategoriesData || [],
         });
       }
 
@@ -440,17 +469,304 @@ const Productos = ({ section = "productos" }) => {
     loadProducts();
   }, [user]);
 
-  const groupedIngredients = useMemo(() => {
-    return availableIngredients.reduce((groups, ingredient) => {
-      const categoryName = ingredient.categoryName || "Sin categoría";
-      groups[categoryName] = groups[categoryName] || [];
-      groups[categoryName].push(ingredient);
-      return groups;
-    }, {});
-  }, [availableIngredients]);
+  const inventoryIngredientSections = useMemo(() => {
+    const sectionsById = new Map();
+    const sections = inventoryCategories.map((category) => {
+      const section = {
+        id: category.id,
+        name: category.name,
+        ingredients: [],
+      };
+      sectionsById.set(category.id, section);
+      return section;
+    });
+    const uncategorized = {
+      id: "uncategorized",
+      name: "Sin categoría",
+      ingredients: [],
+    };
+
+    availableIngredients.forEach((ingredient) => {
+      const section =
+        sectionsById.get(ingredient.category_id) || uncategorized;
+      section.ingredients.push(ingredient);
+    });
+
+    if (uncategorized.ingredients.length > 0) {
+      sections.push(uncategorized);
+    }
+
+    return sections;
+  }, [availableIngredients, inventoryCategories]);
+  const selectedIngredientsById = useMemo(
+    () =>
+      new Map(
+        selectedIngredients.map((item) => [item.inventoryItemId, item]),
+      ),
+    [selectedIngredients],
+  );
+
+  const saveInventoryCategoryQuick = async (event) => {
+    event.preventDefault();
+    const name = String(quickInventoryCategoryName || "")
+      .trim()
+      .toUpperCase();
+    if (!businessId || !name || savingQuickInventory) return;
+
+    const existing = inventoryCategories.find(
+      (category) => category.name.trim().toUpperCase() === name,
+    );
+    if (existing) {
+      setExpandedIngredientCategories((current) =>
+        new Set(current).add(existing.id),
+      );
+      setQuickInventoryError("");
+      setQuickInventoryForm(null);
+      setQuickInventoryCategoryName("");
+      return;
+    }
+
+    setSavingQuickInventory(true);
+    setQuickInventoryError("");
+    let result;
+    try {
+      result = await supabase
+        .from("inventory_categories")
+        .insert({ business_id: businessId, name })
+        .select("id,name")
+        .single();
+    } catch (error) {
+      console.error("Error creando categoría rápida de inventario:", error);
+      setQuickInventoryError(
+        "No se pudo conectar para crear la categoría. Intenta nuevamente.",
+      );
+      setSavingQuickInventory(false);
+      return;
+    }
+    const { data, error } = result;
+
+    if (error) {
+      console.error("Error creando categoría rápida de inventario:", error);
+      setQuickInventoryError(
+        error.code === "23505"
+          ? "Esa categoría ya existe."
+          : "No se pudo crear la categoría. Intenta nuevamente.",
+      );
+      setSavingQuickInventory(false);
+      return;
+    }
+
+    const nextCategories = [...inventoryCategories, data].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    setInventoryCategories(nextCategories);
+    setExpandedIngredientCategories((current) =>
+      new Set(current).add(data.id),
+    );
+    const cachedCatalog = readCatalogCache(businessId);
+    if (cachedCatalog) {
+      writeCatalogCache(businessId, {
+        ...cachedCatalog,
+        inventoryCategories: nextCategories,
+      });
+    }
+    setQuickInventoryCategoryName("");
+    setQuickInventoryError("");
+    setQuickInventoryCategoryLocked(false);
+    setQuickInventoryForm(null);
+    setSavingQuickInventory(false);
+  };
+
+  const saveInventoryItemQuick = async (event) => {
+    event.preventDefault();
+    const name = String(quickInventoryItem.name || "")
+      .trim()
+      .toUpperCase();
+    const unit = String(quickInventoryItem.unit || "").trim().toUpperCase();
+    const initialStock = Number(quickInventoryItem.stock);
+    if (
+      !businessId ||
+      !name ||
+      !quickInventoryItem.categoryId ||
+      !unit ||
+      quickInventoryItem.stock === "" ||
+      !Number.isFinite(initialStock) ||
+      initialStock < 0
+    ) {
+      setQuickInventoryError(
+        "Completa el nombre, la categoría, la unidad y un stock válido.",
+      );
+      return;
+    }
+    if (savingQuickInventory) return;
+
+    setSavingQuickInventory(true);
+    setQuickInventoryError("");
+    let result;
+    try {
+      result = await supabase
+        .from("inventory_items")
+        .insert({
+          business_id: businessId,
+          name,
+          category_id: quickInventoryItem.categoryId,
+          stock: 0,
+          unit,
+          min_stock: 10,
+          price: 0,
+          is_active: true,
+        })
+        .select("id,name,unit,stock,category_id")
+        .single();
+    } catch (error) {
+      console.error("Error creando insumo rápido:", error);
+      setQuickInventoryError(
+        "No se pudo conectar para crear el insumo. Intenta nuevamente.",
+      );
+      setSavingQuickInventory(false);
+      return;
+    }
+    const { data, error } = result;
+
+    if (error) {
+      console.error("Error creando insumo rápido:", error);
+      setQuickInventoryError(
+        error.code === "23505"
+          ? "Ya existe un insumo con ese nombre."
+          : "No se pudo crear el insumo. Intenta nuevamente.",
+      );
+      setSavingQuickInventory(false);
+      return;
+    }
+
+    let savedStock = 0;
+    if (initialStock > 0) {
+      let adjustment;
+      try {
+        adjustment = await supabase.rpc("adjust_inventory_stock", {
+          p_item_id: data.id,
+          p_quantity_delta: initialStock,
+          p_reason: "initial_stock",
+          p_notes: "Stock inicial desde creación rápida de insumo",
+        });
+      } catch (stockError) {
+        console.error("Error registrando stock inicial del insumo:", stockError);
+        adjustment = {
+          error: new Error("No se pudo registrar el stock inicial."),
+        };
+      }
+
+      if (adjustment.error) {
+        console.error(
+          "Error registrando stock inicial del insumo:",
+          adjustment.error,
+        );
+        try {
+          const { error: rollbackError } = await supabase.rpc(
+            "delete_inventory_item_cascade",
+            { p_item_id: data.id },
+          );
+          if (rollbackError) throw rollbackError;
+        } catch (rollbackError) {
+          console.error(
+            "No se pudo revertir el insumo sin stock inicial:",
+            rollbackError,
+          );
+          setQuickInventoryError(
+            "El insumo se creó con stock 0, pero no se pudo registrar ni revertir el stock inicial. Revisa el inventario.",
+          );
+          setSavingQuickInventory(false);
+          return;
+        }
+        setQuickInventoryError(
+          "No se pudo registrar el stock inicial; el insumo no se creó. Intenta nuevamente.",
+        );
+        setSavingQuickInventory(false);
+        return;
+      }
+      const adjustmentData = Array.isArray(adjustment.data)
+        ? adjustment.data[0]
+        : adjustment.data;
+      savedStock = Number(adjustmentData?.stock ?? initialStock);
+    }
+
+    const categoryName =
+      inventoryCategories.find(
+        (category) => category.id === data.category_id,
+      )?.name || "Sin categoría";
+    const nextIngredients = [...availableIngredients, {
+      ...data,
+      stock: savedStock,
+      categoryName,
+    }].sort((a, b) => a.name.localeCompare(b.name));
+    setAvailableIngredients(nextIngredients);
+    setExpandedIngredientCategories((current) =>
+      new Set(current).add(data.category_id),
+    );
+    setSelectedIngredients((current) => [
+      ...current,
+      { inventoryItemId: data.id, quantity: 1 },
+    ]);
+    const cachedCatalog = readCatalogCache(businessId);
+    if (cachedCatalog) {
+      writeCatalogCache(businessId, {
+        ...cachedCatalog,
+        ingredients: nextIngredients,
+        inventoryCategories,
+      });
+    }
+    setQuickInventoryItem({
+      name: "",
+      categoryId: data.category_id,
+      unit,
+      stock: "",
+    });
+    setQuickInventoryError("");
+    setQuickInventoryForm(null);
+    setQuickInventoryCategoryLocked(false);
+    setSavingQuickInventory(false);
+  };
 
   const selectedUnit = units.find((unit) => unit.id === formData.unitId);
+  const editingProduct = products.find((product) => product.id === editingId);
   const stockStep = selectedUnit?.allows_fraction ? 0.1 : 1;
+  const getProductFormSnapshot = (data, groups, ingredients) =>
+    JSON.stringify({
+      product: {
+        name: formatProductNameForStorage(data.name),
+        categoryId: data.categoryId || "",
+        price: Number(data.price) || 0,
+        description: formatStoredText(data.description),
+        stock: Number(data.stock) || 0,
+        minStock: Number(data.minStock) || 0,
+        unitId: data.unitId || "",
+        image: data.image || "",
+      },
+      optionGroups: groups.map((group, index) => ({
+        name: formatStoredText(group.name),
+        description: formatStoredText(group.description),
+        is_required: Boolean(group.is_required),
+        selection_type: group.selection_type || "single",
+        order_index: index + 1,
+        items: group.items.map((item, itemIndex) => ({
+          nombre: formatStoredText(item.nombre),
+          precio_extra: Number(item.precio_extra) || 0,
+          order_index: itemIndex + 1,
+        })),
+      })),
+      selectedIngredients: [...ingredients]
+        .map((ingredient) => ({
+          inventoryItemId: ingredient.inventoryItemId,
+          quantity: Number(ingredient.quantity),
+        }))
+        .sort((a, b) =>
+          a.inventoryItemId.localeCompare(b.inventoryItemId),
+        ),
+    });
+  const hasProductFormChanges =
+    initialProductFormSnapshot !== null &&
+    getProductFormSnapshot(formData, optionGroups, selectedIngredients) !==
+      initialProductFormSnapshot;
 
   // ========== FUNCIONES PARA PRODUCTOS ==========
 
@@ -519,9 +835,14 @@ const Productos = ({ section = "productos" }) => {
   // Abrir modal para crear nuevo
   const handleNewProduct = () => {
     setEditingId(null);
+    setImageEditor(null);
+    setImageEditorError("");
+    setQuickInventoryForm(null);
+    setQuickInventoryCategoryLocked(false);
+    setQuickInventoryError("");
     setQuickCategoryOpen(false);
     setQuickCategoryName("");
-    setFormData({
+    const newFormData = {
       name: "",
       categoryId: categoryRecords[0]?.id || "",
       category: categoryRecords[0]?.name || "",
@@ -532,10 +853,12 @@ const Productos = ({ section = "productos" }) => {
       unitId:
         units.find((unit) => unit.name === "UNIDAD")?.id || units[0]?.id || "",
       image: "",
-    });
+    };
+    setFormData(newFormData);
     setOptionGroups([]);
     setSelectedIngredients([]);
     setOptionsLoading(false);
+    setInitialProductFormSnapshot(getProductFormSnapshot(newFormData, [], []));
     setIsModalOpen(true);
   };
 
@@ -560,6 +883,8 @@ const Productos = ({ section = "productos" }) => {
         itemsError: itemsResponse.error,
       });
       setOptionGroups([]);
+      setOptionsLoading(false);
+      return null;
     } else {
       const itemsByGroup = (itemsResponse.data || []).reduce(
         (grouped, item) => {
@@ -588,16 +913,22 @@ const Productos = ({ section = "productos" }) => {
       }));
       setOptionGroups(loadedGroups);
       setExpandedOptionGroups(new Set());
+      setOptionsLoading(false);
+      return loadedGroups;
     }
-    setOptionsLoading(false);
   };
 
   // Abrir modal para editar
   const handleEditProduct = (product) => {
     setEditingId(product.id);
+    setImageEditor(null);
+    setImageEditorError("");
+    setQuickInventoryForm(null);
+    setQuickInventoryCategoryLocked(false);
+    setQuickInventoryError("");
     setQuickCategoryOpen(false);
     setQuickCategoryName("");
-    setFormData({
+    const editFormData = {
       name: formatProductName(product.name),
       categoryId: product.categoryId,
       category: product.category,
@@ -611,17 +942,38 @@ const Productos = ({ section = "productos" }) => {
         units[0]?.id ||
         "",
       image: product.image,
-    });
+    };
+    setFormData(editFormData);
     setOptionGroups([]);
+    setSelectedIngredients([]);
     setExpandedOptionGroups(new Set());
-    loadProductIngredients(product.id);
-    loadProductOptions(product.id);
+    setInitialProductFormSnapshot(null);
+    Promise.all([
+      loadProductIngredients(product.id),
+      loadProductOptions(product.id),
+    ]).then(([loadedIngredients, loadedGroups]) => {
+      if (!loadedIngredients || !loadedGroups) {
+        alert(
+          "No se pudieron cargar los datos actuales del producto. No podrás guardarlo hasta volver a abrirlo.",
+        );
+        return;
+      }
+      setInitialProductFormSnapshot(
+        getProductFormSnapshot(editFormData, loadedGroups, loadedIngredients),
+      );
+    });
     setIsModalOpen(true);
   };
 
   const closeProductModal = () => {
     setIsModalOpen(false);
     setEditingId(null);
+    setInitialProductFormSnapshot(null);
+    setImageEditor(null);
+    setImageEditorError("");
+    setQuickInventoryForm(null);
+    setQuickInventoryCategoryLocked(false);
+    setQuickInventoryError("");
     setQuickCategoryOpen(false);
     setQuickCategoryName("");
     navigate(location.pathname, { replace: true, state: null });
@@ -648,15 +1000,15 @@ const Productos = ({ section = "productos" }) => {
     if (error) {
       console.error("Error cargando insumos del producto:", error);
       setSelectedIngredients([]);
-      return;
+      return null;
     }
 
-    setSelectedIngredients(
-      (data || []).map((ingredient) => ({
-        inventoryItemId: ingredient.inventory_item_id,
-        quantity: Number(ingredient.quantity || 1),
-      })),
-    );
+    const loadedIngredients = (data || []).map((ingredient) => ({
+      inventoryItemId: ingredient.inventory_item_id,
+      quantity: Number(ingredient.quantity || 1),
+    }));
+    setSelectedIngredients(loadedIngredients);
+    return loadedIngredients;
   };
 
   const toggleProductIngredient = (inventoryItemId) => {
@@ -870,11 +1222,67 @@ const Productos = ({ section = "productos" }) => {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setFormData((current) => ({ ...current, image: event.target?.result }));
-    };
-    reader.readAsDataURL(file);
+    setImageEditorError("");
+    setImageEditor({
+      file,
+      type: "product",
+      url: URL.createObjectURL(file),
+    });
+  };
+
+  const applyProductImageCrop = async (crop) => {
+    if (!imageEditor) return;
+
+    try {
+      const image = new window.Image();
+      image.src = imageEditor.url;
+      await image.decode();
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 1024;
+      canvas.height = 1024;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("No se pudo preparar el recorte.");
+
+      context.drawImage(
+        image,
+        crop.x * image.naturalWidth,
+        crop.y * image.naturalHeight,
+        crop.width * image.naturalWidth,
+        crop.height * image.naturalHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
+
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob(
+          (result) =>
+            result
+              ? resolve(result)
+              : reject(new Error("No se pudo generar la imagen recortada.")),
+          "image/webp",
+          0.9,
+        );
+      });
+      const reader = new FileReader();
+      const dataUrl = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () =>
+          reject(new Error("No se pudo preparar la imagen del producto."));
+        reader.readAsDataURL(blob);
+      });
+
+      setFormData((current) => ({ ...current, image: dataUrl }));
+      setImageEditor(null);
+      setImageEditorError("");
+    } catch (error) {
+      console.error("Error preparando la imagen del producto:", error);
+      setImageEditorError(
+        error.message || "No se pudo preparar la imagen del producto.",
+      );
+    }
   };
 
   // Guardar producto
@@ -1275,6 +1683,113 @@ const Productos = ({ section = "productos" }) => {
   };
 
   const categoriesList = ["todos", ...new Set(products.map((p) => p.category))];
+
+  const renderQuickInventoryItemForm = (categoryId, categoryName) => {
+    if (
+      quickInventoryForm !== "item" ||
+      !quickInventoryCategoryLocked ||
+      quickInventoryItem.categoryId !== categoryId
+    ) {
+      return null;
+    }
+
+    const allowsFraction = units.find(
+      (unit) =>
+        unit.name.toUpperCase() === quickInventoryItem.unit.toUpperCase(),
+    )?.allows_fraction;
+
+    return (
+      <form
+        onSubmit={saveInventoryItemQuick}
+        className="mt-3 space-y-3 rounded-xl border border-white/5 bg-neutral-900/60 p-3"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[10px] font-black uppercase tracking-wide text-white">
+            Nuevo insumo · {categoryName}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setQuickInventoryForm(null);
+              setQuickInventoryCategoryLocked(false);
+              setQuickInventoryError("");
+            }}
+            aria-label="Cancelar creación de insumo"
+            className="rounded-md p-1 text-neutral-500 hover:bg-white/10 hover:text-white"
+          >
+            <X size={15} />
+          </button>
+        </div>
+        <input
+          autoFocus
+          value={quickInventoryItem.name}
+          onChange={(event) =>
+            setQuickInventoryItem((current) => ({
+              ...current,
+              name: event.target.value,
+            }))
+          }
+          placeholder="Nombre del insumo"
+          maxLength={100}
+          required
+          className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2.5 text-xs text-white outline-none placeholder:text-neutral-600 focus:border-emerald-500/50"
+        />
+        <p className="text-[9px] font-bold uppercase tracking-wide text-neutral-400">
+          Unidad y stock inicial
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <select
+            value={quickInventoryItem.unit}
+            required
+            onChange={(event) =>
+              setQuickInventoryItem((current) => ({
+                ...current,
+                unit: event.target.value,
+              }))
+            }
+            className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2.5 text-xs text-white outline-none focus:border-emerald-500/50"
+          >
+            <option value="">Seleccionar unidad</option>
+            {units.map((unit) => (
+              <option key={unit.id} value={unit.name}>
+                {unit.name}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min="0"
+            step={allowsFraction ? "0.001" : "1"}
+            value={quickInventoryItem.stock}
+            onChange={(event) =>
+              setQuickInventoryItem((current) => ({
+                ...current,
+                stock: event.target.value,
+              }))
+            }
+            placeholder="Stock inicial"
+            required
+            aria-label="Stock inicial del insumo"
+            className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2.5 text-xs text-white outline-none placeholder:text-neutral-600 focus:border-emerald-500/50"
+          />
+        </div>
+        {quickInventoryError && (
+          <p role="alert" className="text-[10px] text-amber-300">
+            {quickInventoryError}
+          </p>
+        )}
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={savingQuickInventory}
+            className="rounded-lg bg-emerald-600 px-3 py-2 text-[9px] font-black uppercase text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-50"
+          >
+            {savingQuickInventory ? "Guardando..." : "Crear insumo"}
+          </button>
+        </div>
+      </form>
+    );
+  };
 
   // ========== RENDERIZADO CONDICIONAL ==========
 
@@ -1767,7 +2282,13 @@ const Productos = ({ section = "productos" }) => {
                             <span className="shrink-0 text-[8px] font-bold uppercase tracking-wider text-neutral-400 sm:text-[9px]">
                               {unitName}
                             </span>
-                            <span className="min-w-0 truncate text-base font-black leading-tight tabular-nums sm:text-lg">
+                            <span
+                              className={`min-w-0 truncate text-base font-black leading-tight tabular-nums sm:text-lg ${
+                                Number(item.stock) < 0
+                                  ? "text-red-400"
+                                  : "text-white"
+                              }`}
+                            >
                               {stockLabel}
                             </span>
                           </span>
@@ -1840,13 +2361,13 @@ const Productos = ({ section = "productos" }) => {
 
         {/* MODAL DE EDICIÓN / NUEVO PRODUCTO */}
         {isModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl overflow-y-auto">
-            <div className="min-h-screen w-full bg-neutral-900 overflow-hidden flex flex-col">
+          <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-black/95 backdrop-blur-xl">
+            <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-neutral-900">
               {/* Header Premium - Responsive */}
               <div className="relative overflow-hidden flex-shrink-0">
-                <div className="relative mx-auto flex w-full max-w-7xl items-start justify-between gap-3 border-b border-white/10 px-4 py-5 sm:px-8 sm:py-3 md:px-12">
+                <div className="relative mx-auto flex w-full max-w-7xl items-center justify-between gap-3 border-b border-white/5 px-4 py-4 sm:px-6 md:px-8 lg:px-10">
                   <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0">
-                    <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-500/10">
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-violet-500/10">
                       {editingId ? (
                         <Edit3
                           size={20}
@@ -1860,7 +2381,7 @@ const Productos = ({ section = "productos" }) => {
                       )}
                     </div>
                     <div className="min-w-0">
-                      <h2 className="text-xl font-black uppercase leading-tight tracking-tight text-white sm:text-3xl">
+                      <h2 className="text-lg font-bold leading-tight tracking-tight text-white sm:text-2xl">
                         {editingId ? "Editar" : "Crear"} Producto
                       </h2>
                     </div>
@@ -1875,11 +2396,11 @@ const Productos = ({ section = "productos" }) => {
               </div>
 
               {/* Contenido Principal - Responsive */}
-              <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 overflow-y-auto p-4 sm:p-8 md:flex-row md:gap-10 md:p-12">
+              <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-5 overflow-y-auto p-4 sm:gap-6 sm:p-6 md:flex-row md:items-start md:gap-8 md:p-8 lg:p-10">
                 {/* Panel Izquierdo: Imagen y Estado */}
-                <div className="flex w-full flex-shrink-0 flex-col gap-4 rounded-3xl border border-white/10 bg-black/20 p-4 sm:gap-6 sm:p-6 md:w-[31%]">
-                  <div className="border-b border-white/10 pb-4">
-                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-500">
+                <div className="flex w-full flex-shrink-0 flex-col gap-5 rounded-2xl border border-white/5 bg-neutral-950/40 p-4 sm:p-5 md:w-[30%] md:max-w-sm">
+                  <div className="border-b border-white/5 pb-3">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
                       Presentación
                     </p>
                     <p className="mt-1 text-xs text-neutral-400">
@@ -1889,11 +2410,11 @@ const Productos = ({ section = "productos" }) => {
                   {/* Imagen - Premium */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <label className="text-[9px] sm:text-[10px] font-black uppercase text-violet-400 tracking-widest">
+                      <label className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                         Imagen
                       </label>
                     </div>
-                    <div className="relative group cursor-pointer rounded-2xl sm:rounded-3xl overflow-hidden bg-gradient-to-br from-neutral-700 to-neutral-800 border border-violet-500/20 hover:border-violet-500/50 transition-all aspect-square flex items-center justify-center flex-col gap-3 sm:gap-4 text-neutral-500 hover:text-white shadow-xl sm:shadow-2xl shadow-violet-500/5 hover:shadow-violet-500/20">
+                    <div className="group relative flex aspect-[4/3] cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border border-white/10 bg-neutral-800 text-neutral-400 transition-colors hover:border-white/20 hover:text-white sm:aspect-square">
                       {formData.image ? (
                         <>
                           <img
@@ -1903,8 +2424,8 @@ const Productos = ({ section = "productos" }) => {
                             alt="Producto"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent group-hover:from-black/40 transition-all" />
-                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                            <label className="p-2 sm:p-3 bg-violet-500/30 hover:bg-violet-500/50 border border-violet-400/30 rounded-lg sm:rounded-2xl inline-flex items-center justify-center cursor-pointer transition-all">
+                          <div className="absolute inset-x-0 bottom-0 flex flex-row items-center justify-center gap-3 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-3 pb-3 pt-10 opacity-100 transition-opacity md:inset-0 md:flex-col md:bg-transparent md:p-0 md:opacity-0 md:group-hover:opacity-100">
+                            <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-white/15 bg-neutral-900/80 p-2.5 transition-colors hover:bg-neutral-800">
                               <Camera
                                 size={20}
                                 strokeWidth={1}
@@ -1918,8 +2439,10 @@ const Productos = ({ section = "productos" }) => {
                               />
                             </label>
                             <button
+                              type="button"
                               onClick={handleDeleteImage}
-                              className="p-2 sm:p-3 bg-red-500/30 hover:bg-red-500/50 border border-red-400/30 rounded-lg sm:rounded-2xl inline-flex items-center justify-center cursor-pointer transition-all"
+                              aria-label="Eliminar imagen del producto"
+                              className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-white/15 bg-neutral-900/80 p-2.5 text-neutral-300 transition-colors hover:border-red-400/30 hover:bg-red-500/15 hover:text-red-300"
                               title="Eliminar imagen"
                             >
                               <Trash2
@@ -1952,7 +2475,7 @@ const Productos = ({ section = "productos" }) => {
                           <input
                             type="file"
                             accept="image/jpeg,image/png,image/webp"
-                            className="absolute inset-0 opacity-0 cursor-pointer"
+                            className="absolute inset-0 z-20 cursor-pointer opacity-0"
                             onChange={handleProductImageFile}
                           />
                         </>
@@ -1962,46 +2485,42 @@ const Productos = ({ section = "productos" }) => {
 
                   {/* Estado - Switch Premium */}
                   {editingId && (
-                    <div className="space-y-3">
+                    <div className="space-y-2.5">
                       <div className="flex items-center gap-2">
                         <label className="text-[9px] sm:text-[10px] font-black uppercase text-violet-400 tracking-widest">
                           Estado
                         </label>
                       </div>
-                      <div className="">
-                        <div className="grid grid-cols-2 gap-1.5 sm:gap-3">
+                      <div>
+                        <div className="grid grid-cols-1 gap-1.5">
                           {/* Disponibilidad */}
-                          <div className="flex flex-col justify-center items-center gap-1.5">
-                            <span className="text-[7px] sm:text-[7px] font-bold text-neutral-500 uppercase tracking-widest ">
+                          <div className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.03] px-3 py-2.5">
+                            <span className="text-[9px] font-semibold uppercase tracking-wider text-neutral-400">
                               Disponibilidad
                             </span>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2.5">
                               <span
-                                className={`text-[14px] sm:text-xs font-black ${
-                                  !products.find((p) => p.id === editingId)
-                                    ?.isSoldOut
+                                className={`text-[11px] font-semibold ${
+                                  !editingProduct?.isSoldOut
                                     ? "text-emerald-400"
                                     : "text-red-400"
                                 }`}
                               >
-                                {products.find((p) => p.id === editingId)
-                                  ?.isSoldOut
+                                {editingProduct?.isSoldOut
                                   ? "Agotado"
                                   : "Disponible"}
                               </span>
                               <button
                                 onClick={() => handleToggleSoldOut(editingId)}
-                                className={`relative inline-flex h-6 sm:h-7 w-10 sm:w-12 items-center rounded-full transition-all cursor-pointer shadow-lg ${
-                                  !products.find((p) => p.id === editingId)
-                                    ?.isSoldOut
-                                    ? "bg-emerald-500 shadow-emerald-500/50"
-                                    : "bg-red-500 shadow-red-500/50"
+                                className={`relative inline-flex h-6 w-10 items-center rounded-full transition-colors ${
+                                  !editingProduct?.isSoldOut
+                                    ? "bg-emerald-500"
+                                    : "bg-red-500"
                                 }`}
                               >
                                 <span
-                                  className={`inline-block h-4 sm:h-5 w-4 sm:w-5 transform rounded-full bg-white transition-all shadow-md ${
-                                    !products.find((p) => p.id === editingId)
-                                      ?.isSoldOut
+                                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                    !editingProduct?.isSoldOut
                                       ? "translate-x-5 sm:translate-x-5.5"
                                       : "translate-x-0.5 sm:translate-x-1"
                                   }`}
@@ -2011,38 +2530,34 @@ const Productos = ({ section = "productos" }) => {
                           </div>
 
                           {/* Archivado */}
-                          <div className="flex flex-col justify-center items-center gap-1.5">
-                            <span className="text-[7px] sm:text-[7px] font-bold text-neutral-500 uppercase tracking-widest">
+                          <div className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.03] px-3 py-2.5">
+                            <span className="text-[9px] font-semibold uppercase tracking-wider text-neutral-400">
                               Archivado
                             </span>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2.5">
                               <span
-                                className={`text-[14px] sm:text-xs font-black ${
-                                  products.find((p) => p.id === editingId)
-                                    ?.isActive
+                                className={`text-[11px] font-semibold ${
+                                  editingProduct?.isActive
                                     ? "text-slate-400"
                                     : "text-violet-400"
                                 }`}
                               >
-                                {products.find((p) => p.id === editingId)
-                                  ?.isActive
+                                {editingProduct?.isActive
                                   ? "No"
                                   : "Sí"}
                               </span>
                               <button
                                 onClick={() => handleToggleArchived(editingId)}
                                 aria-label="Cambiar estado de archivado"
-                                className={`relative inline-flex h-6 sm:h-7 w-10 sm:w-12 items-center rounded-full transition-all cursor-pointer shadow-lg ${
-                                  products.find((p) => p.id === editingId)
-                                    ?.isActive
-                                    ? "bg-neutral-700 shadow-neutral-700/40"
-                                    : "bg-violet-500 shadow-violet-500/50"
+                                className={`relative inline-flex h-6 w-10 items-center rounded-full transition-colors ${
+                                  editingProduct?.isActive
+                                    ? "bg-neutral-700"
+                                    : "bg-violet-500"
                                 }`}
                               >
                                 <span
-                                  className={`inline-block h-4 sm:h-5 w-4 sm:w-5 transform rounded-full bg-white transition-all shadow-md ${
-                                    products.find((p) => p.id === editingId)
-                                      ?.isActive
+                                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                    editingProduct?.isActive
                                       ? "translate-x-0.5 sm:translate-x-1"
                                       : "translate-x-5 sm:translate-x-5.5"
                                   }`}
@@ -2055,24 +2570,24 @@ const Productos = ({ section = "productos" }) => {
                     </div>
                   )}
 
-                  <div className="space-y-2 border-t border-white/10 pt-4">
-                    <label className="text-[9px] font-black uppercase tracking-widest text-emerald-300">
+                  <div className="space-y-2 border-t border-white/5 pt-4">
+                    <label className="text-[9px] font-semibold uppercase tracking-wider text-neutral-400">
                       Stock del producto ({selectedUnit?.name || "UNIDAD"})
                     </label>
-                    <div className="flex items-center justify-center gap-4 rounded-xl bg-neutral-800/40 p-3">
+                    <div className="flex items-center justify-center gap-3 rounded-xl bg-white/[0.03] p-2.5">
                       <button
                         type="button"
                         onClick={() =>
-                          setFormData({
-                            ...formData,
+                          setFormData((current) => ({
+                            ...current,
                             stock: Math.max(
                               0,
-                              Number(formData.stock || 0) - stockStep,
+                              Number(current.stock || 0) - stockStep,
                             ),
-                          })
+                          }))
                         }
                         aria-label="Disminuir stock del producto"
-                        className="rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-red-400"
+                        className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/5 hover:text-red-400"
                       >
                         <ArrowDownRight size={18} />
                       </button>
@@ -2084,19 +2599,21 @@ const Productos = ({ section = "productos" }) => {
                         onChange={(e) =>
                           setFormData({ ...formData, stock: e.target.value })
                         }
-                        className="w-28 rounded-lg border border-white/10 bg-neutral-700 px-3 py-2 text-center text-xl font-black outline-none focus:border-emerald-500/50"
+                        className={`w-32 appearance-none rounded-lg border border-white/10 bg-neutral-900/70 px-3 py-2 text-center text-lg font-bold tabular-nums outline-none transition focus:border-violet-400/50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
+                          Number(formData.stock) < 0 ? "text-red-400" : "text-white"
+                        }`}
                         aria-label="Stock del producto"
                       />
                       <button
                         type="button"
                         onClick={() =>
-                          setFormData({
-                            ...formData,
-                            stock: Number(formData.stock || 0) + stockStep,
-                          })
+                          setFormData((current) => ({
+                            ...current,
+                            stock: Number(current.stock || 0) + stockStep,
+                          }))
                         }
                         aria-label="Aumentar stock del producto"
-                        className="rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-emerald-400"
+                        className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/5 hover:text-emerald-400"
                       >
                         <ArrowUpRight size={18} />
                       </button>
@@ -2105,10 +2622,10 @@ const Productos = ({ section = "productos" }) => {
                       Existencias disponibles en {selectedUnit?.name || "UNIDAD"}.
                     </p>
                   </div>
-                  <div className="space-y-2 border-t border-white/10 pt-4">
+                  <div className="space-y-2 border-t border-white/5 pt-4">
                     <label
                       htmlFor="product-min-stock"
-                      className="text-[9px] font-black uppercase tracking-widest text-amber-300"
+                      className="text-[9px] font-semibold uppercase tracking-wider text-neutral-400"
                     >
                       Avisar con stock igual o menor a ({selectedUnit?.name || "UNIDAD"})
                     </label>
@@ -2121,7 +2638,7 @@ const Productos = ({ section = "productos" }) => {
                       onChange={(e) =>
                         setFormData({ ...formData, minStock: e.target.value })
                       }
-                      className="w-full rounded-lg border border-white/10 bg-neutral-700 px-3 py-2 text-sm font-bold text-white outline-none focus:border-amber-400/50"
+                      className="w-full rounded-lg border border-white/10 bg-neutral-900/70 px-3 py-2 text-sm font-semibold text-white outline-none transition focus:border-violet-400/50"
                       aria-label="Umbral de stock bajo del producto"
                     />
                     <p className="text-[9px] text-neutral-500">
@@ -2131,9 +2648,9 @@ const Productos = ({ section = "productos" }) => {
                 </div>
 
                 {/* Panel Derecho: Formulario */}
-                <div className="flex min-w-0 flex-1 flex-col gap-5 sm:gap-7">
-                  <div className="border-b border-white/10 pb-4">
-                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-300">
+                <div className="flex min-w-0 flex-1 flex-col gap-5 sm:gap-6">
+                  <div className="border-b border-white/5 pb-3">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
                       01 · Información principal
                     </p>
                     <p className="mt-1 text-xs text-neutral-500">
@@ -2143,7 +2660,7 @@ const Productos = ({ section = "productos" }) => {
                   {/* Nombre - Premium */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <label className="text-[9px] sm:text-[10px] font-black uppercase text-violet-400 tracking-widest">
+                      <label className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                         Nombre
                       </label>
                     </div>
@@ -2157,17 +2674,52 @@ const Productos = ({ section = "productos" }) => {
                             name: formatProductName(e.target.value),
                           })
                         }
-                        className="w-full bg-gradient-to-r from-neutral-700/30 to-neutral-800/30 border border-neutral-600/50 group-focus-within:border-violet-500/50 rounded-lg sm:rounded-2xl py-3 sm:py-4 px-4 sm:px-5 text-xs sm:text-sm font-bold tracking-wide focus:outline-none transition-all placeholder:text-neutral-600"
+                        className="w-full rounded-xl border border-white/10 bg-neutral-800/50 px-4 py-3 text-sm font-medium text-white outline-none transition-colors placeholder:text-neutral-500 focus:border-violet-400/50 focus:bg-neutral-800"
                         placeholder="EJ: BUÑUELO QUESO"
                       />
                     </div>
                   </div>
 
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="product-unit"
+                      className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400"
+                    >
+                      Unidad de venta
+                    </label>
+                    <select
+                      id="product-unit"
+                      value={formData.unitId}
+                      onChange={(event) =>
+                        setFormData({
+                          ...formData,
+                          unitId: event.target.value,
+                        })
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-neutral-800/50 px-3 py-3 text-xs font-medium text-white outline-none transition-colors focus:border-violet-400/50 focus:bg-neutral-800"
+                      required
+                    >
+                      <option value="" disabled>
+                        Selecciona una unidad
+                      </option>
+                      {units.map((unit) => (
+                        <option key={unit.id} value={unit.id}>
+                          {unit.description
+                            ? `${unit.name} · ${unit.description}`
+                            : unit.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[9px] text-neutral-500">
+                      El precio y el stock se registran en esta unidad.
+                    </p>
+                  </div>
+
                   {/* Precio y Categoría */}
-                  <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2 min-w-0">
                       <div className="flex items-center gap-2">
-                        <label className="text-[9px] sm:text-[10px] font-black uppercase text-violet-400 tracking-widest truncate">
+                        <label className="truncate text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                           Precio (COP / {selectedUnit?.name || "UNIDAD"})
                         </label>
                       </div>
@@ -2186,14 +2738,14 @@ const Productos = ({ section = "productos" }) => {
                             const valor = e.target.value.replace(/\D/g, "");
                             setFormData({ ...formData, price: valor });
                           }}
-                          className="w-full bg-gradient-to-r from-neutral-700/30 to-neutral-800/30 border border-neutral-600/50 group-focus-within:border-violet-500/50 rounded-lg sm:rounded-2xl py-3 sm:py-4 pl-9 sm:pl-11 pr-4 sm:pr-5 text-xs sm:text-sm font-bold uppercase tracking-widest focus:outline-none transition-all placeholder:text-neutral-600"
+                          className="w-full rounded-xl border border-white/10 bg-neutral-800/50 py-3 pl-9 pr-4 text-sm font-medium tabular-nums text-white outline-none transition-colors placeholder:text-neutral-500 focus:border-violet-400/50 focus:bg-neutral-800"
                           placeholder="3000"
                         />
                       </div>
                     </div>
                     <div className="space-y-2 min-w-0">
                       <div className="flex items-center gap-2">
-                        <label className="text-[9px] sm:text-[10px] font-black uppercase text-violet-400 tracking-widest truncate">
+                        <label className="truncate text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                           Categoría
                         </label>
                       </div>
@@ -2209,7 +2761,7 @@ const Productos = ({ section = "productos" }) => {
                               )?.name || "",
                           })
                         }
-                        className="w-full bg-gradient-to-r from-neutral-700/30 to-neutral-800/30 border border-neutral-600/50 focus:border-violet-500/50 rounded-lg sm:rounded-2xl py-3 sm:py-4 px-4 sm:px-5 text-xs sm:text-sm font-bold uppercase tracking-widest focus:outline-none transition-all"
+                        className="w-full rounded-xl border border-white/10 bg-neutral-800/50 px-3 py-3 text-xs font-medium text-white outline-none transition-colors focus:border-violet-400/50 focus:bg-neutral-800"
                       >
                         <option value="">Selecciona una categoría</option>
                         {categoryRecords.map((category) => (
@@ -2222,7 +2774,7 @@ const Productos = ({ section = "productos" }) => {
                         <button
                           type="button"
                           onClick={() => setQuickCategoryOpen(true)}
-                          className="mt-2 inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-violet-300 transition hover:text-violet-200"
+                          className="mt-2 inline-flex items-center gap-1 rounded-md px-1 py-1 text-[10px] font-medium text-violet-300 transition hover:bg-violet-400/10 hover:text-violet-200"
                         >
                           <Plus size={13} />
                           Crear categoría aquí
@@ -2243,13 +2795,13 @@ const Productos = ({ section = "productos" }) => {
                             }}
                             placeholder="Nombre de la categoría"
                             aria-label="Nombre de la nueva categoría"
-                            className="min-w-0 flex-1 rounded-lg border border-white/10 bg-neutral-800 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-violet-500/50"
+                            className="min-w-0 flex-1 rounded-lg border border-white/10 bg-neutral-800/70 px-3 py-2 text-xs text-white outline-none transition-colors focus:border-violet-400/50"
                           />
                           <button
                             type="button"
                             disabled={savingQuickCategory}
                             onClick={handleQuickCategoryCreate}
-                            className="rounded-lg bg-violet-500 px-3 py-2 text-[9px] font-black uppercase text-white disabled:opacity-50"
+                            className="rounded-lg bg-violet-600 px-3 py-2 text-[10px] font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
                           >
                             {savingQuickCategory ? "..." : "Crear"}
                           </button>
@@ -2270,44 +2822,9 @@ const Productos = ({ section = "productos" }) => {
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <label
-                      htmlFor="product-unit"
-                      className="text-[9px] font-black uppercase tracking-widest text-violet-400"
-                    >
-                      Unidad de venta
-                    </label>
-                    <select
-                      id="product-unit"
-                      value={formData.unitId}
-                      onChange={(event) =>
-                        setFormData({
-                          ...formData,
-                          unitId: event.target.value,
-                        })
-                      }
-                      className="w-full rounded-lg border border-neutral-600/50 bg-neutral-700 px-4 py-3 text-xs font-bold uppercase tracking-widest outline-none focus:border-violet-500/50 sm:rounded-2xl sm:py-4 sm:text-sm"
-                      required
-                    >
-                      <option value="" disabled>
-                        Selecciona una unidad
-                      </option>
-                      {units.map((unit) => (
-                        <option key={unit.id} value={unit.id}>
-                          {unit.description
-                            ? `${unit.name} · ${unit.description}`
-                            : unit.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[9px] text-neutral-500">
-                      El precio y el stock se registran en esta unidad.
-                    </p>
-                  </div>
-
                   <div className="space-y-2 min-w-0">
                     <div className="flex items-center gap-2">
-                      <label className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-violet-400">
+                      <label className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                         Descripción
                       </label>
                     </div>
@@ -2319,7 +2836,7 @@ const Productos = ({ section = "productos" }) => {
                           description: formatSentenceInput(e.target.value),
                         })
                       }
-                      className="min-h-24 w-full resize-y rounded-lg border border-neutral-600/50 bg-gradient-to-r from-neutral-700/30 to-neutral-800/30 px-4 py-3 text-xs font-bold tracking-wide outline-none transition-all placeholder:text-neutral-600 focus:border-violet-500/50 sm:rounded-2xl sm:px-5 sm:py-4 sm:text-sm"
+                      className="min-h-24 w-full resize-y rounded-xl border border-white/10 bg-neutral-800/50 px-4 py-3 text-sm font-medium text-white outline-none transition-colors placeholder:text-neutral-500 focus:border-violet-400/50 focus:bg-neutral-800"
                       placeholder="Descripción del producto..."
                     />
                   </div>
@@ -2334,39 +2851,218 @@ const Productos = ({ section = "productos" }) => {
                       </p>
                     </div>
 
-                    <div className="space-y-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.05] p-4 shadow-[0_12px_40px_rgba(16,185,129,0.05)] sm:p-5">
-                      <div>
-                        <label className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-emerald-400">
-                          Insumos descontados por{" "}
-                          {selectedUnit?.name || "unidad"} vendida
-                        </label>
-                        <p className="mt-1 text-[10px] text-neutral-500">
-                          Indica cuánto consume el producto por cada 1{" "}
-                          {selectedUnit?.name || "unidad"} vendida.
-                        </p>
+                    <div className="space-y-4 rounded-2xl border border-white/5 bg-neutral-950/30 p-4 sm:p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-xs font-bold text-neutral-100">
+                            Consumo de insumos
+                          </h3>
+                          <p className="mt-1 text-[10px] text-neutral-500">
+                            Cantidad que se descuenta por cada{" "}
+                            {selectedUnit?.name || "unidad"} vendida.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickInventoryForm("category");
+                            setQuickInventoryCategoryLocked(false);
+                            setQuickInventoryError("");
+                          }}
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold text-emerald-300 transition hover:bg-emerald-400/10 hover:text-emerald-200"
+                        >
+                          <Plus size={13} />
+                          Nueva categoría
+                        </button>
                       </div>
 
-                      {availableIngredients.length === 0 ? (
-                        <p className="rounded-xl border border-dashed border-white/10 px-4 py-4 text-center text-[10px] text-neutral-500">
-                          Primero crea insumos en Inventario.
-                        </p>
-                      ) : (
-                        <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                          {Object.entries(groupedIngredients).map(
-                            ([categoryName, ingredients]) => {
+                      {quickInventoryForm === "category" && (
+                        <form
+                          onSubmit={
+                            quickInventoryForm === "category"
+                              ? saveInventoryCategoryQuick
+                              : saveInventoryItemQuick
+                          }
+                          className="space-y-3 rounded-xl bg-neutral-950/50 p-3"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-[10px] font-black uppercase tracking-wide text-white">
+                              {quickInventoryForm === "category"
+                                ? "Crear categoría de inventario"
+                                : "Crear insumo de inventario"}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuickInventoryForm(null);
+                                setQuickInventoryCategoryLocked(false);
+                                setQuickInventoryError("");
+                              }}
+                              aria-label="Cancelar creación rápida"
+                              className="rounded-md p-1 text-neutral-500 hover:bg-white/10 hover:text-white"
+                            >
+                              <X size={15} />
+                            </button>
+                          </div>
+
+                          {quickInventoryForm === "category" ? (
+                            <input
+                              autoFocus
+                              value={quickInventoryCategoryName}
+                              onChange={(event) =>
+                                setQuickInventoryCategoryName(event.target.value)
+                              }
+                              placeholder="Nombre de la categoría"
+                              maxLength={80}
+                              required
+                              className="w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs text-white outline-none placeholder:text-neutral-600 focus:border-emerald-500/50"
+                            />
+                          ) : (
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <input
+                                autoFocus
+                                value={quickInventoryItem.name}
+                                onChange={(event) =>
+                                  setQuickInventoryItem((current) => ({
+                                    ...current,
+                                    name: event.target.value,
+                                  }))
+                                }
+                                placeholder="Nombre del insumo"
+                                maxLength={100}
+                                required
+                                className="w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs text-white outline-none placeholder:text-neutral-600 focus:border-emerald-500/50"
+                              />
+                              {quickInventoryCategoryLocked ? (
+                                <div className="flex min-h-10 items-center rounded-lg bg-neutral-900 px-3 text-xs font-semibold text-neutral-300">
+                                  Categoría:{" "}
+                                  {inventoryCategories.find(
+                                    (category) =>
+                                      category.id === quickInventoryItem.categoryId,
+                                  )?.name || "Seleccionada"}
+                                </div>
+                              ) : (
+                                <select
+                                  value={quickInventoryItem.categoryId}
+                                  required
+                                  onChange={(event) =>
+                                    setQuickInventoryItem((current) => ({
+                                      ...current,
+                                      categoryId: event.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs text-white outline-none focus:border-emerald-500/50"
+                                >
+                                  <option value="">Seleccionar categoría</option>
+                                  {inventoryCategories.map((category) => (
+                                    <option key={category.id} value={category.id}>
+                                      {category.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                              <select
+                                value={quickInventoryItem.unit}
+                                required
+                                onChange={(event) =>
+                                  setQuickInventoryItem((current) => ({
+                                    ...current,
+                                    unit: event.target.value,
+                                  }))
+                                }
+                                className="w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs text-white outline-none focus:border-emerald-500/50 sm:col-span-2"
+                              >
+                                <option value="">Seleccionar unidad</option>
+                                {units.map((unit) => (
+                                  <option key={unit.id} value={unit.name}>
+                                    {unit.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <label className="flex flex-col gap-1 text-[9px] font-black uppercase tracking-wide text-neutral-500 sm:col-span-2">
+                                Stock inicial
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step={
+                                    units.find(
+                                      (unit) =>
+                                        unit.name.toUpperCase() ===
+                                        quickInventoryItem.unit.toUpperCase(),
+                                    )?.allows_fraction
+                                      ? "0.001"
+                                      : "1"
+                                  }
+                                  value={quickInventoryItem.stock}
+                                  onChange={(event) =>
+                                    setQuickInventoryItem((current) => ({
+                                      ...current,
+                                      stock: event.target.value,
+                                    }))
+                                  }
+                                  required
+                                  className="w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs font-normal normal-case text-white outline-none focus:border-emerald-500/50"
+                                  aria-label="Stock inicial del insumo"
+                                />
+                              </label>
+                            </div>
+                          )}
+
+                          {quickInventoryError && (
+                            <p role="alert" className="text-[10px] text-amber-300">
+                              {quickInventoryError}
+                            </p>
+                          )}
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuickInventoryForm(null);
+                                setQuickInventoryCategoryLocked(false);
+                                setQuickInventoryError("");
+                              }}
+                              disabled={savingQuickInventory}
+                              className="rounded-lg px-3 py-2 text-[9px] font-bold uppercase text-neutral-400 hover:bg-white/5 disabled:opacity-50"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={savingQuickInventory}
+                              className="rounded-lg bg-emerald-600 px-3 py-2 text-[9px] font-black uppercase text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-50"
+                            >
+                              {savingQuickInventory
+                                ? "Guardando..."
+                                : quickInventoryForm === "category"
+                                  ? "Crear categoría"
+                                  : "Crear insumo"}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
+                      <div className="max-h-80 divide-y divide-white/5 overflow-y-auto rounded-xl bg-neutral-950/25 px-2">
+                        {inventoryIngredientSections.length === 0 && (
+                          <p className="px-4 py-4 text-center text-[10px] text-neutral-500">
+                            Aún no hay categorías. Crea una para organizar los insumos.
+                          </p>
+                        )}
+                        {inventoryIngredientSections.map(
+                          ({ id: categoryId, name: categoryName, ingredients }) => {
                               const expanded =
-                                expandedIngredientCategories.has(categoryName);
-                              const selectedCount = ingredients.filter(
-                                (ingredient) =>
-                                  selectedIngredients.some(
-                                    (item) =>
-                                      item.inventoryItemId === ingredient.id,
+                                expandedIngredientCategories.has(categoryId);
+                              const selectedCount = ingredients.reduce(
+                                (count, ingredient) =>
+                                  count +
+                                  Number(
+                                    selectedIngredientsById.has(ingredient.id),
                                   ),
-                              ).length;
+                                0,
+                              );
                               return (
                                 <div
-                                  key={categoryName}
-                                  className="overflow-hidden rounded-xl border border-white/10 bg-neutral-950/50"
+                                  key={categoryId}
+                                  className="py-1"
                                 >
                                   <button
                                     type="button"
@@ -2374,99 +3070,138 @@ const Productos = ({ section = "productos" }) => {
                                       setExpandedIngredientCategories(
                                         (current) => {
                                           const next = new Set(current);
-                                          if (next.has(categoryName))
-                                            next.delete(categoryName);
-                                          else next.add(categoryName);
+                                          if (next.has(categoryId))
+                                            next.delete(categoryId);
+                                          else next.add(categoryId);
                                           return next;
                                         },
                                       )
                                     }
-                                    className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-white/[0.04]"
+                                    className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-white/[0.03]"
                                     aria-expanded={expanded}
                                   >
                                     <span className="flex min-w-0 items-center gap-2">
                                       <ChevronDown
-                                        size={15}
-                                        className={`shrink-0 text-emerald-300 transition-transform ${expanded ? "rotate-180" : ""}`}
+                                        size={14}
+                                        className={`shrink-0 text-neutral-500 transition-transform ${expanded ? "rotate-180" : ""}`}
                                       />
-                                      <span className="truncate text-xs font-black uppercase tracking-wide text-white">
+                                      <span className="truncate text-xs font-semibold text-neutral-200">
                                         {categoryName}
                                       </span>
                                     </span>
-                                    <span className="shrink-0 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+                                    <span
+                                      className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-medium ${
+                                        selectedCount > 0
+                                          ? "bg-emerald-400/10 text-emerald-300"
+                                          : "bg-white/[0.04] text-neutral-500"
+                                      }`}
+                                    >
                                       {selectedCount > 0
-                                        ? `${selectedCount} seleccionado${selectedCount === 1 ? "" : "s"}`
+                                        ? `${selectedCount} de ${ingredients.length} seleccionado${selectedCount === 1 ? "" : "s"}`
                                         : `${ingredients.length} insumo${ingredients.length === 1 ? "" : "s"}`}
                                     </span>
                                   </button>
                                   {expanded && (
-                                    <div className="space-y-2 border-t border-white/5 p-2">
-                                      {ingredients.map((ingredient) => {
-                                        const selected =
-                                          selectedIngredients.find(
-                                            (item) =>
-                                              item.inventoryItemId ===
+                                    <div className="space-y-2 px-2 pb-3 pt-1">
+                                      <div className="space-y-1.5">
+                                        {ingredients.map((ingredient) => {
+                                          const selected =
+                                            selectedIngredientsById.get(
                                               ingredient.id,
-                                          );
-                                        return (
-                                          <div
-                                            key={ingredient.id}
-                                            className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 ${
-                                              selected
-                                                ? "border-emerald-500/30 bg-emerald-500/10"
-                                                : "border-white/10 bg-neutral-900/60"
-                                            }`}
-                                          >
-                                            <input
-                                              type="checkbox"
-                                              checked={Boolean(selected)}
-                                              onChange={() =>
-                                                toggleProductIngredient(
-                                                  ingredient.id,
-                                                )
-                                              }
-                                              className="h-4 w-4 shrink-0 accent-emerald-500"
-                                              aria-label={`Descontar insumo ${ingredient.name}`}
-                                            />
-                                            <div className="min-w-0 flex-1">
-                                              <p className="truncate text-xs font-bold text-white">
-                                                {ingredient.name}
-                                              </p>
-                                              <p className="text-[9px] uppercase tracking-wide text-neutral-500">
-                                                Stock actual: {ingredient.stock}{" "}
-                                                {ingredient.unit}
-                                              </p>
+                                            );
+                                          return (
+                                            <div
+                                              key={ingredient.id}
+                                              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 ${
+                                                selected
+                                                  ? "bg-emerald-400/[0.07]"
+                                                  : "bg-white/[0.025]"
+                                              }`}
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={Boolean(selected)}
+                                                onChange={() =>
+                                                  toggleProductIngredient(
+                                                    ingredient.id,
+                                                  )
+                                                }
+                                                className="h-4 w-4 shrink-0 accent-emerald-500"
+                                                aria-label={`Descontar insumo ${ingredient.name}`}
+                                              />
+                                              <div className="min-w-0 flex-1">
+                                                <p className="truncate text-xs font-bold text-white">
+                                                  {ingredient.name}
+                                                </p>
+                                                <p className="text-[9px] uppercase tracking-wide text-neutral-500">
+                                                  Stock actual: {ingredient.stock}{" "}
+                                                  {ingredient.unit}
+                                                </p>
+                                              </div>
+                                              {selected && (
+                                                <label className="flex shrink-0 items-center gap-1.5 text-[9px] font-black uppercase text-neutral-500">
+                                                  Cant. {ingredient.unit}
+                                                  <input
+                                                    type="number"
+                                                    min="0.001"
+                                                    step="0.001"
+                                                    value={selected.quantity}
+                                                    onChange={(event) =>
+                                                      updateProductIngredientQuantity(
+                                                        ingredient.id,
+                                                        event.target.value,
+                                                      )
+                                                    }
+                                                    className="w-20 rounded-lg border border-white/10 bg-neutral-900 px-2 py-1.5 text-center text-xs font-bold text-white outline-none focus:border-emerald-500/50"
+                                                    aria-label={`Consumo de ${ingredient.name} por cada ${selectedUnit?.name || "unidad"} vendida, en ${ingredient.unit}`}
+                                                  />
+                                                </label>
+                                              )}
                                             </div>
-                                            {selected && (
-                                              <label className="flex shrink-0 items-center gap-1.5 text-[9px] font-black uppercase text-neutral-500">
-                                                Cant. {ingredient.unit}
-                                                <input
-                                                  type="number"
-                                                  min="0.001"
-                                                  step="0.001"
-                                                  value={selected.quantity}
-                                                  onChange={(event) =>
-                                                    updateProductIngredientQuantity(
-                                                      ingredient.id,
-                                                      event.target.value,
-                                                    )
-                                                  }
-                                                  className="w-20 rounded-lg border border-white/10 bg-neutral-900 px-2 py-1.5 text-center text-xs font-bold text-white outline-none focus:border-emerald-500/50"
-                                                  aria-label={`Consumo de ${ingredient.name} por cada ${selectedUnit?.name || "unidad"} vendida, en ${ingredient.unit}`}
-                                                />
-                                              </label>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
+                                          );
+                                        })}
+                                      </div>
+                                      <div className="mt-2 flex justify-end">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setQuickInventoryForm("item");
+                                            setQuickInventoryCategoryLocked(true);
+                                            setQuickInventoryError("");
+                                            setQuickInventoryItem((current) => ({
+                                              ...current,
+                                              name: "",
+                                              stock: "",
+                                              categoryId,
+                                              unit:
+                                                current.unit ||
+                                                units.find(
+                                                  (unit) =>
+                                                    unit.name.toUpperCase() ===
+                                                    "UNIDAD",
+                                                )?.name ||
+                                                units[0]?.name ||
+                                                "",
+                                            }));
+                                          }}
+                                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-medium text-emerald-300 transition hover:bg-emerald-400/10 hover:text-emerald-200"
+                                        >
+                                          <Plus size={13} />
+                                          Crear insumo aquí
+                                        </button>
+                                      </div>
+                                      {renderQuickInventoryItemForm(
+                                        categoryId,
+                                        categoryName,
+                                      )}
                                     </div>
                                   )}
                                 </div>
                               );
-                            },
-                          )}
-                        </div>
-                      )}
+                          },
+                        )}
+                      </div>
+
                     </div>
                   </div>
 
@@ -2475,19 +3210,18 @@ const Productos = ({ section = "productos" }) => {
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10  pb-4 pt-2">
                       <div>
                         <div className="flex items-center gap-2">
-                          <label className="text-[9px] font-black uppercase tracking-widest text-neutral-300 sm:text-[10px]">
+                          <label className="text-[9px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
                             02 · Variables del producto
                           </label>
                         </div>
                         <p className="mt-1 text-[10px] text-neutral-500">
-                          Estás en la sección de variables. Crea opciones que el
-                          cliente podrá elegir, como tamaño, sabor o tipo.
+                          Opciones que el cliente podrá elegir al comprar.
                         </p>
                       </div>
                       <button
                         type="button"
                         onClick={addOptionGroup}
-                        className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-[9px] font-black uppercase tracking-wide text-violet-300 transition-all hover:bg-violet-500/20 active:scale-95"
+                        className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[10px] font-semibold text-violet-300 transition-colors hover:bg-violet-400/10 hover:text-violet-200"
                       >
                         <Plus size={13} />
                         Agregar variable
@@ -2495,18 +3229,18 @@ const Productos = ({ section = "productos" }) => {
                     </div>
 
                     {optionsLoading ? (
-                      <div className="flex items-center justify-center gap-2 rounded-xl border border-white/5 bg-black/10 px-3 py-5">
+                      <div className="flex items-center justify-center gap-2 rounded-xl bg-white/[0.03] px-3 py-5">
                         {[0, 1, 2].map((dot) => (
                           <span
                             key={dot}
-                            className="h-2 w-2 animate-pulse rounded-full bg-blue-400"
+                            className="h-2 w-2 animate-pulse rounded-full bg-violet-400"
                             style={{ animationDelay: `${dot * 150}ms` }}
                           />
                         ))}
                       </div>
                     ) : optionGroups.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-white/10 px-4 py-5 text-center">
-                        <p className="text-[11px] font-bold text-neutral-400">
+                      <div className="rounded-xl bg-white/[0.025] px-4 py-5 text-center">
+                        <p className="text-[11px] font-semibold text-neutral-300">
                           Este producto no tiene opciones todavía.
                         </p>
                         <p className="mt-1 text-[10px] text-neutral-600">
@@ -2518,9 +3252,9 @@ const Productos = ({ section = "productos" }) => {
                         {optionGroups.map((group, groupIndex) => (
                           <div
                             key={group.id}
-                            className="overflow-hidden rounded-xl border border-white/10 bg-neutral-950/50"
+                            className="overflow-hidden rounded-xl border border-white/5 bg-neutral-950/30"
                           >
-                            <div className="flex items-center gap-2 px-3 sm:px-4 hover:bg-white/[0.03]">
+                            <div className="flex items-center gap-2 px-3 transition-colors hover:bg-white/[0.03] sm:px-4">
                               <button
                                 type="button"
                                 onClick={() => toggleOptionGroup(group.id)}
@@ -2532,7 +3266,7 @@ const Productos = ({ section = "productos" }) => {
                                 <span className="flex min-w-0 items-start gap-2">
                                   <ChevronRight
                                     size={15}
-                                    className={`mt-0.5 shrink-0 text-violet-300 transition-transform ${
+                                    className={`mt-0.5 shrink-0 text-neutral-500 transition-transform ${
                                       expandedOptionGroups.has(group.id)
                                         ? "rotate-90"
                                         : ""
@@ -2540,7 +3274,7 @@ const Productos = ({ section = "productos" }) => {
                                     aria-hidden="true"
                                   />
                                   <span className="min-w-0">
-                                    <span className="block truncate text-xs font-black text-white">
+                                    <span className="block truncate text-xs font-semibold text-neutral-100">
                                       {group.name || `Grupo ${groupIndex + 1}`}
                                     </span>
                                     <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-neutral-500">
@@ -2580,7 +3314,7 @@ const Productos = ({ section = "productos" }) => {
                             </div>
 
                             {expandedOptionGroups.has(group.id) && (
-                              <div className="border-t border-white/5 p-3 sm:p-4">
+                              <div className="border-t border-white/5 bg-white/[0.01] p-3 sm:p-4">
                                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_200px] sm:items-center">
                                   <div className="space-y-1.5">
                                     <label className="mb-1.5 block text-[9px] font-black uppercase tracking-widest text-neutral-500 ">
@@ -2596,7 +3330,7 @@ const Productos = ({ section = "productos" }) => {
                                         })
                                       }
                                       placeholder="Ej: Tipo de leche"
-                                      className="w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs font-bold text-white outline-none transition-all focus:border-violet-500/50"
+                                      className="w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2.5 text-xs font-medium text-white outline-none transition-colors focus:border-violet-400/50"
                                     />
                                     <p className="text-[9px] leading-4 text-neutral-600">
                                       Ejemplo: Color, Talla, Material o Tipo.
@@ -2634,7 +3368,7 @@ const Productos = ({ section = "productos" }) => {
                                         })
                                       }
                                       placeholder="Descripción del grupo (opcional)"
-                                      className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[11px] font-semibold text-white outline-none focus:border-violet-500/50"
+                                      className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none transition-colors focus:border-violet-400/50"
                                     />
                                     <p className="mt-1 text-[9px] leading-4 text-neutral-600">
                                       Texto breve que verá el cliente. Ej: Elige
@@ -2652,7 +3386,7 @@ const Productos = ({ section = "productos" }) => {
                                           selection_type: event.target.value,
                                         })
                                       }
-                                      className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[11px] font-semibold text-white outline-none focus:border-violet-500/50"
+                                      className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none transition-colors focus:border-violet-400/50"
                                     >
                                       <option value="single">Una opción</option>
                                       <option value="multiple">
@@ -2768,12 +3502,16 @@ const Productos = ({ section = "productos" }) => {
               </div>
 
               {/* Footer Premium - Responsive */}
-              <div className="border-t border-violet-500/10 bg-gradient-to-t from-neutral-900/80 to-transparent px-4 sm:px-6 md:px-8 py-4 sm:py-5 md:py-6 flex gap-2 sm:gap-3 justify-end flex-wrap flex-shrink-0">
+              <div className="flex flex-shrink-0 flex-wrap justify-end gap-2 border-t border-white/5 bg-neutral-900/95 px-4 py-3 sm:gap-3 sm:px-6 md:px-8">
                 <button
                   onClick={handleSaveProduct}
-                  disabled={savingProduct}
+                  disabled={
+                    savingProduct ||
+                    optionsLoading ||
+                    !hasProductFormChanges
+                  }
                   aria-busy={savingProduct}
-                  className="px-4 sm:px-8 py-2.5 sm:py-3 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-lg sm:rounded-xl font-black uppercase text-[9px] sm:text-[10px] tracking-[0.2em] sm:tracking-[0.3em] flex items-center gap-1.5 sm:gap-2 hover:from-violet-600 hover:to-purple-700 transition-all shadow-xl shadow-violet-500/30 active:scale-95 disabled:cursor-wait disabled:opacity-75"
+                  className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-[10px] font-bold text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40 sm:px-5"
                 >
                   {savingProduct ? (
                     <LoaderCircle
@@ -2788,7 +3526,7 @@ const Productos = ({ section = "productos" }) => {
                 </button>
                 <button
                   onClick={closeProductModal}
-                  className="px-4 sm:px-8 py-2.5 sm:py-3 bg-neutral-700/50 border border-neutral-600/50 text-neutral-300 rounded-lg sm:rounded-xl font-black uppercase text-[9px] sm:text-[10px] tracking-[0.2em] sm:tracking-[0.3em] hover:bg-neutral-700 hover:border-neutral-500 transition-all"
+                  className="rounded-lg border border-white/10 px-4 py-2.5 text-[10px] font-semibold text-neutral-300 transition-colors hover:bg-white/5 sm:px-5"
                 >
                   <span className="hidden sm:inline">Cancelar</span>
                   <span className="sm:hidden">Cerrar</span>
@@ -2796,6 +3534,21 @@ const Productos = ({ section = "productos" }) => {
               </div>
             </div>
           </div>
+        )}
+
+        {isModalOpen && (
+          <ImageCropEditor
+            key={imageEditor?.url || "product-image-editor-closed"}
+            imageEditor={imageEditor}
+            onConfirm={applyProductImageCrop}
+            onClose={() => {
+              setImageEditor(null);
+              setImageEditorError("");
+            }}
+            saving={savingProduct}
+            error={imageEditorError}
+            confirmLabel="Usar imagen"
+          />
         )}
 
         {/* MODAL CONFIRMACIÓN ARCHIVAR */}

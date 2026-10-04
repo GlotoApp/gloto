@@ -34,7 +34,7 @@ const METODOS_PAGO = [
   { id: "Dividir", label: "Dividir", Icon: Split },
 ];
 
-const Carrito = ({ onIrAPagar }) => {
+const Carrito = ({ onIrAPagar, tiendaAbierta = true }) => {
   const [imageError, setImageError] = useState(false);
 
   const {
@@ -97,7 +97,7 @@ const Carrito = ({ onIrAPagar }) => {
   const items = productos.filter((p) => carrito[p.id] > 0);
 
   const handlePedir = () => {
-    if (!puedeHacerPedido) return;
+    if (!tiendaAbierta || !puedeHacerPedido) return;
     // TODO: conectar con el envío real del pedido (API / backend).
     if (onIrAPagar) onIrAPagar();
   };
@@ -869,34 +869,36 @@ const Carrito = ({ onIrAPagar }) => {
           <button
             type="button"
             onClick={handlePedir}
-            disabled={!puedeHacerPedido || hayFilaSinMetodo}
+            disabled={!tiendaAbierta || !puedeHacerPedido || hayFilaSinMetodo}
             style={{
               width: "100%",
               padding: "14px",
               borderRadius: "100px",
               background:
-                !puedeHacerPedido || hayFilaSinMetodo
+                !tiendaAbierta || !puedeHacerPedido || hayFilaSinMetodo
                   ? "rgba(124,58,237,0.25)"
                   : "#7c3aed",
               color:
-                !puedeHacerPedido || hayFilaSinMetodo
+                !tiendaAbierta || !puedeHacerPedido || hayFilaSinMetodo
                   ? "rgba(255,255,255,0.5)"
                   : "#fff",
               fontWeight: 800,
               fontSize: "14px",
               border: "none",
               cursor:
-                !puedeHacerPedido || hayFilaSinMetodo
+                !tiendaAbierta || !puedeHacerPedido || hayFilaSinMetodo
                   ? "not-allowed"
                   : "pointer",
               boxShadow:
-                !puedeHacerPedido || hayFilaSinMetodo
+                !tiendaAbierta || !puedeHacerPedido || hayFilaSinMetodo
                   ? "none"
                   : "0 8px 32px rgba(124,58,237,0.45)",
               transition: "all 0.15s",
             }}
           >
-            Confirmar · {fmt(totalPrecio)}
+            {!tiendaAbierta
+              ? "Tienda cerrada"
+              : `Confirmar · ${fmt(totalPrecio)}`}
           </button>
         </div>
       )}

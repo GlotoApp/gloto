@@ -18,6 +18,8 @@ import {
   ArrowUpDown,
   RefreshCcw,
   LoaderCircle,
+  Eye,
+  Share2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../../src/lib/supabaseClient";
@@ -268,6 +270,8 @@ const OrderCard = memo(
     onPrint,
     onSavePdf,
     onShare,
+    onOpenTracking,
+    onShareTracking,
     onEdit,
     onOpenMap,
     canDelete,
@@ -519,6 +523,26 @@ const OrderCard = memo(
                     color="border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:bg-emerald-500 hover:text-white"
                     onClick={() => onShare(orden)}
                   />
+                  {orden.trackingToken ? (
+                    <>
+                      <ActionButton
+                        icon={Eye}
+                        label="Ver seguimiento"
+                        color="border-violet-500/20 bg-violet-500/5 text-violet-300 hover:bg-violet-500 hover:text-white"
+                        onClick={() => onOpenTracking(orden)}
+                      />
+                      <ActionButton
+                        icon={Share2}
+                        label="Compartir rastreo"
+                        color="border-cyan-500/20 bg-cyan-500/5 text-cyan-300 hover:bg-cyan-500 hover:text-white"
+                        onClick={() => onShareTracking(orden)}
+                      />
+                    </>
+                  ) : (
+                    <span className="flex items-center rounded-lg border border-white/5 px-3 py-2 text-[9px] font-bold uppercase text-neutral-600">
+                      Sin enlace de rastreo
+                    </span>
+                  )}
                   <ActionButton
                     icon={Save}
                     label="Guardar PDF"
@@ -1063,6 +1087,7 @@ const mapDatabaseOrderToUi = (order) => {
     paymentMethods: Array.isArray(metadata.payment_methods)
       ? metadata.payment_methods
       : [],
+    trackingToken: metadata.tracking_token || "",
     pago: normalizePaymentMethod(order.payment_method),
     metodoPago: normalizePaymentMethod(order.payment_method),
     horaIngreso: formatDateTime(order.created_at),
@@ -1438,6 +1463,53 @@ const Ordenes = () => {
     }
   };
 
+  const getTrackingUrl = (orden) => {
+    if (!orden.trackingToken || !orden.numeroFactura) return null;
+    const url = new URL("/marketplace/seguimiento", window.location.origin);
+    url.searchParams.set("order", orden.numeroFactura);
+    url.searchParams.set("token", orden.trackingToken);
+    return url.toString();
+  };
+
+  const handleOpenTracking = (orden) => {
+    const trackingUrl = getTrackingUrl(orden);
+    if (!trackingUrl) {
+      alert("Esta orden no tiene un enlace de seguimiento disponible.");
+      return;
+    }
+    window.open(trackingUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const handleShareTracking = async (orden) => {
+    const trackingUrl = getTrackingUrl(orden);
+    if (!trackingUrl) {
+      alert("Esta orden no tiene un enlace de seguimiento disponible.");
+      return;
+    }
+
+    const title = `Seguimiento del pedido ${orden.numeroFactura}`;
+    const text = `Consulta el estado de tu pedido ${orden.numeroFactura}: ${trackingUrl}`;
+
+    try {
+      if (typeof navigator.share === "function") {
+        await navigator.share({ title, text, url: trackingUrl });
+        return;
+      }
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(trackingUrl);
+        alert("Enlace de seguimiento copiado. Ya puedes compartirlo con el cliente.");
+        return;
+      }
+
+      window.prompt("Copia este enlace de seguimiento para compartirlo:", trackingUrl);
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      console.error("Error compartiendo el enlace de seguimiento:", error);
+      alert("No se pudo compartir el enlace de seguimiento.");
+    }
+  };
+
   const handleSavePdf = async (orden) => {
     try {
       await downloadOrderInvoicePdf(orden, invoiceBusiness);
@@ -1460,6 +1532,7 @@ const Ordenes = () => {
         mesaEdit: {
           orderId: orden.id,
           orderNumber: orden.numeroFactura,
+          trackingToken: orden.trackingToken,
           orderStatus: orden.databaseStatus,
           orderType: orden.metodoEntrega,
           mesa: orden.mesa,
@@ -1831,6 +1904,8 @@ const Ordenes = () => {
                                     onPrint={handlePrint}
                                     onSavePdf={handleSavePdf}
                                     onShare={handleShare}
+                                    onOpenTracking={handleOpenTracking}
+                                    onShareTracking={handleShareTracking}
                                     onEdit={handleEdit}
                                     onOpenMap={handleOpenMap}
                                     canDelete={canDelete}

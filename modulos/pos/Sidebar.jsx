@@ -549,7 +549,7 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
                       className={`absolute left-0 h-6 w-1 rounded-r-full bg-primary-container transition-all duration-300 ${
                         isOrdersActive
                           ? "scale-y-100 opacity-100"
-                          : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
+                          : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
                       }`}
                     />
                     <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center ${isOrdersActive ? "text-primary-container" : ""}`}>

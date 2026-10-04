@@ -323,8 +323,19 @@ export const CartProvider = ({ children }) => {
           notas: p.notas || "",
           unit_name: p.unit?.name || "UNIDAD",
           varianteNombre: p.varianteNombre || null,
-          opciones: p.varianteNombre
-            ? String(p.varianteNombre).split(" · ") || []
+          opciones: Array.isArray(p.opciones)
+            ? p.opciones.map((opcion) => ({
+                nombre: opcion.nombre || opcion.name || "Opción",
+                precioExtra: Number(
+                  opcion.precioExtra ??
+                    opcion.precio_extra ??
+                    opcion.price_extra ??
+                    opcion.extra_price ??
+                    opcion.price ??
+                    opcion.monto ??
+                    0,
+                ),
+              }))
             : [],
         };
       });

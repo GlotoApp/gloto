@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import { Loading, LOADING_DURATION_MS } from "./Loading";
 
@@ -26,9 +26,11 @@ const ReadyGate = ({ children }) => {
 };
 
 const Layout = () => {
+  const location = useLocation();
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
+  const isPosRoute = location.pathname === "/pos";
 
   const toggleSidebar = () => {
     if (isSidebarPinned || isSidebarHovered) {
@@ -42,7 +44,8 @@ const Layout = () => {
   const handleSidebarMouseEnter = () => {
     if (
       window.matchMedia("(hover: hover) and (pointer: fine)").matches &&
-      !isSidebarPinned
+      !isSidebarPinned &&
+      !isPosRoute
     ) {
       setIsSidebarHovered(true);
     }

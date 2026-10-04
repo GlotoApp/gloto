@@ -2,6 +2,11 @@ import { useState } from "react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock, Loader2, Eye, EyeOff, AlertCircle } from "lucide-react";
+import {
+  getLoginFailureMessage,
+  getLoginLockMessage,
+  useLoginAttemptLimit,
+} from "../../src/hooks/useLoginAttemptLimit";
 
 const LoginSuperAdmin = () => {
   const [email, setEmail] = useState("");
@@ -9,12 +14,24 @@ const LoginSuperAdmin = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const {
+    isLocked,
+    lockedUntil,
+    recordFailedAttempt,
+    refreshState,
+    resetAttempts,
+  } = useLoginAttemptLimit();
 
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setErrorMsg("");
+    const currentAttemptState = refreshState();
+    if (currentAttemptState.lockedUntil > Date.now()) {
+      setErrorMsg(getLoginLockMessage(currentAttemptState));
+      return;
+    }
     setLoading(true);
 
     try {
@@ -26,8 +43,7 @@ const LoginSuperAdmin = () => {
       });
 
       if (error) {
-        setErrorMsg("Usuario o contraseña incorrectos");
-        setLoading(false);
+        setErrorMsg(getLoginFailureMessage(recordFailedAttempt()));
         return;
       }
 
@@ -36,12 +52,17 @@ const LoginSuperAdmin = () => {
         .select("role")
         .eq("id", data.user.id);
 
+      if (profileError) throw profileError;
+
       if (profile && profile.length > 0 && profile[0].role === "superadmin") {
         await supabase.auth.updateUser({ data: { role: "super_admin" } });
+        resetAttempts();
         navigate("/superadmin");
       } else {
-        setErrorMsg("Acceso denegado: no tienes permisos de administrador");
         await supabase.auth.signOut();
+        setErrorMsg(
+          getLoginFailureMessage(recordFailedAttempt(), "Acceso denegado"),
+        );
       }
     } catch (err) {
       setErrorMsg("Ocurrió un error al intentar entrar");
@@ -186,7 +207,7 @@ const LoginSuperAdmin = () => {
           border-radius: 12px;
           color: var(--text);
           font-family: system-ui, -apple-system, sans-serif;
-          font-size: 15px;
+          font-size: 16px;
           outline: none;
           transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
         }
@@ -364,9 +385,15 @@ const LoginSuperAdmin = () => {
             </button>
           </div>
 
-          <button type="submit" className="gloto-button" disabled={loading}>
+          <button
+            type="submit"
+            className="gloto-button"
+            disabled={loading || isLocked}
+          >
             {loading ? (
               <Loader2 className="animate-spin" size={19} />
+            ) : isLocked ? (
+              getLoginLockMessage({ lockedUntil })
             ) : (
               "ENTRAR"
             )}

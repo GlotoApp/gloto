@@ -1777,10 +1777,7 @@ const POS = () => {
       Number.isFinite(availableStock) &&
       existingQuantity + requestedQuantity > availableStock
     ) {
-      addToast(
-        `La cantidad solicitada supera el stock disponible de ${activeProduct.unit?.name || "UNIDAD"}. Se registrará el faltante.`,
-        "error",
-      );
+      addToast("Stock insuficiente. Se registrará el faltante.", "warning");
     }
     const selectedOptions = getSelectedOptionItems(
       activeProduct,
@@ -2486,6 +2483,11 @@ const POS = () => {
   );
   const paidAmount =
     paymentMethod === "efectivo" ? parseFloat(moneyPaid) || 0 : 0;
+  const isCashPaymentBelowTotal =
+    paymentMethod === "efectivo" &&
+    !isEditingTableOrder &&
+    total > 0 &&
+    paidAmount < total;
   const remaining = paidAmount > 0 ? total - paidAmount : total - assignedTotal;
   const remainingLabel = remaining > 0 ? "Faltante" : "Cambio";
   const remainingDisplay = formatPrice(Math.abs(remaining));
@@ -2589,9 +2591,13 @@ const POS = () => {
       paymentMethod === "efectivo" &&
       !isEditingTableOrder &&
       total > 0 &&
-      !(parseFloat(moneyPaid) > 0)
+      paidAmount < total
     ) {
-      errors.push("Ingresar monto recibido para efectivo");
+      errors.push(
+        paidAmount <= 0
+          ? "Ingresar monto recibido para efectivo"
+          : "El monto recibido debe ser igual o mayor al total de la orden",
+      );
     }
     if (paymentMethod === "dividir" && !splitPayments.some((p) => p.amount)) {
       errors.push("Agregar al menos una división de pago");
@@ -2889,7 +2895,8 @@ const POS = () => {
     });
 
     const orderNumber = generarNumeroPedido(customerNumber);
-    const trackingToken = generarUuid();
+    const trackingToken =
+      (isEditingTableOrder && editingOrder?.trackingToken) || generarUuid();
     const deliveryMethodKey =
       deliveryMethod === "delivery"
         ? "domicilio"
@@ -3405,32 +3412,35 @@ const POS = () => {
         ))}
       </div>
       {paymentMethod === "efectivo" && (
-        <div className="mt-2 lg:mt-3 animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="rounded-2xl border border-white/10 bg-neutral-900/50 p-3 lg:p-4">
-            <div className="flex items-center justify-between gap-2 lg:gap-4">
-              {/* Etiqueta e Icono */}
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary text-xs lg:text-sm">
+        <div className="mt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <label
+                htmlFor="cash-amount-received"
+                className="flex min-w-0 items-center gap-2 text-[10px] font-semibold text-neutral-300"
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300">
+                  <span className="material-symbols-outlined text-sm">
                     payments
                   </span>
-                  <span className="text-[9px] lg:text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant">
-                    Efectivo
-                  </span>
-                </div>
-                <p className="text-[8px] lg:text-[9px] text-on-surface-variant font-bold uppercase hidden lg:block">
-                  Monto recibido
-                </p>
-              </div>
-
-              {/* Input de Monto */}
-              <div className="relative flex-1 max-w-[120px] lg:max-w-[180px]">
-                <span className="absolute left-2 lg:left-4 top-1/2 -translate-y-1/2 text-primary font-black text-xs lg:text-sm">
+                </span>
+                Monto recibido
+              </label>
+              <div
+                className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg border bg-neutral-950 px-3 transition-colors ${
+                  isCashPaymentBelowTotal
+                    ? "border-red-400/60 focus-within:border-red-400"
+                    : "border-white/10 focus-within:border-violet-400/70"
+                }`}
+              >
+                <span className="text-xs font-medium text-neutral-500">
                   $
                 </span>
                 <input
+                  id="cash-amount-received"
                   type="text"
                   inputMode="numeric"
+                  aria-invalid={isCashPaymentBelowTotal}
                   value={
                     moneyPaid ? Number(moneyPaid).toLocaleString("es-CO") : ""
                   }
@@ -3439,10 +3449,17 @@ const POS = () => {
                     setMoneyPaid(val);
                   }}
                   placeholder="0"
-                  className="w-full bg-background border-2 border-outline rounded-lg lg:rounded-xl py-2 lg:py-3 pl-6 lg:pl-8 pr-2 lg:pr-4 text-right text-sm lg:text-lg font-black text-on-surface outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all placeholder:text-on-surface-variant appearance-none"
+                  className={`min-w-0 w-full bg-transparent py-2 text-right text-sm font-bold outline-none placeholder:text-neutral-600 ${
+                    isCashPaymentBelowTotal ? "text-red-300" : "text-white"
+                  }`}
                 />
               </div>
             </div>
+            {isCashPaymentBelowTotal && paidAmount > 0 && (
+              <p className="mt-1.5 text-right text-[10px] font-medium text-red-300">
+                Faltan $ {remainingDisplay} para completar el total
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -3660,7 +3677,7 @@ const POS = () => {
 
   return (
     <>
-      <div className="grid grid-cols-1 lg:grid-cols-4 h-screen bg-background font-sans selection:bg-primary-container/30 pb-20 lg:pb-0">
+      <div className="grid grid-cols-1 lg:grid-cols-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] h-screen bg-background font-sans selection:bg-primary-container/30 pb-20 lg:pb-0">
         {isDeliveryMapFullscreen && deliveryMethod === "delivery" && (
           <div className="fixed inset-0 z-[100] flex flex-col gap-3 bg-background p-3 sm:p-5">
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 pb-3">
@@ -3731,9 +3748,11 @@ const POS = () => {
                   ? "opacity-0 -translate-y-4 scale-90"
                   : "opacity-100 translate-y-0 scale-100"
               } ${
-                toast.type === "error"
-                  ? "border-error/20 bg-error/95"
-                  : "border-success/20 bg-success/90"
+                toast.type === "warning"
+                  ? "border-orange-300/30 bg-orange-500/95 text-white"
+                  : toast.type === "error"
+                    ? "border-error/20 bg-error/95"
+                    : "border-success/20 bg-success/90"
               }`}
               style={{
                 animation: !toast.exiting
@@ -3745,7 +3764,11 @@ const POS = () => {
                 {toast.name}
               </span>
               <span className="material-symbols-outlined text-base text-on-surface">
-                {toast.type === "error" ? "error" : "check_circle"}
+                {toast.type === "warning"
+                  ? "warning"
+                  : toast.type === "error"
+                    ? "error"
+                    : "check_circle"}
               </span>
             </div>
           ))}
@@ -3758,10 +3781,10 @@ const POS = () => {
         `}</style>
         {/* Listado de Productos */}
         <div
-          className={`${mobilePanel !== "products" ? "hidden" : "block"} lg:block lg:col-span-2 overflow-y-auto  custom-sidebar`}
+          className={`${mobilePanel !== "products" ? "hidden" : "flex"} lg:flex lg:col-span-2 xl:col-span-1 h-full min-h-0 flex-col overflow-hidden`}
         >
           {/* Buscador Inteligente */}
-          <div className="p-4 pb-0 sticky top-0 bg-background/90 backdrop-blur-md z-20">
+          <div className="z-20 shrink-0 bg-background/90 p-4 pb-0 backdrop-blur-md">
             <h2 className="text-base font-black uppercase tracking-tighter mb-2 ml-2 text-on-surface">
               Productos
             </h2>
@@ -3790,36 +3813,42 @@ const POS = () => {
                 </button>
               )}
             </div>
-            <div className="flex gap-2 p-2 sticky top-0 bg-background/90 backdrop-blur-md z-10 overflow-x-auto overflow-y-hidden whitespace-nowrap scrollbar-hide no-scrollbar mt-2">
+          </div>
+
+          <div className="flex min-h-0 min-w-0 flex-1 items-stretch">
+            <aside
+              aria-label="Categorías de productos"
+              className="flex h-full min-h-0 w-24 shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-outline/50 px-2 py-3 custom-sidebar min-[420px]:w-28 sm:w-32 lg:w-36 lg:py-4 xl:w-40"
+            >
               {isLoadingCategories
-                ? [...Array(3)].map((_, idx) => (
+                ? [...Array(4)].map((_, idx) => (
                     <div
                       key={idx}
-                      className="flex-shrink-0 h-8 w-24 rounded-xl bg-surface animate-pulse"
+                      className="h-9 w-full flex-shrink-0 animate-pulse rounded-lg bg-surface"
                     />
                   ))
                 : categories.map((cat) => (
                     <button
                       key={cat.id}
+                      type="button"
+                      title={cat.name}
                       onClick={() => {
                         setSelectedCategory(cat.id);
                         setSearchTerm("");
                       }}
-                      className={`flex-shrink-0 py-2 px-6 rounded-xl font-bold text-xs uppercase tracking-wider transition-all duration-300 ${
+                      className={`w-full flex-shrink-0 truncate rounded-lg px-2 py-2 text-left text-[9px] font-bold uppercase tracking-wide transition-colors lg:px-3 lg:py-2.5 lg:text-[10px] ${
                         selectedCategory === cat.id
-                          ? "bg-primary-container text-on-surface shadow-lg shadow-primary-container/20"
-                          : "bg-surface text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
+                          ? "bg-primary-container text-on-surface"
+                          : "text-on-surface-variant hover:bg-surface hover:text-on-surface"
                       }`}
                     >
                       {cat.name}
                     </button>
                   ))}
-            </div>
-          </div>
-
-          <div className="flex-1 flex flex-col p-4">
+            </aside>
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-2 custom-sidebar min-[420px]:p-3 lg:p-4">
             {isLoadingProducts && filteredProducts.length === 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
+                <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3">
                 {[...Array(8)].map((_, idx) => (
                   <div
                     key={idx}
@@ -3848,7 +3877,7 @@ const POS = () => {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
+              <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3">
                 {filteredProducts.map((product) => (
                   <div
                     key={product.id}
@@ -3938,6 +3967,7 @@ const POS = () => {
                 ))}
               </div>
             )}
+            </div>
           </div>
         </div>
         {/* Modal centrado para descripción de producto */}
@@ -3989,14 +4019,13 @@ const POS = () => {
           </h2>
 
           {/* Botones en Grid Indestructible */}
-          <div className="grid grid-cols-2 gap-1.5 w-full">
+          <div className="grid grid-cols-4 gap-1 w-full sm:gap-1.5">
             {Object.entries(deliveryLabels).map(([key, { label, icon }]) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => handleDeliveryChange(key)}
-                className={`group relative p-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all duration-300 
-      flex flex-col items-center justify-center gap-0.5 w-full overflow-hidden min-h-11 ${
+                className={`group relative min-h-10 w-full overflow-hidden rounded-lg p-1 text-[8px] font-bold uppercase tracking-wide transition-all duration-300 flex flex-col items-center justify-center gap-0.5 sm:min-h-11 sm:p-1.5 sm:text-[10px] sm:tracking-wider ${
         deliveryMethod === key
           ? "bg-primary-container text-on-surface border-primary shadow-lg shadow-primary-container/20"
           : "bg-surface/100 border-outline text-on-surface-variant hover:border-outline hover:text-on-surface"
@@ -4009,7 +4038,7 @@ const POS = () => {
 
                 {/* Icono */}
                 <span
-                  className={`material-symbols-outlined text-base transition-transform duration-300 flex-shrink-0 ${
+                  className={`material-symbols-outlined text-sm transition-transform duration-300 flex-shrink-0 sm:text-base ${
                     deliveryMethod === key
                       ? "scale-110"
                       : "group-hover:scale-110"
@@ -4019,7 +4048,7 @@ const POS = () => {
                 </span>
 
                 {/* Texto - Quitamos flex-1 y text-left para que el justify-center del padre mande */}
-                <span className="leading-none truncate">{label}</span>
+                <span className="max-w-full truncate leading-none">{label}</span>
               </button>
             ))}
           </div>
@@ -4029,9 +4058,9 @@ const POS = () => {
             <div className="mt-2 space-y-1.5">
               <button
                 onClick={autoFillDeliveryFields}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
+                className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-primary/50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
               >
-                <span className="material-symbols-outlined text-sm">
+                <span className="material-symbols-outlined text-xs">
                   auto_fix_high
                 </span>
                 Autorellenar
@@ -4061,9 +4090,9 @@ const POS = () => {
             <div className="mt-2 space-y-1.5">
               <button
                 onClick={autoFillDeliveryFields}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
+                className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-primary/50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
               >
-                <span className="material-symbols-outlined text-sm">
+                <span className="material-symbols-outlined text-xs">
                   auto_fix_high
                 </span>
                 Autorellenar
@@ -4135,9 +4164,9 @@ const POS = () => {
             <div className="mt-2 space-y-1.5">
               <button
                 onClick={autoFillDeliveryFields}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
+                className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-primary/50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
               >
-                <span className="material-symbols-outlined text-sm">
+                <span className="material-symbols-outlined text-xs">
                   auto_fix_high
                 </span>
                 Autorellenar
@@ -4193,9 +4222,9 @@ const POS = () => {
             <div className="mt-2 space-y-1.5">
               <button
                 onClick={autoFillDeliveryFields}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
+                className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-primary/50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-primary transition-all hover:border-primary hover:bg-primary/10"
               >
-                <span className="material-symbols-outlined text-sm">
+                <span className="material-symbols-outlined text-xs">
                   auto_fix_high
                 </span>
                 Autorellenar
@@ -4464,16 +4493,6 @@ const POS = () => {
                       </span>
                     </div>
                   )}
-                  {nightDeliverySurcharge > 0 && (
-                    <div className="flex justify-between items-center font-bold">
-                      <span className="text-[10px] uppercase tracking-widest">
-                        Domicilio total
-                      </span>
-                      <span className="text-sm">
-                        $ {formatPrice(deliveryFee)}
-                      </span>
-                    </div>
-                  )}
                 </>
               )}
 
@@ -4553,6 +4572,7 @@ const POS = () => {
               disabled={
                 isSubmittingOrder ||
                 cart.length === 0 ||
+                isCashPaymentBelowTotal ||
                 (isEditingTableOrder && !hasEditChanges)
               }
               aria-busy={isSubmittingOrder}
@@ -4821,16 +4841,6 @@ const POS = () => {
                       </span>
                     </div>
                   )}
-                  {nightDeliverySurcharge > 0 && (
-                    <div className="flex justify-between items-center font-bold">
-                      <span className="text-[10px] uppercase tracking-widest">
-                        Domicilio total
-                      </span>
-                      <span className="text-sm">
-                        $ {formatPrice(deliveryFee)}
-                      </span>
-                    </div>
-                  )}
                 </>
               )}
 
@@ -4911,6 +4921,7 @@ const POS = () => {
               disabled={
                 isSubmittingOrder ||
                 cart.length === 0 ||
+                isCashPaymentBelowTotal ||
                 (isEditingTableOrder && !hasEditChanges)
               }
               aria-busy={isSubmittingOrder}

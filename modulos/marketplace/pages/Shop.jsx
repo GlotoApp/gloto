@@ -2315,7 +2315,9 @@ const Shop = () => {
       {/* ── CARRITO (pantalla completa) ── */}
       {cartOpen && (
         <Carrito
+          tiendaAbierta={tiendaData.isOpen}
           onIrAPagar={() => {
+            if (!tiendaData.isOpen) return;
             cerrarCarrito();
             setCheckoutOpen(true);
           }}
@@ -2330,6 +2332,15 @@ const Shop = () => {
             abrirCarrito();
           }}
           onConfirmar={async (deliveryFee) => {
+            if (!tiendaData.isOpen) {
+              setCheckoutOpen(false);
+              abrirCarrito();
+              setShareMessage(
+                "Esta tienda está cerrada. No es posible hacer pedidos ahora.",
+              );
+              window.setTimeout(() => setShareMessage(""), 3500);
+              return;
+            }
             try {
               const pedido = await crearPedido({ deliveryFee });
               setCheckoutOpen(false);
@@ -2357,11 +2368,19 @@ const Shop = () => {
           producto={productoDetalle}
           onClose={() => setProductoDetalle(null)}
           onAgregarIntento={() => {
+            if (!tiendaData.isOpen) {
+              setShareMessage(
+                "Esta tienda está cerrada. No es posible hacer pedidos ahora.",
+              );
+              window.setTimeout(() => setShareMessage(""), 3500);
+              return false;
+            }
             if (mostrarModalCambioTienda(slug)) {
               return false;
             }
             return true;
           }}
+          tiendaAbierta={tiendaData.isOpen}
           tiendaNombre={tiendaData?.nombre}
           tiendaLogo={tiendaData?.logo}
           tiendaSlug={slug}

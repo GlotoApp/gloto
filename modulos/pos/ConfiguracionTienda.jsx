@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   Image,
+  LoaderCircle,
   LocateFixed,
   MapPin,
   Maximize2,
@@ -15,6 +16,7 @@ import {
   supabase,
 } from "../../src/lib/supabaseClient";
 import ConfiguracionField from "./ConfiguracionField";
+import ImageCropEditor from "./ImageCropEditor";
 import SubLoading from "./SubLoading";
 
 const EMPTY_DATA = {
@@ -46,6 +48,49 @@ const parseThousands = (value) => {
   return digits ? Number(digits) : 0;
 };
 
+const loadEditorImage = async (editor) => {
+  const image = new window.Image();
+  image.src = editor.url;
+  await image.decode();
+  return image;
+};
+
+const canvasToFile = (canvas, fileName, type, quality) =>
+  new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) =>
+        blob
+          ? resolve(new File([blob], fileName, { type }))
+          : reject(new Error("No se pudo crear la imagen editada.")),
+      type,
+      quality,
+    );
+  });
+
+const createCroppedImage = async (editor, crop) => {
+  const image = await loadEditorImage(editor);
+  const isCover = editor.type === "cover";
+  const canvas = document.createElement("canvas");
+  canvas.width = isCover ? 1600 : 1024;
+  canvas.height = isCover ? 700 : 1024;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("No se pudo preparar el recorte de la imagen.");
+  context.drawImage(
+    image,
+    crop.x * image.naturalWidth,
+    crop.y * image.naturalHeight,
+    crop.width * image.naturalWidth,
+    crop.height * image.naturalHeight,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+  return isCover
+    ? canvasToFile(canvas, "portada.webp", "image/webp", 0.9)
+    : canvasToFile(canvas, "logo.png", "image/png");
+};
+
 const ConfiguracionTienda = () => {
   const [businessId, setBusinessId] = useState(null);
   const [categories, setCategories] = useState([]);
@@ -54,6 +99,9 @@ const ConfiguracionTienda = () => {
   const [coverUrl, setCoverUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(null);
+  const [imageEditor, setImageEditor] = useState(null);
+  const [imageEditorError, setImageEditorError] = useState("");
   const [locating, setLocating] = useState(false);
   const [saveAttempted, setSaveAttempted] = useState(false);
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
@@ -63,6 +111,13 @@ const ConfiguracionTienda = () => {
   const coverInput = useRef(null);
   const mapElement = useRef(null);
   const mapInstance = useRef(null);
+
+  useEffect(
+    () => () => {
+      if (imageEditor?.url) URL.revokeObjectURL(imageEditor.url);
+    },
+    [imageEditor?.url],
+  );
 
   useEffect(() => {
     const load = async () => {
@@ -425,7 +480,7 @@ const ConfiguracionTienda = () => {
     setSaving(false);
   };
 
-  const uploadImage = async (event, type) => {
+  const selectImage = (event, type) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file || !businessId) return;
@@ -436,29 +491,67 @@ const ConfiguracionTienda = () => {
       setMessage("Usa JPG, PNG o WEBP de máximo 5 MB.");
       return;
     }
-    setSaving(true);
+    if (uploadingImage) return;
+    setImageEditor({
+      file,
+      type,
+      url: URL.createObjectURL(file),
+    });
+    setImageEditorError("");
     setMessage("");
-    const folder = type === "cover" ? "portadas-negocios" : "logos-negocio";
-    const path = `${businessId}/${folder}/${type}-${Date.now()}.${file.type.split("/")[1]}`;
-    const { error: uploadError } = await supabase.storage
-      .from("business-assets")
-      .upload(path, file, { contentType: file.type, upsert: false });
-    if (uploadError) {
-      setMessage(uploadError.message);
-      setSaving(false);
-      return;
-    }
-    const { data: publicData } = supabase.storage
-      .from("business-assets")
-      .getPublicUrl(path);
-    const url = publicData?.publicUrl;
+  };
+
+  const uploadImage = async (file, type, previewUrl) => {
     const previousUrl = type === "logo" ? logoUrl : coverUrl;
-    const { error } = await supabase
-      .from("businesses")
-      .update({ [type === "logo" ? "logo_url" : "cover_url"]: url })
-      .eq("id", businessId);
-    if (error) {
-      setMessage(error.message);
+    type === "logo" ? setLogoUrl(previewUrl) : setCoverUrl(previewUrl);
+    setUploadingImage(type);
+    setMessage("Subiendo imagen...");
+
+    const folder = type === "cover" ? "portadas-negocios" : "logos-negocio";
+    const extensionByType = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+    };
+    const extension = extensionByType[file.type] || "webp";
+    const path = `${businessId}/${folder}/${type}-${Date.now()}.${extension}`;
+
+    try {
+      const { error: uploadError } = await supabase.storage
+        .from("business-assets")
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { data: publicData } = supabase.storage
+        .from("business-assets")
+        .getPublicUrl(path);
+      const url = publicData?.publicUrl;
+      if (!url) throw new Error("No se pudo obtener la URL de la imagen.");
+
+      const { error } = await supabase
+        .from("businesses")
+        .update({ [type === "logo" ? "logo_url" : "cover_url"]: url })
+        .eq("id", businessId);
+      if (error) throw error;
+
+      type === "logo" ? setLogoUrl(url) : setCoverUrl(url);
+      setMessage("Imagen actualizada");
+      window.setTimeout(() => URL.revokeObjectURL(previewUrl), 1000);
+
+      if (previousUrl && previousUrl !== url) {
+        void removeStorageObjectIfUnused("business-assets", previousUrl).catch(
+          (cleanupError) => {
+            console.warn("No se pudo limpiar la imagen anterior:", cleanupError);
+            setMessage(
+              "Imagen actualizada; no se pudo limpiar el archivo anterior.",
+            );
+          },
+        );
+      }
+    } catch (error) {
+      type === "logo" ? setLogoUrl(previousUrl) : setCoverUrl(previousUrl);
+      setMessage(error.message || "No se pudo subir la imagen.");
+      URL.revokeObjectURL(previewUrl);
       try {
         await removeStorageObjectIfUnused("business-assets", path);
       } catch (cleanupError) {
@@ -467,21 +560,28 @@ const ConfiguracionTienda = () => {
           cleanupError,
         );
       }
-    } else {
-      type === "logo" ? setLogoUrl(url) : setCoverUrl(url);
-      setMessage("Imagen actualizada");
-      if (previousUrl && previousUrl !== url) {
-        try {
-          await removeStorageObjectIfUnused("business-assets", previousUrl);
-        } catch (cleanupError) {
-          console.warn("No se pudo limpiar la imagen anterior:", cleanupError);
-          setMessage(
-            "Imagen actualizada; no se pudo limpiar el archivo anterior.",
-          );
-        }
-      }
+    } finally {
+      setUploadingImage(null);
     }
-    setSaving(false);
+  };
+
+  const applyImageEdit = async (crop) => {
+    if (!imageEditor || uploadingImage) return;
+
+    let editedFile = imageEditor.file;
+    try {
+      editedFile = await createCroppedImage(imageEditor, crop);
+    } catch (error) {
+      setImageEditorError(
+        error.message || "No se pudo preparar la imagen seleccionada.",
+      );
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(editedFile);
+    const { type } = imageEditor;
+    setImageEditor(null);
+    await uploadImage(editedFile, type, previewUrl);
   };
 
   return (
@@ -527,16 +627,23 @@ const ConfiguracionTienda = () => {
                 <button
                   type="button"
                   onClick={() => logoInput.current?.click()}
-                  className="absolute bottom-1 right-1 rounded-lg bg-violet-600 p-2"
+                  disabled={saving || Boolean(uploadingImage)}
+                  className="absolute bottom-1 right-1 rounded-lg bg-violet-600 p-2 disabled:opacity-50"
                 >
                   <Camera size={14} />
                 </button>
+                {uploadingImage === "logo" && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-neutral-950/80 text-xs font-bold text-white">
+                    <LoaderCircle size={22} className="animate-spin text-violet-400" />
+                    Subiendo logo...
+                  </div>
+                )}
                 <input
                   ref={logoInput}
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
                   className="hidden"
-                  onChange={(event) => uploadImage(event, "logo")}
+                  onChange={(event) => selectImage(event, "logo")}
                 />
               </div>
             </div>
@@ -556,20 +663,35 @@ const ConfiguracionTienda = () => {
                 <button
                   type="button"
                   onClick={() => coverInput.current?.click()}
-                  className="absolute bottom-3 right-3 flex items-center gap-2 rounded-xl bg-black/75 px-3 py-2 text-[10px] font-black uppercase"
+                  disabled={saving || Boolean(uploadingImage)}
+                  className="absolute bottom-3 right-3 flex items-center gap-2 rounded-xl bg-black/75 px-3 py-2 text-[10px] font-black uppercase disabled:opacity-50"
                 >
                   <Image size={14} /> Cambiar portada
                 </button>
+                {uploadingImage === "cover" && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-neutral-950/75 text-xs font-bold text-white">
+                    <LoaderCircle size={24} className="animate-spin text-violet-400" />
+                    Subiendo portada...
+                  </div>
+                )}
                 <input
                   ref={coverInput}
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
                   className="hidden"
-                  onChange={(event) => uploadImage(event, "cover")}
+                  onChange={(event) => selectImage(event, "cover")}
                 />
               </div>
             </div>
           </div>
+          <ImageCropEditor
+            key={imageEditor?.url || "closed"}
+            imageEditor={imageEditor}
+            onConfirm={applyImageEdit}
+            onClose={() => setImageEditor(null)}
+            saving={Boolean(uploadingImage)}
+            error={imageEditorError}
+          />
           <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
             <h3 className="mb-5 text-sm font-black uppercase tracking-wider text-neutral-300">
               Identidad y contacto
@@ -833,7 +955,7 @@ const ConfiguracionTienda = () => {
             <button
               type="button"
               onClick={save}
-              disabled={saving || loading}
+              disabled={saving || loading || Boolean(uploadingImage)}
               className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
             >
               <Save size={14} /> {saving ? "Guardando..." : "Guardar tienda"}
