@@ -160,8 +160,10 @@ const Checkout = ({ onVolver, onConfirmar }) => {
   const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
+  const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
   const [fullscreenSummaryHeight, setFullscreenSummaryHeight] = useState(0);
   const fullscreenSummaryRef = useRef(null);
+  const isConfirmingOrderRef = useRef(false);
   const skipAddressSearchRef = useRef("");
   const skipReverseGeocodeRef = useRef("");
   const [currentTime, setCurrentTime] = useState(() => new Date());
@@ -476,10 +478,18 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                   ? "Completa tus datos para continuar"
                   : "";
 
-  const handleConfirmar = () => {
-    if (!canConfirmOrder) return;
-    actualizarDatoCliente("deliveryFee", deliveryFee);
-    if (onConfirmar) onConfirmar(deliveryFee);
+  const handleConfirmar = async () => {
+    if (!canConfirmOrder || isConfirmingOrderRef.current) return;
+    isConfirmingOrderRef.current = true;
+    setIsConfirmingOrder(true);
+
+    try {
+      actualizarDatoCliente("deliveryFee", deliveryFee);
+      await onConfirmar?.(deliveryFee);
+    } finally {
+      isConfirmingOrderRef.current = false;
+      setIsConfirmingOrder(false);
+    }
   };
 
   useEffect(() => {
@@ -1577,7 +1587,8 @@ const Checkout = ({ onVolver, onConfirmar }) => {
         <button
           type="button"
           onClick={handleConfirmar}
-          disabled={!canConfirmOrder}
+          disabled={!canConfirmOrder || isConfirmingOrder}
+          aria-busy={isConfirmingOrder}
           style={{
             width: "100%",
             padding: "14px",
@@ -1585,18 +1596,37 @@ const Checkout = ({ onVolver, onConfirmar }) => {
             background: canConfirmOrder
               ? "#7c3aed"
               : "rgba(124,58,237,0.25)",
-            color: canConfirmOrder ? "#fff" : "rgba(255,255,255,0.5)",
+            color:
+              canConfirmOrder
+                ? "#fff"
+                : "rgba(255,255,255,0.5)",
             fontWeight: 800,
             fontSize: "14px",
             border: "none",
-            cursor: canConfirmOrder ? "pointer" : "not-allowed",
+            cursor:
+              isConfirmingOrder
+                ? "wait"
+                : canConfirmOrder
+                  ? "pointer"
+                  : "not-allowed",
             boxShadow: canConfirmOrder
               ? "0 8px 32px rgba(124,58,237,0.45)"
               : "none",
             transition: "all 0.15s",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px",
           }}
         >
-          Confirmar pedido · {fmt(totalPrecio + deliveryFee)}
+          {isConfirmingOrder ? (
+            <>
+              <LoaderCircle size={18} className="animate-spin" />
+              Confirmando pedido...
+            </>
+          ) : (
+            `Confirmar pedido · ${fmt(totalPrecio + deliveryFee)}`
+          )}
         </button>
       </div>
     </div>,

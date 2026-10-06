@@ -1,5 +1,5 @@
 // SeguimientoPedido.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -17,6 +17,7 @@ import {
   X,
   Star,
   MessageCircle,
+  LoaderCircle,
 } from "lucide-react";
 import { supabase } from "../../../src/lib/supabaseClient";
 import { useCart } from "./CartContext";
@@ -125,12 +126,23 @@ const SeguimientoPedido = ({ onCerrar }) => {
   const [calificacionTienda, setCalificacionTienda] = useState(0);
   const [guardandoCalificacion, setGuardandoCalificacion] = useState(false);
   const [calificacionEnviada, setCalificacionEnviada] = useState(false);
+  const [abriendoWhatsapp, setAbriendoWhatsapp] = useState(false);
+  const whatsappRedirectTimeoutRef = useRef(null);
 
   const orderNumber = searchParams.get("order");
   const isRemoteTracking = Boolean(orderNumber && tokenParam);
   const pedido = isRemoteTracking
     ? fetchedPedido || pedidoActivo
     : pedidoActivo || fetchedPedido;
+
+  useEffect(
+    () => () => {
+      if (whatsappRedirectTimeoutRef.current !== null) {
+        window.clearTimeout(whatsappRedirectTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!pedido) return;
@@ -537,9 +549,23 @@ const SeguimientoPedido = ({ onCerrar }) => {
   };
 
   const irAWppTienda = () => {
-    if (typeof window === "undefined" || !tieneWhatsappDestino) return;
-    window.open(`https://wa.me/${whatsappDestino}`, "_blank");
-    cerrar();
+    if (
+      typeof window === "undefined" ||
+      !tieneWhatsappDestino ||
+      abriendoWhatsapp
+    ) {
+      return;
+    }
+    setAbriendoWhatsapp(true);
+    window.open(
+      `https://wa.me/${whatsappDestino}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+    whatsappRedirectTimeoutRef.current = window.setTimeout(() => {
+      setAbriendoWhatsapp(false);
+      whatsappRedirectTimeoutRef.current = null;
+    }, 1500);
   };
 
   const obtenerPasos = (metodo) => {
@@ -1323,6 +1349,8 @@ const SeguimientoPedido = ({ onCerrar }) => {
         <button
           type="button"
           onClick={irAWppTienda}
+          disabled={abriendoWhatsapp}
+          aria-busy={abriendoWhatsapp}
           style={{
             width: "100%",
             padding: "14px",
@@ -1332,16 +1360,26 @@ const SeguimientoPedido = ({ onCerrar }) => {
             fontWeight: 800,
             fontSize: "14px",
             border: "none",
-            cursor: "pointer",
+            cursor: abriendoWhatsapp ? "wait" : "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             gap: "8px",
             boxShadow: "0 8px 28px rgba(124,58,237,0.3)",
+            opacity: abriendoWhatsapp ? 0.8 : 1,
           }}
         >
-          <MessageCircle size={18} />
-          Comunicarme con la tienda
+          {abriendoWhatsapp ? (
+            <>
+              <LoaderCircle size={18} className="animate-spin" />
+              Abriendo WhatsApp...
+            </>
+          ) : (
+            <>
+              <MessageCircle size={18} />
+              Comunicarme con la tienda
+            </>
+          )}
         </button>
       </div>
     </div>,
