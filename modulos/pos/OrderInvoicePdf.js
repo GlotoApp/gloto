@@ -159,12 +159,13 @@ export const generateOrderInvoicePdf = async (order, business = {}) => {
     const pdfContainer = document.createElement("div");
     Object.assign(pdfContainer.style, {
       position: "fixed",
-      left: "-10000px",
+      left: "0",
       top: "0",
       width: "74mm",
       background: "#ffffff",
       zIndex: "-1",
       pointerEvents: "none",
+      opacity: "0",
     });
     pdfContainer.appendChild(pdfContent);
     document.body.appendChild(pdfContainer);

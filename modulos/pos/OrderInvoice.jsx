@@ -165,7 +165,7 @@ export const getInvoiceHtml = (
       )
     : "";
   const mapQr = qrMarkup
-    ? `<section class="map-qr"><p><strong>¡ESCANEA PARA ABRIR LA UBICACIÓN!</strong></p><div class="map-qr-code">${qrMarkup}</div><a class="map-link" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener noreferrer">Abrir ubicación en Google Maps</a></section>`
+    ? `<section class="map-qr"><p><strong>¡ESCANEA PARA ABRIR LA UBICACIÓN!</strong></p><div class="map-qr-code">${qrMarkup}</div><a class="map-link" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(mapUrl)}</a></section>`
     : "";
   const itemsSubtotal = getItemsSubtotal(order);
   const deliveryFee = Number(order.deliveryFee || 0);
