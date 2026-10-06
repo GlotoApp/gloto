@@ -14,24 +14,6 @@ const downloadPdfBlob = (order, pdfBlob) => {
   window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
 };
 
-const copyComputedStyles = (source, target) => {
-  if (source.nodeType === Node.ELEMENT_NODE) {
-    const computedStyle = source.ownerDocument.defaultView.getComputedStyle(source);
-    for (const property of computedStyle) {
-      target.style.setProperty(
-        property,
-        computedStyle.getPropertyValue(property),
-        computedStyle.getPropertyPriority(property),
-      );
-    }
-  }
-
-  Array.from(source.children || []).forEach((sourceChild, index) => {
-    const targetChild = target.children[index];
-    if (targetChild) copyComputedStyles(sourceChild, targetChild);
-  });
-};
-
 const convertQrSvgToPng = async (svg, size = 512) => {
   const svgBlob = new Blob([new XMLSerializer().serializeToString(svg)], {
     type: "image/svg+xml;charset=utf-8",
@@ -110,42 +92,12 @@ export const generateOrderInvoicePdf = async (order, business = {}) => {
       }),
     );
 
-    const sourceHeight = Math.max(
-      invoiceElement.scrollHeight,
-      invoiceElement.getBoundingClientRect().height,
-    );
-    iframe.style.height = `${sourceHeight + 64}px`;
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve)),
-    );
-
-    const pdfContent = invoiceElement.cloneNode(true);
-    copyComputedStyles(invoiceElement, pdfContent);
-    Object.assign(pdfContent.style, {
-      width: "74mm",
-      height: "auto",
-      minHeight: "0",
-      maxHeight: "none",
-      maxWidth: "none",
-      marginLeft: "0",
-      marginRight: "0",
-      paddingBottom: "12mm",
-      overflow: "visible",
-    });
-    const qrContainer = pdfContent.querySelector(".map-qr-code");
-    const qrCode = qrContainer?.querySelector("svg");
-    if (qrContainer && qrCode) {
-      const qrImage = document.createElement("img");
+    const qrCode = invoiceElement.querySelector(".map-qr svg");
+    if (qrCode) {
+      const qrImage = invoiceDocument.createElement("img");
       qrImage.src = await convertQrSvgToPng(qrCode);
       qrImage.alt = "Código QR para abrir la ubicación del pedido";
       await qrImage.decode();
-      Object.assign(qrContainer.style, {
-        display: "grid",
-        width: "100%",
-        maxWidth: "100%",
-        placeItems: "center",
-        overflow: "visible",
-      });
       Object.assign(qrImage.style, {
         display: "block",
         width: "40mm",
@@ -156,57 +108,61 @@ export const generateOrderInvoicePdf = async (order, business = {}) => {
       });
       qrCode.replaceWith(qrImage);
     }
-    const pdfContainer = document.createElement("div");
-    Object.assign(pdfContainer.style, {
-      position: "fixed",
-      left: "0",
-      top: "0",
-      width: "74mm",
-      background: "#ffffff",
-      zIndex: "-1",
-      pointerEvents: "none",
-      opacity: "0",
-    });
-    pdfContainer.appendChild(pdfContent);
-    document.body.appendChild(pdfContainer);
+
+    const sourceHeight = Math.max(
+      invoiceElement.scrollHeight,
+      invoiceElement.getBoundingClientRect().height,
+    );
+    iframe.style.height = `${sourceHeight + 64}px`;
     await new Promise((resolve) =>
       requestAnimationFrame(() => requestAnimationFrame(resolve)),
     );
     const contentHeightPx = Math.max(
-      pdfContent.scrollHeight,
-      pdfContent.getBoundingClientRect().height,
+      invoiceElement.scrollHeight,
+      invoiceElement.getBoundingClientRect().height,
     );
     const pageHeightMm = Math.ceil((contentHeightPx * 25.4) / 96 + 6);
 
-    const { default: html2pdf } = await import("html2pdf.js");
-    try {
-      const pdfBlob = await html2pdf()
-        .set({
-          filename: getInvoicePdfFileName(order),
-          margin: [3, 3, 3, 3],
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: "#ffffff",
-            windowWidth: Math.ceil((80 * 96) / 25.4),
-          },
-          jsPDF: {
-            unit: "mm",
-            format: [80, pageHeightMm],
-            orientation: "portrait",
-          },
-        })
-        .from(pdfContent)
-        .outputPdf("blob");
+    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+      import("html2canvas"),
+      import("jspdf"),
+    ]);
+    const canvas = await html2canvas(invoiceElement, {
+      scale: 3,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      windowWidth: Math.ceil((80 * 96) / 25.4),
+      windowHeight: sourceHeight + 64,
+      scrollX: 0,
+      scrollY: 0,
+    });
+    const pdfContentHeightMm = (canvas.height * 74) / canvas.width;
+    const pdfPageHeightMm = Math.max(
+      pageHeightMm,
+      Math.ceil(pdfContentHeightMm + 6),
+    );
+    const pdf = new jsPDF({
+      unit: "mm",
+      format: [80, pdfPageHeightMm],
+      orientation: "portrait",
+      compress: true,
+    });
+    pdf.addImage(
+      canvas.toDataURL("image/jpeg", 0.98),
+      "JPEG",
+      3,
+      3,
+      74,
+      pdfContentHeightMm,
+      undefined,
+      "FAST",
+    );
+    const pdfBlob = pdf.output("blob");
 
-      if (!(pdfBlob instanceof Blob) || pdfBlob.size === 0) {
-        throw new Error("La factura se generó vacía; no se pudo crear el PDF.");
-      }
-      return pdfBlob;
-    } finally {
-      pdfContainer.remove();
+    if (!(pdfBlob instanceof Blob) || pdfBlob.size === 0) {
+      throw new Error("La factura se generó vacía; no se pudo crear el PDF.");
     }
+    return pdfBlob;
   } finally {
     iframe.remove();
   }
