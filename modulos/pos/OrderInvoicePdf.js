@@ -32,6 +32,34 @@ const copyComputedStyles = (source, target) => {
   });
 };
 
+const convertQrSvgToPng = async (svg, size = 512) => {
+  const svgBlob = new Blob([new XMLSerializer().serializeToString(svg)], {
+    type: "image/svg+xml;charset=utf-8",
+  });
+  const svgUrl = URL.createObjectURL(svgBlob);
+
+  try {
+    const image = new Image();
+    image.src = svgUrl;
+    await image.decode();
+
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("No se pudo preparar el código QR de la factura.");
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, size, size);
+    context.drawImage(image, 0, 0, size, size);
+    return canvas.toDataURL("image/png");
+  } finally {
+    URL.revokeObjectURL(svgUrl);
+  }
+};
+
 export const generateOrderInvoicePdf = async (order, business = {}) => {
   const iframe = document.createElement("iframe");
   iframe.title = `PDF de factura ${order.numeroFactura || ""}`;
@@ -107,6 +135,10 @@ export const generateOrderInvoicePdf = async (order, business = {}) => {
     const qrContainer = pdfContent.querySelector(".map-qr-code");
     const qrCode = qrContainer?.querySelector("svg");
     if (qrContainer && qrCode) {
+      const qrImage = document.createElement("img");
+      qrImage.src = await convertQrSvgToPng(qrCode);
+      qrImage.alt = "Código QR para abrir la ubicación del pedido";
+      await qrImage.decode();
       Object.assign(qrContainer.style, {
         display: "grid",
         width: "100%",
@@ -114,14 +146,15 @@ export const generateOrderInvoicePdf = async (order, business = {}) => {
         placeItems: "center",
         overflow: "visible",
       });
-      Object.assign(qrCode.style, {
+      Object.assign(qrImage.style, {
         display: "block",
         width: "40mm",
         height: "40mm",
         maxWidth: "100%",
         margin: "8px auto 0",
-        overflow: "visible",
+        objectFit: "contain",
       });
+      qrCode.replaceWith(qrImage);
     }
     const pdfContainer = document.createElement("div");
     Object.assign(pdfContainer.style, {
