@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useState,
   useCallback,
+  useRef,
 } from "react";
 import { supabase } from "../../../src/lib/supabaseClient";
 
@@ -65,6 +66,7 @@ export const CartProvider = ({ children }) => {
   });
   // Pedido ya confirmado, pendiente de seguimiento (cocina → camino → entregado)
   const [pedidoActivo, setPedidoActivo] = useState(null);
+  const creatingOrderRef = useRef(null);
   // 'recibido' | 'preparando' | 'camino' | 'entregado'
   const [estadoPedido, setEstadoPedido] = useState("recibido");
 
@@ -309,7 +311,9 @@ export const CartProvider = ({ children }) => {
 
   // Crea un pedido a partir del carrito actual (snapshot) y lo deja
   // listo para el seguimiento en pantalla.
-  const crearPedido = async ({ deliveryFee: deliveryFeeOverride } = {}) => {
+  const crearPedidoInterno = async ({
+    deliveryFee: deliveryFeeOverride,
+  } = {}) => {
     const items = productos
       .filter((p) => carrito[p.id] > 0)
       .map((p) => {
@@ -669,6 +673,18 @@ export const CartProvider = ({ children }) => {
     setMetodoEntrega(null);
 
     return pedido;
+  };
+
+  const crearPedido = (options = {}) => {
+    if (creatingOrderRef.current) return creatingOrderRef.current;
+
+    const creation = crearPedidoInterno(options);
+    creatingOrderRef.current = creation;
+    return creation.finally(() => {
+      if (creatingOrderRef.current === creation) {
+        creatingOrderRef.current = null;
+      }
+    });
   };
 
   // Etapas disponibles por método de entrega. El pedido nunca pasa por "camino"

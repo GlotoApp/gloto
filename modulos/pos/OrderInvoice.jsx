@@ -165,7 +165,7 @@ export const getInvoiceHtml = (
       )
     : "";
   const mapQr = qrMarkup
-    ? `<section class="map-qr"><p><strong>¡ESCANEA PARA ABRIR LA UBICACIÓN!</strong></p>${qrMarkup}<a class="map-link" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(mapUrl)}</a></section>`
+    ? `<section class="map-qr"><p><strong>¡ESCANEA PARA ABRIR LA UBICACIÓN!</strong></p><div class="map-qr-code">${qrMarkup}</div><a class="map-link" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(mapUrl)}</a></section>`
     : "";
   const itemsSubtotal = getItemsSubtotal(order);
   const deliveryFee = Number(order.deliveryFee || 0);
@@ -230,7 +230,9 @@ export const getInvoiceHtml = (
       .payment-method-row{display:flex;justify-content:space-between;gap:12px;margin:3px 0}
       .payment-method-row strong{text-align:right;white-space:nowrap}
       .notes{border-top:1px dashed #555;border-bottom:1px dashed #555;margin-top:16px;padding:12px 0}.footer{text-align:center;margin-top:22px;font-size:10px}
-      .map-qr{text-align:center;margin:20px auto 0;break-inside:avoid}.map-qr svg{display:block;width:150px;height:150px;margin:8px auto 0}
+      .map-qr{display:flex;flex-direction:column;align-items:center;width:100%;max-width:100%;text-align:center;margin:20px auto 0;break-inside:avoid;page-break-inside:avoid}
+      .map-qr-code{display:flex;justify-content:center;align-items:center;width:100%;max-width:100%;overflow:visible}
+      .map-qr-code svg{display:block;flex:0 0 auto;width:150px;max-width:100%;height:auto;aspect-ratio:1;margin:8px auto 0;overflow:visible}
       .map-link{display:block;margin:8px auto 0;max-width:100%;font-size:9px;color:#111;overflow-wrap:anywhere;word-break:break-word}
       .document-footer{text-align:center;margin-top:18px;padding-top:12px;border-top:1px dashed #555;break-inside:avoid}
       .non-fiscal{margin:0 0 6px;font-size:10px;font-weight:bold;text-transform:uppercase}
@@ -239,8 +241,8 @@ export const getInvoiceHtml = (
       .gloto-logo{display:block!important;flex:0 0 28px;width:28px!important;height:28px!important;max-width:28px;object-fit:contain;margin:0;filter:grayscale(1) invert(1) contrast(1.4);print-color-adjust:exact;-webkit-print-color-adjust:exact}
       .footer{text-align:center;margin-top:10px;font-size:10px}
       .back-button{position:fixed;top:16px;left:16px;padding:8px 12px;border:1px solid #777;border-radius:6px;background:#fff;color:#111;font:bold 12px Arial,sans-serif;cursor:pointer}
-      ${receipt ? "body{padding:3mm}.invoice{width:100%;max-width:none;margin:0}table{table-layout:fixed}th,td{overflow-wrap:anywhere;word-break:break-word}.center{white-space:normal}.map-link{overflow-wrap:anywhere;word-break:break-all}.map-qr,.document-footer{break-inside:auto}" : ""}
-      @media print{body{padding:0}.back-button{display:none!important}.invoice{max-width:none}.logo{filter:grayscale(1) contrast(1.3);print-color-adjust:exact;-webkit-print-color-adjust:exact}a{color:#111;text-decoration:none}}
+      ${receipt ? "body{width:auto;min-width:0;padding:3mm;overflow:visible}.invoice{width:100%;max-width:none;margin:0}table{table-layout:fixed}th,td{overflow-wrap:anywhere;word-break:break-word}.center{white-space:normal}.map-link{overflow-wrap:anywhere;word-break:break-all}.document-footer{break-inside:auto}" : ""}
+      @media print{html,body{width:auto;min-width:0;overflow:visible}body{padding:0}.back-button{display:none!important}.invoice{width:100%;max-width:none;margin:0 auto}.map-qr,.map-qr-code,.map-qr svg{break-inside:avoid;page-break-inside:avoid}.logo{filter:grayscale(1) contrast(1.3);print-color-adjust:exact;-webkit-print-color-adjust:exact}a{color:#111;text-decoration:none}}
     </style></head><body>${showBackButton ? '<button class="back-button" type="button" aria-label="Volver a la pestaña anterior" onclick="window.close()">Volver</button>' : ""}<main class="invoice">
       <header class="header">${logoUrl}${business.name ? `<h1>${escapeHtml(business.name)}</h1>` : "<h1>Factura</h1>"}${business.address ? `<p class="muted">${escapeHtml(business.address)}</p>` : ""}${business.phone ? `<p class="muted">Tel. ${escapeHtml(business.phone)}</p>` : ""}
       <p><strong>Factura N.º ${escapeHtml(order.numeroFactura)}</strong></p><p class="muted">${escapeHtml(order.horaIngreso)} · ${escapeHtml(displayDeliveryMethod(order.metodoEntrega))}</p></header>
