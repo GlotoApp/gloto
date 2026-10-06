@@ -165,7 +165,7 @@ const Planes = () => {
           const { data: openRequest, error: requestError } = await supabase
             .from("business_plan_change_requests")
             .select(
-              "id,requested_plan_code,requested_plan_name,requested_period_code,requested_period_label,billing_type,duration_days,price_amount,commission_rate,minimum_amount,quoted_amount,status,payment_support_path,review_notes,created_at",
+              "id,requested_plan_code,requested_plan_name,requested_period_code,requested_period_label,billing_type,current_billing_type,duration_days,price_amount,commission_rate,minimum_amount,quoted_amount,activation_timing,status,payment_support_path,review_notes,created_at",
             )
             .in("status", [
               "awaiting_payment",
@@ -272,30 +272,47 @@ const Planes = () => {
 
   const requestPlanChange = (plan, period) => {
     if (!period || !businessId || hasBlockingChangeRequest) return;
+    const hasUnexpiredCycle =
+      currentPlan?.status === "active" && Boolean(currentPlan.ends_at);
+    const isCommissionDowngrade =
+      currentPlan?.billing_type === "commission" &&
+      period.billing_type === "fixed";
     const amount = period.billing_type === "commission"
       ? Number(period.minimum_amount || 0)
       : Number(period.price_amount || 0);
     const amountLabel =
       period.billing_type === "commission"
         ? `${Number(period.commission_rate || 0).toLocaleString("es-CO")}% por ticket${amount > 0 ? ` · mínimo a cobrar ${formatCurrency(amount)}` : ""} · cobro al cierre`
-        : formatCurrency(amount);
+        : isCommissionDowngrade
+          ? `${formatCurrency(amount)} · cobro al cierre del ciclo`
+          : formatCurrency(amount);
 
     setConfirmation({
       type: "request",
       plan,
       period,
       amountLabel,
+      isCommissionDowngrade,
+      hasUnexpiredCycle,
+      activationTiming: isCommissionDowngrade
+        ? "now"
+        : hasUnexpiredCycle
+          ? "cycle_end"
+          : "now",
     });
   };
 
   const confirmPlanChangeAction = async () => {
     if (confirmation?.type === "request") {
-      const { period } = confirmation;
+      const { period, activationTiming } = confirmation;
       setRequestBusy(true);
       setRequestMessage("");
       const { data, error: requestError } = await supabase.rpc(
-        "request_business_plan_change",
-        { p_period_id: period.id },
+        "request_business_plan_change_with_timing",
+        {
+          p_period_id: period.id,
+          p_activation_timing: activationTiming,
+        },
       );
 
       if (requestError) {
@@ -305,10 +322,17 @@ const Planes = () => {
         );
       } else {
         setChangeRequest(data);
+        const isCommissionDowngrade =
+          data?.current_billing_type === "commission" &&
+          data?.billing_type === "fixed";
         setRequestMessage(
-          period.billing_type === "commission"
-            ? "Solicitud enviada a nuestro equipo. No hay pago inicial; la comisión se calcula al terminar el ciclo."
-            : "Solicitud creada. Adjunta el comprobante para enviarla a revisión.",
+          isCommissionDowngrade
+            ? "Tu solicitud quedó en revisión. Premium se liquidará con las ventas acumuladas o el mínimo completo, lo que sea mayor. Después de pagar, inicia el plan menor y se cobra al final de su ciclo."
+            : `${activationTiming === "now" || !confirmation.hasUnexpiredCycle ? "El cambio se aplicará cuando aprobemos tu solicitud." : "El nuevo plan empezará cuando termine tu ciclo actual."} ${
+              period.billing_type === "commission"
+                ? "No hay pago inicial; la comisión se calcula al terminar el ciclo."
+                : "Adjunta el comprobante para enviarla a revisión."
+            }`,
         );
       }
       setRequestBusy(false);
@@ -317,7 +341,9 @@ const Planes = () => {
         !changeRequest ||
         (changeRequest.status !== "awaiting_payment" &&
           !(changeRequest.status === "pending_review" &&
-            changeRequest.billing_type === "commission"))
+            (changeRequest.billing_type === "commission" ||
+              (changeRequest.current_billing_type === "commission" &&
+                changeRequest.billing_type === "fixed"))))
       ) return;
       setRequestBusy(true);
       const { error: cancelError } = await supabase.rpc(
@@ -401,7 +427,9 @@ const Planes = () => {
       !changeRequest ||
       (changeRequest.status !== "awaiting_payment" &&
         !(changeRequest.status === "pending_review" &&
-          changeRequest.billing_type === "commission"))
+          (changeRequest.billing_type === "commission" ||
+            (changeRequest.current_billing_type === "commission" &&
+              changeRequest.billing_type === "fixed"))))
     ) return;
     setConfirmation({ type: "cancel" });
   };
@@ -438,6 +466,9 @@ const Planes = () => {
       currentPlan?.plan_code === changeRequest.requested_plan_code &&
       currentPeriodCode === changeRequest.requested_period_code
     );
+  const isCommissionDowngrade =
+    changeRequest?.current_billing_type === "commission" &&
+    changeRequest?.billing_type === "fixed";
   const hasBlockingChangeRequest =
     hasOpenChangeRequest || hasScheduledChange;
 
@@ -533,7 +564,10 @@ const Planes = () => {
                           {{
                             awaiting_payment: "Solicitud pendiente de pago",
                             pending_review:
-                              changeRequest.billing_type === "commission"
+                              changeRequest.current_billing_type === "commission" &&
+                              changeRequest.billing_type === "fixed"
+                                ? "Solicitud de baja de Premium en revisión"
+                                : changeRequest.billing_type === "commission"
                                 ? "Solicitud de Premium en revisión"
                                 : "Solicitud en revisión",
                             approved: "Cambio de plan aprobado",
@@ -551,16 +585,34 @@ const Planes = () => {
                       </p>
                       <p className="mt-1 max-w-2xl text-xs leading-relaxed text-neutral-400">
                         {changeRequest.status === "approved"
-                          ? "El cambio se activará al terminar tu periodo vigente."
+                          ? isCommissionDowngrade
+                            ? "Premium se liquida con las ventas acumuladas o el mínimo completo, lo que sea mayor. Al aprobarse el pago, inicia el plan menor y se cobra al final de su ciclo."
+                            : changeRequest.activation_timing === "now"
+                              ? "El nuevo plan ya está activo."
+                              : "El cambio se activará al terminar tu periodo vigente."
                           : changeRequest.status === "pending_review"
-                            ? changeRequest.billing_type === "commission"
-                              ? "Tu plan actual sigue vigente mientras nuestro equipo revisa la solicitud. No hay pago inicial; la comisión se calcula al cierre del ciclo."
-                              : "Tu plan actual sigue vigente mientras nuestro equipo revisa el comprobante."
+                            ? isCommissionDowngrade
+                              ? "Premium sigue activo mientras revisamos tu solicitud. Al aprobarla, se calcula la comisión acumulada aplicando el mínimo completo; pagas esa liquidación para iniciar el plan menor. El plan menor se cobra al final de su ciclo."
+                              : changeRequest.billing_type === "commission"
+                              ? `Tu plan actual sigue vigente mientras revisamos la solicitud. No hay pago inicial; ${
+                                changeRequest.activation_timing === "now"
+                                  ? "el nuevo plan empieza al aprobarse."
+                                  : "Premium empieza al terminar el ciclo actual."
+                              }`
+                              : `Tu plan actual sigue vigente mientras revisamos el comprobante. ${
+                                changeRequest.activation_timing === "now"
+                                  ? "El nuevo plan empezará al aprobarse."
+                                  : "El cambio se hará al terminar el ciclo actual."
+                              }`
                             : changeRequest.status === "rejected"
                               ? changeRequest.review_notes
                                 ? `Motivo del rechazo: ${changeRequest.review_notes}`
                                 : "La solicitud fue rechazada."
-                              : "Tu plan actual sigue vigente mientras completas la solicitud."}
+                              : `Tu plan actual sigue vigente mientras completas la solicitud. ${
+                                changeRequest.activation_timing === "now"
+                                  ? "El cambio se hará al aprobarse."
+                                  : "El nuevo plan empezará al terminar el ciclo."
+                              }`}
                       </p>
                       {requestMessage && (
                         <p className="mt-2 text-xs font-medium text-violet-200">
@@ -573,7 +625,9 @@ const Planes = () => {
                     <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-neutral-500">
                       {changeRequest.billing_type === "commission"
                         ? `${Number(changeRequest.commission_rate || 0).toLocaleString("es-CO")}% por ticket · cobro al cierre`
-                        : "Valor del periodo"}
+                        : isCommissionDowngrade
+                          ? "Valor del plan · cobro al cierre"
+                          : "Valor del periodo"}
                     </p>
                     <p className="mt-0.5 text-sm font-black text-white">
                       {changeRequest.billing_type === "commission"
@@ -1051,6 +1105,75 @@ const Planes = () => {
                     </div>
                   </div>
 
+                  {confirmation.isCommissionDowngrade ? (
+                    <div className="rounded-2xl border border-amber-300/20 bg-amber-400/[0.06] p-4">
+                      <p className="text-sm font-bold text-amber-200">
+                        Primero se liquida Premium; el plan menor se cobra al final de su ciclo
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-neutral-300">
+                        Al aprobarse la solicitud, se calcula la comisión de las ventas acumuladas y se compara con el mínimo completo de Premium. Pagas el mayor de esos valores; cuando se apruebe el pago, inicia el plan menor y su cobro se realiza al terminar el ciclo seleccionado.
+                      </p>
+                    </div>
+                  ) : confirmation.hasUnexpiredCycle && (
+                    <fieldset className="space-y-3">
+                      <legend className="mb-3 text-xs font-black uppercase tracking-wider text-neutral-200">
+                        ¿Cuándo quieres cambiar de plan?
+                      </legend>
+                      <label className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition ${
+                        confirmation.activationTiming === "now"
+                          ? "border-violet-400/40 bg-violet-400/[0.08]"
+                          : "border-white/[0.07] bg-white/[0.025] hover:bg-white/[0.05]"
+                      }`}>
+                        <input
+                          type="radio"
+                          name="activation-timing"
+                          value="now"
+                          checked={confirmation.activationTiming === "now"}
+                          onChange={() => setConfirmation((current) => ({
+                            ...current,
+                            activationTiming: "now",
+                          }))}
+                          className="mt-1 accent-violet-400"
+                        />
+                        <span>
+                          <span className="block text-sm font-bold text-white">
+                            Cambiar ahora
+                          </span>
+                          <span className="mt-1 block text-xs leading-relaxed text-neutral-400">
+                            {confirmation.period.billing_type === "commission"
+                              ? "Al aprobar la solicitud, el nuevo plan reemplazará el actual y la comisión empezará a calcularse desde entonces."
+                              : "Al aprobar la solicitud, el nuevo plan reemplazará el actual. Se cobra el valor completo del periodo seleccionado, sin prorrateo."}
+                          </span>
+                        </span>
+                      </label>
+                      <label className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition ${
+                        confirmation.activationTiming === "cycle_end"
+                          ? "border-violet-400/40 bg-violet-400/[0.08]"
+                          : "border-white/[0.07] bg-white/[0.025] hover:bg-white/[0.05]"
+                      }`}>
+                        <input
+                          type="radio"
+                          name="activation-timing"
+                          value="cycle_end"
+                          checked={confirmation.activationTiming === "cycle_end"}
+                          onChange={() => setConfirmation((current) => ({
+                            ...current,
+                            activationTiming: "cycle_end",
+                          }))}
+                          className="mt-1 accent-violet-400"
+                        />
+                        <span>
+                          <span className="block text-sm font-bold text-white">
+                            Al terminar mi ciclo actual
+                          </span>
+                          <span className="mt-1 block text-xs leading-relaxed text-neutral-400">
+                            Conservas tu plan actual hasta el final de su periodo; después empieza el nuevo plan.
+                          </span>
+                        </span>
+                      </label>
+                    </fieldset>
+                  )}
+
                   <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4 sm:p-5">
                     <div className="mb-4 flex items-center gap-2">
                       <CalendarClock size={16} className={confirmationPlanStyle.label} />
@@ -1085,8 +1208,12 @@ const Planes = () => {
                         </span>
                         <span>
                           {confirmation.period.billing_type === "commission"
-                            ? "Premium inicia al terminar tu ciclo actual; la comisión se calcula al cierre del ciclo Premium."
-                            : "Tu plan actual sigue activo; el nuevo inicia al terminar su periodo."}
+                            ? confirmation.activationTiming === "now" || !confirmation.hasUnexpiredCycle
+                              ? "Premium inicia cuando se apruebe tu solicitud; la comisión se calcula al cierre de cada ciclo Premium."
+                              : "Premium inicia al terminar tu ciclo actual; la comisión se calcula al cierre del ciclo Premium."
+                            : confirmation.activationTiming === "now" || !confirmation.hasUnexpiredCycle
+                              ? "El nuevo plan empieza cuando se apruebe el pago y reemplaza tu plan actual."
+                              : "Tu plan actual sigue activo; el nuevo inicia al terminar su periodo."}
                         </span>
                       </li>
                     </ol>

@@ -61,19 +61,27 @@ const Layout = () => {
     setIsSidebarPinned(false);
     setIsSidebarHovered(false);
   };
+  const sidebarPushesContent = isPosRoute && isSidebarExpanded;
 
   return (
     <div className="bg-neutral-950 min-h-screen flex font-manrope selection:bg-violet-500/30 text-white relative overflow-x-hidden">
       <div className="z-50 fixed top-0 left-0 h-screen transition-all duration-300">
         <Sidebar
           isExpanded={isSidebarExpanded}
+          overlayClassName={isPosRoute ? "lg:hidden" : ""}
           toggleSidebar={toggleSidebar}
           onMouseEnter={handleSidebarMouseEnter}
           onMouseLeave={handleSidebarMouseLeave}
         />
       </div>
 
-      <main className="flex-1 p-0 overflow-y-auto min-h-screen ml-20 w-[calc(100%-5rem)] transition-all duration-300">
+      <main
+        className={`flex-1 p-0 overflow-y-auto min-h-screen ml-20 w-[calc(100%-5rem)] transition-all duration-300 ${
+          sidebarPushesContent
+            ? "lg:ml-64 lg:w-[calc(100%-16rem)]"
+            : ""
+        }`}
+      >
         {/* Aquí la animación protege TODAS las rutas hijas automáticamente */}
         <ReadyGate>
           <Outlet context={{ isSidebarExpanded }} />
@@ -82,7 +90,9 @@ const Layout = () => {
 
       {isSidebarExpanded && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 transition-opacity duration-300"
+          className={`fixed inset-0 bg-black/40 backdrop-blur-sm z-40 transition-opacity duration-300 ${
+            isPosRoute ? "lg:hidden" : ""
+          }`}
           onClick={closeSidebar}
         />
       )}

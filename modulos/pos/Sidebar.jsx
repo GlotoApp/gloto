@@ -21,7 +21,13 @@ import {
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 
-const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
+const Sidebar = ({
+  isExpanded,
+  toggleSidebar,
+  onMouseEnter,
+  onMouseLeave,
+  overlayClassName = "",
+}) => {
   const location = useLocation();
   const navigate = useNavigate();
   const navRef = useRef(null);
@@ -422,7 +428,7 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
   return (
     <>
       <div
-        className={`fixed inset-0 z-50 transition-all duration-500 ${
+        className={`fixed inset-0 z-50 transition-all duration-500 ${overlayClassName} ${
           isExpanded
             ? "bg-background/40 backdrop-blur-sm opacity-100 pointer-events-auto"
             : "bg-background/0 backdrop-blur-0 opacity-0 pointer-events-none"
@@ -639,7 +645,7 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
                       />
                     )}
                     {!isExpanded && (
-                      <div className="fixed left-20 ml-2 rounded bg-primary-container px-3 py-1 text-[10px] font-black uppercase tracking-widest text-on-primary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                      <div className="pointer-events-none fixed left-20 ml-2 rounded bg-primary-container px-3 py-1 text-[10px] font-black uppercase tracking-widest text-on-primary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
                         Órdenes
                       </div>
                     )}

@@ -21,7 +21,7 @@ const SolicitudesCambioPlan = () => {
       const { data, error: queryError } = await supabase
         .from("business_plan_change_requests")
         .select(
-          "id,business_id,current_plan_name,requested_plan_name,requested_period_label,billing_type,commission_rate,minimum_amount,quoted_amount,status,payment_support_path,created_at,businesses(name)",
+          "id,business_id,current_plan_name,requested_plan_name,requested_period_label,billing_type,current_billing_type,commission_rate,minimum_amount,quoted_amount,activation_timing,status,payment_support_path,created_at,businesses(name)",
         )
         .in("status", ["awaiting_payment", "pending_review"])
         .order("created_at", { ascending: true });
@@ -61,9 +61,23 @@ const SolicitudesCambioPlan = () => {
       reason = window.prompt("Indica el motivo del rechazo de la solicitud:") || "";
       if (!reason.trim()) return;
     } else {
+      const startsImmediately = request.activation_timing === "now";
+      const isCommissionDowngrade =
+        request.current_billing_type === "commission" &&
+        request.billing_type === "fixed";
       const approvalMessage = request.billing_type === "commission"
-        ? `¿Aprobar la solicitud de ${request.businesses?.name || "la tienda"} para Premium · ${request.requested_period_label}? No requiere pago inicial. Iniciará al terminar el periodo vigente y la comisión se cobrará al cierre del ciclo.`
-        : `¿Aprobar el cambio de ${request.businesses?.name || "la tienda"} al plan ${request.requested_plan_name} · ${request.requested_period_label} por ${formatCurrency(request.quoted_amount)}? Se activará al terminar el periodo vigente.`;
+        ? `¿Aprobar la solicitud de ${request.businesses?.name || "la tienda"} para Premium · ${request.requested_period_label}? No requiere pago inicial. ${
+          startsImmediately
+            ? "Reemplazará el plan actual inmediatamente."
+            : "Iniciará al terminar el periodo vigente."
+        } La comisión se cobrará al cierre de cada ciclo.`
+        : `¿Aprobar el cambio de ${request.businesses?.name || "la tienda"} al plan ${request.requested_plan_name} · ${request.requested_period_label} por ${formatCurrency(request.quoted_amount)}? ${
+          isCommissionDowngrade
+            ? "No requiere anticipo del plan menor. Se liquidará Premium con la comisión acumulada o el mínimo completo, lo que sea mayor; al aprobar ese pago comienza el ciclo del plan menor."
+            : startsImmediately
+              ? "Se activará inmediatamente y reemplazará el plan actual."
+              : "Se activará al terminar el periodo vigente."
+        }`;
       if (!window.confirm(approvalMessage)) return;
     }
 
@@ -86,7 +100,12 @@ const SolicitudesCambioPlan = () => {
       setRequests((current) => current.filter((item) => item.id !== request.id));
       setNotice(
         approve
-          ? `Cambio de plan aprobado para ${request.businesses?.name || "la tienda"}. Se activará al finalizar su suscripción actual.`
+          ? request.current_billing_type === "commission" &&
+            request.billing_type === "fixed"
+            ? `Cambio aprobado para ${request.businesses?.name || "la tienda"}. Debe pagar la liquidación Premium; después inicia el ciclo del plan menor, que se cobra al finalizar.`
+            : request.activation_timing === "now"
+            ? `Cambio de plan activado para ${request.businesses?.name || "la tienda"}.`
+            : `Cambio de plan aprobado para ${request.businesses?.name || "la tienda"}. Se activará al finalizar su suscripción actual.`
           : `Solicitud rechazada para ${request.businesses?.name || "la tienda"}.`,
       );
     }
@@ -100,7 +119,7 @@ const SolicitudesCambioPlan = () => {
           Solicitudes de cambio de plan
         </h2>
         <p className="mt-1 text-xs text-neutral-500">
-          Los cambios aprobados se activan al finalizar el periodo vigente.
+          Las bajas de Premium requieren liquidar la comisión antes de activar el plan menor; los demás cambios indican su fecha de activación.
         </p>
       </div>
 
@@ -139,9 +158,20 @@ const SolicitudesCambioPlan = () => {
                 </p>
                 <p className="mt-1 text-xs text-neutral-400">
                   {request.requested_period_label} ·{" "}
-                  {request.billing_type === "commission"
+                  {request.current_billing_type === "commission" &&
+                  request.billing_type === "fixed"
+                    ? `Cobro al final del ciclo · ${formatCurrency(request.quoted_amount)}`
+                    : request.billing_type === "commission"
                     ? `${Number(request.commission_rate || 0).toLocaleString("es-CO")}% por ticket · cobro al cierre del ciclo${request.minimum_amount ? ` · mínimo a cobrar ${formatCurrency(request.minimum_amount)}` : ""}`
                     : formatCurrency(request.quoted_amount)}
+                </p>
+                <p className="mt-1 text-xs font-semibold text-violet-300">
+                  {request.current_billing_type === "commission" &&
+                  request.billing_type === "fixed"
+                    ? "Revisar solicitud; luego liquidar Premium"
+                    : request.activation_timing === "now"
+                    ? "Activar al aprobar"
+                    : "Activar al terminar el ciclo"}
                 </p>
                 <span
                   className={`mt-2 inline-flex rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-wider ${
@@ -151,7 +181,10 @@ const SolicitudesCambioPlan = () => {
                   }`}
                 >
                   {request.status === "pending_review"
-                    ? request.billing_type === "commission"
+                    ? request.current_billing_type === "commission" &&
+                      request.billing_type === "fixed"
+                      ? "Sin anticipo; requiere liquidación Premium"
+                      : request.billing_type === "commission"
                       ? "Solicitud sin anticipo"
                       : "Comprobante enviado"
                     : "Esperando comprobante"}
@@ -185,7 +218,12 @@ const SolicitudesCambioPlan = () => {
                   >
                     {reviewingId === request.id
                       ? "Procesando..."
-                      : "Aprobar y programar"}
+                      : request.current_billing_type === "commission" &&
+                        request.billing_type === "fixed"
+                        ? "Aprobar cambio"
+                      : request.activation_timing === "now"
+                        ? "Aprobar y activar"
+                        : "Aprobar y programar"}
                   </button>
                 </>
               )}

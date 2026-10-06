@@ -1925,6 +1925,11 @@ const Shop = () => {
                       </h4>
                       <p
                         style={{
+                          display: "-webkit-box",
+                          WebkitBoxOrient: "vertical",
+                          WebkitLineClamp: 3,
+                          overflow: "hidden",
+                          height: "55.8px",
                           fontSize: "12px",
                           color: "rgba(255,255,255,0.4)",
                           lineHeight: 1.55,
@@ -1955,11 +1960,11 @@ const Shop = () => {
                         <span
                           style={{
                             fontWeight: 600,
-                            fontSize: "11px",
-                            color: "rgba(255,255,255,0.6)",
+                            fontSize: "9px",
+                            color: "rgba(255,255,255,0.45)",
                           }}
                         >
-                          / {p.unit?.name || "UNIDAD"}
+                          {p.unit?.name || "UNIDAD"}
                         </span>
                         {precioExtraMax > 0 && (
                           <span
