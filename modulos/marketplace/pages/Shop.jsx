@@ -304,6 +304,7 @@ const Shop = () => {
   const [categorias, setCategorias] = useState([]);
   const [productos, setProductosState] = useState([]);
   const [shopBusinessId, setShopBusinessId] = useState(null);
+  const [shopInventoryEnabled, setShopInventoryEnabled] = useState(false);
   const [businessHoursRows, setBusinessHoursRows] = useState([]);
   const [, setAvailabilityByProduct] = useState({});
   const [isLoadingProductos, setIsLoadingProductos] = useState(true);
@@ -446,6 +447,7 @@ const Shop = () => {
           productosRes,
           availabilityRes,
           businessHoursRes,
+          inventoryAccessRes,
         ] = await Promise.all([
           businessInfoQuery,
           supabase
@@ -473,6 +475,9 @@ const Shop = () => {
             .eq("business_id", data.id)
             .order("day_of_week", { ascending: true })
             .order("shift_index", { ascending: true }),
+          supabase.rpc("get_public_business_inventory_access", {
+            p_business_id: data.id,
+          }),
         ]);
 
         const info = businessInfoRes.error ? {} : businessInfoRes.data || {};
@@ -527,6 +532,16 @@ const Shop = () => {
             businessHoursRes.error,
           );
         }
+        if (inventoryAccessRes.error) {
+          console.error(
+            "Error al obtener el acceso de inventario de la tienda:",
+            inventoryAccessRes.error,
+          );
+        }
+        const inventoryEnabled = inventoryAccessRes.error
+          ? true
+          : Boolean(inventoryAccessRes.data);
+        setShopInventoryEnabled(inventoryEnabled);
 
         const availabilityMap = (availabilityRes.data || []).reduce(
           (acc, item) => ({ ...acc, [item.product_id]: item.is_available }),
@@ -657,15 +672,18 @@ const Shop = () => {
               nombre: producto.name,
               desc: producto.description || "",
               precio: Number(producto.price) || 0,
-              stock: Number(producto.stock || 0),
+              stock: inventoryEnabled
+                ? Number(producto.stock || 0)
+                : undefined,
               unit:
                 producto.unit ||
                 { id: producto.unit_id, name: "UNIDAD", allows_fraction: false },
               isSoldOut: producto.is_sold_out || producto.is_soldout || false,
-              isAvailable:
-                availabilityMap[producto.id] ??
-                (Number(producto.stock || 0) > 0 &&
-                  !Boolean(producto.is_sold_out || producto.is_soldout)),
+              isAvailable: inventoryEnabled
+                ? availabilityMap[producto.id] ??
+                  (Number(producto.stock || 0) > 0 &&
+                    !Boolean(producto.is_sold_out || producto.is_soldout))
+                : !Boolean(producto.is_sold_out || producto.is_soldout),
               orderIndex: Number(producto.order_index || 0),
               cat: categoria?.nombre || "Otros",
               image: producto.image_url,
@@ -860,14 +878,32 @@ const Shop = () => {
           table: "product_availability",
           filter: `business_id=eq.${shopBusinessId}`,
         },
-        (payload) => {
+        async (payload) => {
           const productId = payload.new?.product_id || payload.old?.product_id;
           if (!productId) return;
 
-          const isAvailable =
+          let isAvailable =
             payload.eventType === "DELETE"
               ? false
               : Boolean(payload.new?.is_available);
+          let isSoldOut = payload.eventType === "DELETE";
+
+          if (!shopInventoryEnabled && payload.eventType !== "DELETE") {
+            const { data, error } = await supabase
+              .from("products")
+              .select("is_sold_out")
+              .eq("id", productId)
+              .maybeSingle();
+            if (error) {
+              console.error(
+                "Error actualizando agotado manual de producto:",
+                error,
+              );
+              return;
+            }
+            isSoldOut = Boolean(data?.is_sold_out);
+            isAvailable = !isSoldOut;
+          }
 
           setAvailabilityByProduct((current) => ({
             ...current,
@@ -875,12 +911,16 @@ const Shop = () => {
           }));
           const updateAvailability = (current) =>
             current.map((product) =>
-              product.id === productId ? { ...product, isAvailable } : product,
+              product.id === productId
+                ? { ...product, isAvailable, isSoldOut }
+                : product,
             );
           setProductosState(updateAvailability);
           setProductos(updateAvailability);
           setProductoDetalle((current) =>
-            current?.id === productId ? { ...current, isAvailable } : current,
+            current?.id === productId
+              ? { ...current, isAvailable, isSoldOut }
+              : current,
           );
         },
       )
@@ -889,7 +929,7 @@ const Shop = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [shopBusinessId]);
+  }, [shopBusinessId, shopInventoryEnabled]);
 
   // Lleva la vista al punto exacto donde la barra de filtros queda fija
   // arriba, mostrando el primer producto del filtro justo debajo.
@@ -1986,7 +2026,9 @@ const Shop = () => {
 
                         {(p.isAvailable === false ||
                           p.isSoldOut ||
-                          (typeof p.stock === "number" && p.stock <= 0)) && (
+                          (shopInventoryEnabled &&
+                            typeof p.stock === "number" &&
+                            p.stock <= 0)) && (
                           <div
                             style={{
                               position: "absolute",
@@ -2354,7 +2396,10 @@ const Shop = () => {
             } catch (error) {
               console.error("No se pudo confirmar el pedido:", error);
               setShareMessage(
-                "No se pudo guardar el pedido. Intenta nuevamente.",
+                error?.message?.includes("TICKET_LIMIT_REACHED") ||
+                  error?.message?.includes("ACTIVE_PLAN_REQUIRED")
+                  ? "Esta tienda no está aceptando pedidos nuevos por el momento. Inténtalo más tarde."
+                  : "No se pudo guardar el pedido. Intenta nuevamente.",
               );
               window.setTimeout(() => setShareMessage(""), 3500);
             }

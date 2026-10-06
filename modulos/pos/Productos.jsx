@@ -116,6 +116,7 @@ const Productos = ({ section = "productos" }) => {
   const [categoryRecords, setCategoryRecords] = useState([]);
   const [units, setUnits] = useState([]);
   const [businessId, setBusinessId] = useState(null);
+  const [inventoryEnabled, setInventoryEnabled] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [savingProduct, setSavingProduct] = useState(false);
   const [quickCategoryOpen, setQuickCategoryOpen] = useState(false);
@@ -365,11 +366,27 @@ const Productos = ({ section = "productos" }) => {
         .maybeSingle();
 
       if (profileError || !profile?.business_id) {
+        setBusinessId(null);
+        setInventoryEnabled(false);
         setProducts([]);
         setLoadingProducts(false);
         return;
       }
       setBusinessId(profile.business_id);
+      setInventoryEnabled(false);
+
+      const { data: planAccess, error: planAccessError } = await supabase.rpc(
+        "get_business_plan_access",
+      );
+      if (planAccessError) {
+        console.error("Error consultando acceso al inventario:", planAccessError);
+        setInventoryEnabled(true);
+      } else {
+        setInventoryEnabled(Boolean(planAccess?.inventory_enabled));
+      }
+      const hasInventoryAccess = planAccessError
+        ? true
+        : Boolean(planAccess?.inventory_enabled);
 
       const cachedCatalog = readCatalogCache(profile.business_id);
       if (
@@ -400,17 +417,21 @@ const Productos = ({ section = "productos" }) => {
           .select("*")
           .eq("business_id", profile.business_id)
           .order("order_index", { ascending: true }),
-        supabase
-          .from("inventory_items")
-          .select("id, name, unit, stock, category_id")
-          .eq("business_id", profile.business_id)
-          .eq("is_active", true)
-          .order("name", { ascending: true }),
-        supabase
-          .from("inventory_categories")
-          .select("id, name")
-          .eq("business_id", profile.business_id)
-          .order("name", { ascending: true }),
+        hasInventoryAccess
+          ? supabase
+              .from("inventory_items")
+              .select("id, name, unit, stock, category_id")
+              .eq("business_id", profile.business_id)
+              .eq("is_active", true)
+              .order("name", { ascending: true })
+          : Promise.resolve({ data: [], error: null }),
+        hasInventoryAccess
+          ? supabase
+              .from("inventory_categories")
+              .select("id, name")
+              .eq("business_id", profile.business_id)
+              .order("name", { ascending: true })
+          : Promise.resolve({ data: [], error: null }),
         supabase
           .from("units")
           .select("id,name,description,allows_fraction,is_active")
@@ -801,7 +822,7 @@ const Productos = ({ section = "productos" }) => {
       result = result.filter((p) => p.isActive && p.isSoldOut);
     } else if (filterStatus === "archivados") {
       result = result.filter((p) => !p.isActive);
-    } else if (filterStatus === "bajo_stock") {
+    } else if (inventoryEnabled && filterStatus === "bajo_stock") {
       result = result.filter(
         (p) => p.isActive && !p.isSoldOut && isProductLowStock(p),
       );
@@ -823,7 +844,7 @@ const Productos = ({ section = "productos" }) => {
     });
 
     return result;
-  }, [products, searchQuery, filterCategory, filterStatus, sortBy]);
+  }, [products, searchQuery, filterCategory, filterStatus, sortBy, inventoryEnabled]);
 
   const selectedProductRecords = products.filter((product) =>
     selectedProducts.has(product.id),
@@ -1351,8 +1372,12 @@ const Productos = ({ section = "productos" }) => {
       category_id: formData.categoryId,
       price: Number(formData.price),
       description: formatStoredText(formData.description),
-      stock: Number(formData.stock) || 0,
-      min_stock: Number(formData.minStock) || 0,
+      ...(inventoryEnabled
+        ? {
+            stock: Number(formData.stock) || 0,
+            min_stock: Number(formData.minStock) || 0,
+          }
+        : {}),
       unit_id: formData.unitId || null,
       image_url: imageUrl,
     };
@@ -1383,7 +1408,7 @@ const Productos = ({ section = "productos" }) => {
         business_id: businessId,
         order_index: nextOrderIndex,
         is_active: true,
-        is_sold_out: false,
+        ...(inventoryEnabled ? { is_sold_out: false } : {}),
       });
     }
     const { data, error } = await query.select().single();
@@ -1410,7 +1435,9 @@ const Productos = ({ section = "productos" }) => {
 
       try {
         await saveProductOptions(data.id);
-        await saveProductIngredients(data.id);
+        if (inventoryEnabled) {
+          await saveProductIngredients(data.id);
+        }
       } catch (optionsError) {
         console.error("Error guardando relaciones del producto:", optionsError);
         alert(
@@ -1841,23 +1868,24 @@ const Productos = ({ section = "productos" }) => {
                   <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
                     <span className="text-emerald-400 font-black">
                       {
-                        products.filter((p) => p.isActive && !p.isSoldOut)
-                          .length
+                        products.filter((p) => p.isActive && !p.isSoldOut).length
                       }
                     </span>{" "}
                     Activos
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-rose-500/80" />
-                  <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
-                    <span className="text-rose-400 font-black">
-                      {products.filter((p) => p.isActive && p.isSoldOut).length}
-                    </span>{" "}
-                    Agotados
-                  </span>
-                </div>
+                {
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-rose-500/80" />
+                    <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
+                      <span className="text-rose-400 font-black">
+                        {products.filter((p) => p.isActive && p.isSoldOut).length}
+                      </span>{" "}
+                      Agotados
+                    </span>
+                  </div>
+                }
 
                 <div className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-slate-500/80" />
@@ -2083,20 +2111,22 @@ const Productos = ({ section = "productos" }) => {
               </select>
             </div>
             <div>
-              <label className="text-[8px] font-black text-neutral-600 uppercase tracking-widest ml-1 block mb-2">
-                Estado
-              </label>
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="w-full bg-neutral-900 border border-white/5 rounded-xl py-2.5 px-3 text-[10px] font-mono text-neutral-300 uppercase focus:border-violet-500/40 outline-none transition-all cursor-pointer"
-              >
-                <option value="todos">Todos</option>
-                <option value="activos">Activos</option>
-                <option value="bajo_stock">Bajo stock</option>
-                <option value="agotados">Agotados</option>
-                <option value="archivados">Archivados</option>
-              </select>
+                <label className="text-[8px] font-black text-neutral-600 uppercase tracking-widest ml-1 block mb-2">
+                  Estado
+                </label>
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="w-full bg-neutral-900 border border-white/5 rounded-xl py-2.5 px-3 text-[10px] font-mono text-neutral-300 uppercase focus:border-violet-500/40 outline-none transition-all cursor-pointer"
+                >
+                  <option value="todos">Todos</option>
+                  <option value="activos">Activos</option>
+                  {inventoryEnabled && (
+                    <option value="bajo_stock">Bajo stock</option>
+                  )}
+                  <option value="agotados">Agotados</option>
+                  <option value="archivados">Archivados</option>
+                </select>
             </div>
             <div>
               <label className="text-[8px] font-black text-neutral-600 uppercase tracking-widest ml-1 block mb-2">
@@ -2159,6 +2189,7 @@ const Productos = ({ section = "productos" }) => {
                     className="w-full h-full object-cover transition-all duration-500 group-hover:scale-105"
                   />
                   {/* Badge Estado Superior Izquierda */}
+                  {(!item.isActive || inventoryEnabled || item.isSoldOut) && (
                   <div className="absolute top-2 left-2">
                     {/* Badge Estado */}
                     <div
@@ -2167,7 +2198,7 @@ const Productos = ({ section = "productos" }) => {
                           ? "bg-slate-500/80 text-slate-100 border-slate-400/30"
                           : item.isSoldOut
                             ? "bg-red-500 text-red-fff border-red-500/30"
-                            : isProductLowStock(item)
+                            : inventoryEnabled && isProductLowStock(item)
                               ? "bg-amber-500/20 text-amber-300 border-amber-400/30"
                               : "bg-emerald-500 text-fff border-emerald-500/30"
                       }`}
@@ -2176,11 +2207,12 @@ const Productos = ({ section = "productos" }) => {
                         ? "Archivado"
                         : item.isSoldOut
                           ? "Agotado"
-                          : isProductLowStock(item)
+                          : inventoryEnabled && isProductLowStock(item)
                             ? "Bajo stock"
                             : "Activo"}
                     </div>
                   </div>
+                  )}
 
                   {/* Checkbox o Botón Archivar Superior Derecha */}
                   <div className="absolute top-2 right-2">
@@ -2242,90 +2274,96 @@ const Productos = ({ section = "productos" }) => {
 
                 {/* SECCIÓN INFERIOR: Acciones de estado */}
                 <div className="pb-2">
-                  <div className="grid grid-cols-1 gap-2 pt-2.5 border-t border-white/5 px-2 sm:grid-cols-2 md:px-3">
-                    <div className="col-span-full flex justify-center">
-                      {(() => {
-                        const productUnit =
-                          units.find((unit) => unit.id === item.unitId) ||
-                          units.find((unit) => unit.name === "UNIDAD");
-                        const unitName = productUnit?.name || "UNIDAD";
-                        const stockStep = productUnit?.allows_fraction
-                          ? 0.1
-                          : 1;
-                        const stockLabel = formatStockQuantity(item.stock);
+                  <div
+                    className={`grid grid-cols-1 gap-2 pt-2.5 border-t border-white/5 px-2 ${
+                      inventoryEnabled ? "sm:grid-cols-2" : "sm:grid-cols-1"
+                    } md:px-3`}
+                  >
+                    {inventoryEnabled && (
+                      <div className="col-span-full flex justify-center">
+                        {(() => {
+                          const productUnit =
+                            units.find((unit) => unit.id === item.unitId) ||
+                            units.find((unit) => unit.name === "UNIDAD");
+                          const unitName = productUnit?.name || "UNIDAD";
+                          const stockStep = productUnit?.allows_fraction
+                            ? 0.1
+                            : 1;
+                          const stockLabel = formatStockQuantity(item.stock);
 
-                        return isSelectionMode ? (
-                          <div
-                            className="flex min-w-16 flex-col items-center rounded-lg border border-white/15 bg-black/75 px-3 py-1 text-white"
-                            aria-label={`${unitName}: ${stockLabel}`}
-                          >
-                            <span className="text-[8px] font-bold uppercase tracking-wider text-neutral-400">
-                              {unitName}
-                            </span>
-                            <span className="text-sm font-black tabular-nums">
-                              {Number(item.stock || 0) > 99 ? "99+" : stockLabel}
-                            </span>
-                          </div>
-                        ) : (
-                        <div
-                          role="group"
-                          aria-label={`${item.name}: ${stockLabel} ${unitName}`}
-                          title={`${stockLabel} ${unitName}`}
-                          className="flex w-full max-w-[267px] items-center justify-center gap-1 rounded-xl bg-neutral-800/40 p-2 sm:gap-2 sm:p-3"
-                        >
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleAdjustStock(item.id, -stockStep);
-                            }}
-                            disabled={
-                              updatingStockIds.has(item.id) ||
-                              Number(item.stock || 0) <= 0
-                            }
-                            aria-label={`Disminuir ${unitName} de ${item.name}`}
-                            title={`Disminuir ${stockStep} ${unitName}`}
-                            className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 sm:p-2"
-                          >
-                            <ArrowDownRight
-                              size={16}
-                              className="sm:h-[18px] sm:w-[18px]"
-                            />
-                          </button>
-                          <span className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0 rounded-lg border border-white/10 bg-neutral-700 px-1 py-2 text-center text-white sm:px-3 sm:py-1">
-                            <span className="shrink-0 text-[8px] font-bold uppercase tracking-wider text-neutral-400 sm:text-[9px]">
-                              {unitName}
-                            </span>
-                            <span
-                              className={`min-w-0 truncate text-base font-black leading-tight tabular-nums sm:text-lg ${
-                                Number(item.stock) < 0
-                                  ? "text-red-400"
-                                  : "text-white"
-                              }`}
+                          return isSelectionMode ? (
+                            <div
+                              className="flex min-w-16 flex-col items-center rounded-lg border border-white/15 bg-black/75 px-3 py-1 text-white"
+                              aria-label={`${unitName}: ${stockLabel}`}
                             >
-                              {stockLabel}
-                            </span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleAdjustStock(item.id, stockStep);
-                            }}
-                            disabled={updatingStockIds.has(item.id)}
-                            aria-label={`Aumentar ${unitName} de ${item.name}`}
-                            title={`Aumentar ${stockStep} ${unitName}`}
-                            className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-emerald-400 disabled:cursor-wait disabled:opacity-40 sm:p-2"
-                          >
-                            <ArrowUpRight
-                              size={16}
-                              className="sm:h-[18px] sm:w-[18px]"
-                            />
-                          </button>
-                        </div>
-                        );
-                      })()}
-                    </div>
+                              <span className="text-[8px] font-bold uppercase tracking-wider text-neutral-400">
+                                {unitName}
+                              </span>
+                              <span className="text-sm font-black tabular-nums">
+                                {Number(item.stock || 0) > 99 ? "99+" : stockLabel}
+                              </span>
+                            </div>
+                          ) : (
+                            <div
+                              role="group"
+                              aria-label={`${item.name}: ${stockLabel} ${unitName}`}
+                              title={`${stockLabel} ${unitName}`}
+                              className="flex w-full max-w-[267px] items-center justify-center gap-1 rounded-xl bg-neutral-800/40 p-2 sm:gap-2 sm:p-3"
+                            >
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleAdjustStock(item.id, -stockStep);
+                                }}
+                                disabled={
+                                  updatingStockIds.has(item.id) ||
+                                  Number(item.stock || 0) <= 0
+                                }
+                                aria-label={`Disminuir ${unitName} de ${item.name}`}
+                                title={`Disminuir ${stockStep} ${unitName}`}
+                                className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 sm:p-2"
+                              >
+                                <ArrowDownRight
+                                  size={16}
+                                  className="sm:h-[18px] sm:w-[18px]"
+                                />
+                              </button>
+                              <span className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0 rounded-lg border border-white/10 bg-neutral-700 px-1 py-2 text-center text-white sm:px-3 sm:py-1">
+                                <span className="shrink-0 text-[8px] font-bold uppercase tracking-wider text-neutral-400 sm:text-[9px]">
+                                  {unitName}
+                                </span>
+                                <span
+                                  className={`min-w-0 truncate text-base font-black leading-tight tabular-nums sm:text-lg ${
+                                    Number(item.stock) < 0
+                                      ? "text-red-400"
+                                      : "text-white"
+                                  }`}
+                                >
+                                  {stockLabel}
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleAdjustStock(item.id, stockStep);
+                                }}
+                                disabled={updatingStockIds.has(item.id)}
+                                aria-label={`Aumentar ${unitName} de ${item.name}`}
+                                title={`Aumentar ${stockStep} ${unitName}`}
+                                className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-emerald-400 disabled:cursor-wait disabled:opacity-40 sm:p-2"
+                              >
+                                <ArrowUpRight
+                                  size={16}
+                                  className="sm:h-[18px] sm:w-[18px]"
+                                />
+                              </button>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2507,7 +2545,6 @@ const Productos = ({ section = "productos" }) => {
                       </div>
                       <div>
                         <div className="grid grid-cols-1 gap-1.5">
-                          {/* Disponibilidad */}
                           <div className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.03] px-3 py-2.5">
                             <span className="text-[9px] font-semibold uppercase tracking-wider text-neutral-400">
                               Disponibilidad
@@ -2584,6 +2621,8 @@ const Productos = ({ section = "productos" }) => {
                     </div>
                   )}
 
+                  {inventoryEnabled && (
+                  <>
                   <div className="space-y-2 border-t border-white/5 pt-4">
                     <label className="text-[9px] font-semibold uppercase tracking-wider text-neutral-400">
                       Stock del producto ({selectedUnit?.name || "UNIDAD"})
@@ -2659,6 +2698,8 @@ const Productos = ({ section = "productos" }) => {
                       Usa 0 para avisar solo cuando se agote.
                     </p>
                   </div>
+                  </>
+                  )}
                 </div>
 
                 {/* Panel Derecho: Formulario */}
@@ -2855,6 +2896,7 @@ const Productos = ({ section = "productos" }) => {
                     />
                   </div>
 
+                  {inventoryEnabled && (
                   <div className="order-3 space-y-5 border-t border-white/10 pt-5">
                     <div className="border-b border-white/10 pb-4 pt-2">
                       <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-300">
@@ -3218,6 +3260,7 @@ const Productos = ({ section = "productos" }) => {
 
                     </div>
                   </div>
+                  )}
 
                   {/* Opciones y variaciones del producto */}
                   <div className="order-2 space-y-5 border-t border-white/10 pt-5">

@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.eliminar-cuenta-negocio]
 verify_jwt = true
+
+[functions.restablecer-contrasena-negocio]
+verify_jwt = true

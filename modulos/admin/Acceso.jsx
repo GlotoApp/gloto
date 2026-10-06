@@ -57,7 +57,7 @@ const LoginSuperAdmin = () => {
       if (profile && profile.length > 0 && profile[0].role === "superadmin") {
         await supabase.auth.updateUser({ data: { role: "super_admin" } });
         resetAttempts();
-        navigate("/superadmin");
+        navigate("/gestion");
       } else {
         await supabase.auth.signOut();
         setErrorMsg(

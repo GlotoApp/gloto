@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import logoPng from "/logo.png";
 import {
@@ -39,7 +39,32 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
   const [businessName, setBusinessName] = useState("Gloto");
   const [businessLogo, setBusinessLogo] = useState(logoPng);
   const [planName, setPlanName] = useState("Sin plan");
+  const [inventoryEnabled, setInventoryEnabled] = useState(false);
+  const [ticketUsage, setTicketUsage] = useState(null);
   const isOrdersActive = location.pathname.startsWith("/pos/ordenes");
+  const accountPlanStyles = planName.toLowerCase().includes("premium")
+    ? {
+        button: "bg-amber-400/[0.06] hover:bg-amber-400/10",
+        active: "bg-amber-400/15",
+        icon: "bg-amber-400/15 text-amber-200",
+        accent: "text-amber-300",
+        details: "text-amber-100/60",
+      }
+    : planName.toLowerCase().includes("pro")
+      ? {
+          button: "bg-violet-400/[0.06] hover:bg-violet-400/10",
+          active: "bg-violet-400/15",
+          icon: "bg-violet-400/15 text-violet-200",
+          accent: "text-violet-300",
+          details: "text-violet-100/60",
+        }
+      : {
+          button: "bg-white/[0.03] hover:bg-white/[0.07]",
+          active: "bg-white/[0.08]",
+          icon: "bg-white/10 text-neutral-200",
+          accent: "text-neutral-300",
+          details: "text-neutral-400",
+        };
 
   useEffect(() => {
     if (!isExpanded) setUserMenuOpen(false);
@@ -193,28 +218,64 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
 
       if (!profile?.business_id) return;
 
-      const [{ data: business }, { data: subscription }] = await Promise.all([
-        supabase
-          .from("businesses")
-          .select("name, logo_url")
-          .eq("id", profile.business_id)
-          .maybeSingle(),
-        supabase
-          .from("subscriptions")
-          .select("plan_name")
-          .eq("business_id", profile.business_id)
-          .in("status", ["active", "suspended", "expired"])
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-      ]);
+      const [{ data: business }, { data: planAccess, error: planAccessError }] =
+        await Promise.all([
+          supabase
+            .from("businesses")
+            .select("name, logo_url")
+            .eq("id", profile.business_id)
+            .maybeSingle(),
+          supabase.rpc("get_business_plan_access"),
+        ]);
 
       if (business?.name) setBusinessName(business.name);
       if (business?.logo_url) setBusinessLogo(business.logo_url);
-      if (subscription?.plan_name) setPlanName(subscription.plan_name);
+      if (planAccessError) {
+        console.error("No se pudo cargar el acceso del plan:", planAccessError);
+        return;
+      }
+      if (planAccess?.plan_name) setPlanName(planAccess.plan_name);
+      setInventoryEnabled(Boolean(planAccess?.inventory_enabled));
+      setTicketUsage(
+        planAccess?.plan_code
+          ? {
+              limit: planAccess.ticket_limit,
+              used: Number(planAccess.tickets_used || 0),
+            }
+          : null,
+      );
     };
 
     loadBusinessBrand();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const refreshPlanAccess = async () => {
+      const { data, error } = await supabase.rpc("get_business_plan_access");
+      if (error) {
+        console.error("No se pudo actualizar el uso del plan:", error);
+        return;
+      }
+      if (!isMounted) return;
+      if (data?.plan_name) setPlanName(data.plan_name);
+      setInventoryEnabled(Boolean(data?.inventory_enabled));
+      setTicketUsage(
+        data?.plan_code
+          ? {
+              limit: data.ticket_limit,
+              used: Number(data.tickets_used || 0),
+            }
+          : null,
+      );
+    };
+
+    const intervalId = window.setInterval(refreshPlanAccess, 30_000);
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {
@@ -436,7 +497,9 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
           className="flex-1 px-3 pt-6 pb-20 space-y-0.5 overflow-y-auto overflow-x-hidden custom-sidebar scrollbar-gutter-stable"
           style={{ scrollbarGutter: isExpanded ? "stable" : "auto" }}
         >
-          {menuItems.map((item) => {
+          {menuItems
+            .filter((item) => item.name !== "Inventario" || inventoryEnabled)
+            .map((item) => {
             if (item.name === "Caja") {
               return (
                 <div
@@ -1056,12 +1119,14 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
                 isExpanded ? "gap-3 justify-start" : "justify-center"
               } ${
                 isExpanded && userMenuOpen
-                  ? "bg-surface-hover"
-                  : "hover:bg-surface-hover"
+                  ? accountPlanStyles.active
+                  : accountPlanStyles.button
               }`}
             >
-              <div className="w-8 h-8 rounded-full bg-surface-hover border border-outline flex items-center justify-center flex-shrink-0">
-                <span className="material-symbols-outlined text-[14px] text-primary font-variation-fill">
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${accountPlanStyles.icon}`}
+              >
+                <span className="material-symbols-outlined text-[14px] font-variation-fill">
                   shield_person
                 </span>
               </div>
@@ -1069,22 +1134,35 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
               <div
                 className={`min-w-0 transition-all duration-300 ${
                   isExpanded
-                    ? "flex-1 opacity-100 translate-x-0"
+                    ? "flex-1 text-center opacity-100 translate-x-0"
                     : "flex-none opacity-0 -translate-x-2 pointer-events-none w-0"
                 }`}
               >
-                <p className="text-on-surface font-body-sm text-[11px] font-black uppercase tracking-tighter truncate">
-                  Mi cuenta
-                </p>
-                <p className="text-primary font-label-caps text-[9px] uppercase font-black tracking-[0.1em]">
-                  {planName}
-                </p>
+                <div className="flex min-w-0 items-center justify-center gap-1.5">
+                  <p className="min-w-0 truncate text-on-surface font-body-sm text-[11px] font-black tracking-tight">
+                    {businessName}
+                  </p>
+                  <span
+                    className={`${accountPlanStyles.accent} shrink-0 font-label-caps text-[9px] uppercase font-black tracking-[0.1em]`}
+                  >
+                    {planName}
+                  </span>
+                </div>
+                {ticketUsage && (
+                  <p
+                    className={`mt-0.5 truncate text-center text-[9px] ${accountPlanStyles.details}`}
+                  >
+                    {ticketUsage.limit == null
+                      ? `${ticketUsage.used.toLocaleString("es-CO")} tickets · sin límite`
+                      : `${ticketUsage.used.toLocaleString("es-CO")} / ${ticketUsage.limit.toLocaleString("es-CO")} tickets`}
+                  </p>
+                )}
               </div>
 
               {isExpanded && (
                 <ChevronDown
                   size={14}
-                  className={`text-primary/50 transition-transform duration-300 flex-shrink-0 ${
+                  className={`${accountPlanStyles.accent} opacity-60 transition-transform duration-300 flex-shrink-0 ${
                     userMenuOpen ? "rotate-180" : ""
                   }`}
                 />

@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft,
   Crown,
   CreditCard,
   LayoutDashboard,
+  LogOut,
   Menu,
   Megaphone,
   Settings,
@@ -14,28 +14,29 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
+import { supabase } from "../../src/lib/supabaseClient";
 
 const navItems = [
-  { label: "Resumen", path: "/superadmin/resumen", icon: LayoutDashboard },
-  { label: "Marketplace", path: "/superadmin/marketplace", icon: Tag },
-  { label: "Tiendas", path: "/superadmin/tiendas", icon: Store },
-  { label: "Crear cuenta", path: "/superadmin/cuentas/nueva", icon: UserPlus },
+  { label: "Resumen", path: "/gestion/resumen", icon: LayoutDashboard },
+  { label: "Marketplace", path: "/gestion/marketplace", icon: Tag },
+  { label: "Tiendas", path: "/gestion/tiendas", icon: Store },
+  { label: "Crear cuenta", path: "/gestion/cuentas/nueva", icon: UserPlus },
   {
     label: "Suscripciones",
-    path: "/superadmin/finanzas/suscripciones",
+    path: "/gestion/finanzas/suscripciones",
     icon: WalletCards,
   },
   {
     label: "Planes",
-    path: "/superadmin/planes",
+    path: "/gestion/planes",
     icon: CreditCard,
   },
   {
     label: "Promociones",
-    path: "/superadmin/finanzas/promociones",
+    path: "/gestion/finanzas/promociones",
     icon: Megaphone,
   },
-  { label: "Sistema", path: "/superadmin/sistema", icon: Settings },
+  { label: "Sistema", path: "/gestion/sistema", icon: Settings },
 ];
 
 const SuperAdminSidebar = ({
@@ -45,9 +46,28 @@ const SuperAdminSidebar = ({
   onMouseLeave,
 }) => {
   const [internalExpanded, setInternalExpanded] = useState(true);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
+  const navigate = useNavigate();
   const isExpanded = expandedProp ?? internalExpanded;
   const toggleSidebar =
     toggleSidebarProp ?? (() => setInternalExpanded((current) => !current));
+
+  const handleSignOut = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
+    setSignOutError("");
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      navigate("/acceso", { replace: true });
+    } catch (error) {
+      console.error("No se pudo cerrar la sesión de administración:", error);
+      setSignOutError("No se pudo cerrar sesión. Intenta de nuevo.");
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
 
   return (
     <aside
@@ -66,7 +86,7 @@ const SuperAdminSidebar = ({
             <div className="min-w-0">
               <p className="truncate text-sm font-black text-white">Gloto</p>
               <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-violet-300">
-                Superadmin
+                Administración
               </p>
             </div>
           )}
@@ -117,20 +137,28 @@ const SuperAdminSidebar = ({
       </nav>
 
       <div className="border-t border-white/[0.06] p-3">
-        <Link
-          to="/superadmin-actual"
-          title={isExpanded ? undefined : "Gestión completa"}
-          className={`group flex h-10 items-center rounded-lg text-neutral-400 transition hover:bg-white/[0.05] hover:text-white ${
+        {signOutError && (
+          <p className="mb-2 text-xs text-rose-300" role="alert">
+            {signOutError}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={handleSignOut}
+          disabled={isSigningOut}
+          title={isExpanded ? undefined : "Cerrar sesión"}
+          aria-label="Cerrar sesión"
+          className={`group flex h-10 w-full items-center rounded-lg text-neutral-400 transition hover:bg-white/[0.05] hover:text-white disabled:cursor-wait disabled:opacity-60 ${
             isExpanded ? "gap-3 px-3" : "justify-center"
           }`}
         >
-          <ArrowLeft size={18} />
+          <LogOut size={18} />
           {isExpanded && (
             <span className="text-xs font-bold uppercase tracking-tight">
-              Gestión completa
+              {isSigningOut ? "Cerrando sesión..." : "Cerrar sesión"}
             </span>
           )}
-        </Link>
+        </button>
       </div>
     </aside>
   );

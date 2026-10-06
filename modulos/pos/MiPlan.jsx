@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   CreditCard,
@@ -7,7 +7,9 @@ import {
   Maximize2,
   X,
   Upload,
+  LogOut,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "../../src/lib/supabaseClient";
 import SubLoading from "./SubLoading";
@@ -28,11 +30,11 @@ const formatDate = (value) =>
       })
     : "Sin fecha";
 
-const getDaysRemaining = (endsAt) => {
+const getDaysRemaining = (endsAt, currentTime = Date.now()) => {
   if (!endsAt) return null;
   return Math.max(
     0,
-    Math.ceil((new Date(endsAt).getTime() - Date.now()) / 86400000),
+    Math.ceil((new Date(endsAt).getTime() - currentTime) / 86400000),
   );
 };
 
@@ -60,6 +62,7 @@ const getPlanEndDate = (plan) => {
 export default function MiPlan() {
   const [businessId, setBusinessId] = useState(null);
   const [subscription, setSubscription] = useState(null);
+  const [planAccess, setPlanAccess] = useState(null);
   const [renewalAmount, setRenewalAmount] = useState(null);
   const [commissionStatement, setCommissionStatement] = useState(null);
   const [latestPayment, setLatestPayment] = useState(null);
@@ -69,9 +72,19 @@ export default function MiPlan() {
   const [fileInputKey, setFileInputKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [message, setMessage] = useState("");
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(
+      () => setCurrentTime(Date.now()),
+      60_000,
+    );
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const loadSubscription = async () => {
     setLoading(true);
@@ -98,6 +111,15 @@ export default function MiPlan() {
     setBusinessId(profile.business_id);
     setRenewalAmount(null);
     setCommissionStatement(null);
+    const { data: planAccessData, error: planAccessError } = await supabase.rpc(
+      "get_business_plan_access",
+    );
+    if (planAccessError) {
+      console.error("No se pudo cargar el uso del plan:", planAccessError);
+      setMessage("No se pudo consultar el uso de tickets de tu plan.");
+    } else {
+      setPlanAccess(planAccessData);
+    }
     const [{ data, error }, { data: paymentData }, { data: qrData }] =
       await Promise.all([
         supabase
@@ -223,11 +245,39 @@ export default function MiPlan() {
   );
 
   const daysRemaining = useMemo(
-    () => getDaysRemaining(planEndDate),
-    [planEndDate],
+    () => getDaysRemaining(planEndDate, currentTime),
+    [currentTime, planEndDate],
   );
   const planHasExpired =
-    planEndDate !== null && new Date(planEndDate).getTime() <= Date.now();
+    planEndDate !== null && new Date(planEndDate).getTime() <= currentTime;
+  const planEndTime = planEndDate ? new Date(planEndDate).getTime() : null;
+  const suspensionDeadline =
+    planEndTime === null ? null : planEndTime + 3 * 86400000;
+  const isInSuspensionGracePeriod =
+    ["active", "expired"].includes(subscription?.status) &&
+    planEndTime !== null &&
+    currentTime >= planEndTime &&
+    currentTime < suspensionDeadline;
+  const suspensionIsDue =
+    ["active", "expired"].includes(subscription?.status) &&
+    planEndTime !== null &&
+    currentTime >= suspensionDeadline;
+  const isSubscriptionSuspended = subscription?.status === "suspended";
+  const overdueDays = isInSuspensionGracePeriod
+    ? Math.min(3, Math.floor((currentTime - planEndTime) / 86400000) + 1)
+    : null;
+  const suspensionDaysRemaining = isInSuspensionGracePeriod
+    ? Math.max(
+        0,
+        Math.ceil((suspensionDeadline - currentTime) / 86400000),
+      )
+    : null;
+  const isPaymentOnlyMode =
+    Boolean(subscription) &&
+    (isSubscriptionSuspended ||
+      subscription.status === "expired" ||
+      isInSuspensionGracePeriod ||
+      suspensionIsDue);
 
   const validity = useMemo(() => {
     const totalDays = subscription?.duration_days || 30;
@@ -321,6 +371,17 @@ export default function MiPlan() {
     setSaving(false);
   };
 
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    setMessage("");
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error("No se pudo cerrar la sesión:", error);
+      setMessage("No se pudo cerrar la sesión. Inténtalo de nuevo.");
+      setSigningOut(false);
+    }
+  };
+
   const handleFileChange = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -355,9 +416,21 @@ export default function MiPlan() {
               Mi plan
             </h1>
           </div>
-          <p className="max-w-xs text-left text-xs leading-5 text-neutral-500 sm:text-right">
-            Consulta tu vigencia y envía el soporte de pago.
-          </p>
+          {isPaymentOnlyMode ? (
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-neutral-300 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-wait disabled:opacity-50"
+            >
+              <LogOut size={14} />
+              {signingOut ? "Cerrando..." : "Cerrar sesión"}
+            </button>
+          ) : (
+            <p className="max-w-xs text-left text-xs leading-5 text-neutral-500 sm:text-right">
+              Consulta tu vigencia y envía el soporte de pago.
+            </p>
+          )}
         </header>
 
         {loading ? (
@@ -373,6 +446,84 @@ export default function MiPlan() {
               <div className="rounded-lg border border-violet-500/20 bg-violet-500/10 px-3 py-2.5 text-xs text-violet-200">
                 {message}
               </div>
+            )}
+
+            {isPaymentOnlyMode && (
+              <div
+                role="alert"
+                className="rounded-xl border border-rose-400/20 bg-rose-400/[0.07] px-4 py-3 text-sm text-rose-100"
+              >
+                <p className="font-black">
+                  {isSubscriptionSuspended
+                    ? "Tu plan está suspendido"
+                    : "Tu ciclo terminó"}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-rose-100/75">
+                  {isInSuspensionGracePeriod
+                    ? `Estás en el día ${overdueDays} después del vencimiento. Quedan ${suspensionDaysRemaining} ${
+                        suspensionDaysRemaining === 1 ? "día" : "días"
+                      } para que se suspenda la tienda. Desde aquí puedes enviar el comprobante de pago.`
+                    : isSubscriptionSuspended
+                      ? "Envía el comprobante de pago para solicitar la reactivación de tu tienda."
+                      : "Envía el comprobante de pago para renovar y reactivar tu tienda."}
+                </p>
+              </div>
+            )}
+
+            {!isPaymentOnlyMode && planAccess?.plan_code && (
+              <section className="rounded-xl bg-white/[0.02] p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xs font-black uppercase tracking-wider text-neutral-200">
+                      Tickets de este ciclo
+                    </h2>
+                    <p className="mt-1 text-sm text-neutral-400">
+                      {planAccess.ticket_limit === null ||
+                      planAccess.ticket_limit === undefined
+                        ? `${Number(planAccess.tickets_used || 0).toLocaleString("es-CO")} tickets · sin límite`
+                        : `${Number(planAccess.tickets_used || 0).toLocaleString("es-CO")} de ${Number(planAccess.ticket_limit).toLocaleString("es-CO")} tickets usados`}
+                    </p>
+                  </div>
+                  {planAccess.ticket_limit != null &&
+                    Number(planAccess.tickets_remaining) === 0 && (
+                      <Link
+                        to="/pos/planes"
+                        className="rounded-lg bg-violet-600 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-white hover:bg-violet-500"
+                      >
+                        Ver planes
+                      </Link>
+                    )}
+                </div>
+                {planAccess.ticket_limit != null && (
+                  <div
+                    className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"
+                    role="progressbar"
+                    aria-label="Uso de tickets del ciclo"
+                    aria-valuemin={0}
+                    aria-valuemax={Number(planAccess.ticket_limit)}
+                    aria-valuenow={Math.min(
+                      Number(planAccess.tickets_used || 0),
+                      Number(planAccess.ticket_limit),
+                    )}
+                  >
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        Number(planAccess.tickets_remaining) === 0
+                          ? "bg-rose-400"
+                          : "bg-violet-400"
+                      }`}
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (Number(planAccess.tickets_used || 0) /
+                            Number(planAccess.ticket_limit)) *
+                            100,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                )}
+              </section>
             )}
 
             {latestPayment && latestPayment.status !== "paid" && (
@@ -403,7 +554,8 @@ export default function MiPlan() {
               </section>
             ) : (
               <>
-                <section className="rounded-xl bg-white/[0.02] p-5 sm:p-6">
+                {!isPaymentOnlyMode && (
+                  <section className="rounded-xl bg-white/[0.02] p-5 sm:p-6">
                   <div className="mx-auto max-w-sm text-center">
                     <div className="flex items-center justify-between gap-3 text-left">
                       <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
@@ -411,13 +563,21 @@ export default function MiPlan() {
                       </p>
                       <span
                         className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${
-                          validity.isActive
-                            ? "bg-emerald-500/10 text-emerald-300"
-                            : "bg-rose-500/10 text-rose-300"
+                          suspensionIsDue || isInSuspensionGracePeriod
+                            ? "bg-rose-500/10 text-rose-300"
+                            : validity.isActive
+                              ? "bg-emerald-500/10 text-emerald-300"
+                              : "bg-rose-500/10 text-rose-300"
                         }`}
                       >
-                        <CheckCircle2 size={11} />{" "}
-                        {getStatusLabel(subscription.status)}
+                        <CheckCircle2 size={11} />
+                        {isSubscriptionSuspended
+                          ? "Plan suspendido"
+                          : suspensionIsDue
+                          ? "Suspensión pendiente"
+                          : isInSuspensionGracePeriod
+                            ? "Vencido · periodo de gracia"
+                            : getStatusLabel(subscription.status)}
                       </span>
                     </div>
                     <div className="relative mx-auto mt-3 w-full max-w-[280px]">
@@ -459,16 +619,47 @@ export default function MiPlan() {
                           className="text-4xl font-black sm:text-5xl"
                           style={{ color: validity.color }}
                         >
-                          {daysRemaining === null
-                            ? "-"
-                            : validity.remainingDays}
+                          {isSubscriptionSuspended || suspensionIsDue
+                            ? "!"
+                            : isInSuspensionGracePeriod
+                              ? `-${overdueDays}`
+                              : daysRemaining === null
+                                ? "-"
+                                : validity.remainingDays}
                         </p>
                         <p className="mt-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                          Días restantes
+                          {isSubscriptionSuspended
+                            ? "Plan suspendido"
+                            : suspensionIsDue
+                              ? "Suspensión pendiente"
+                            : isInSuspensionGracePeriod
+                              ? "Días desde vencimiento"
+                              : "Días restantes"}
                         </p>
+                        {isInSuspensionGracePeriod && (
+                          <p className="mt-1 text-[10px] font-bold text-rose-300">
+                            {suspensionDaysRemaining}{" "}
+                            {suspensionDaysRemaining === 1
+                              ? "día restante"
+                              : "días restantes"}{" "}
+                            para suspensión
+                          </p>
+                        )}
+                        {(suspensionIsDue || isSubscriptionSuspended) && (
+                          <p className="mt-1 text-[10px] font-bold text-rose-300">
+                            {isSubscriptionSuspended
+                              ? "La tienda está suspendida por vencimiento del plan."
+                              : "El periodo de gracia terminó; la suspensión está en proceso."}
+                          </p>
+                        )}
                         <p className="mt-1 text-[10px] text-neutral-500">
-                          {validity.totalDays} días ·{" "}
-                          {subscription.billing_period || "periodo"}
+                          {isInSuspensionGracePeriod ||
+                          suspensionIsDue ||
+                          isSubscriptionSuspended
+                            ? "Ciclo vencido"
+                            : `${validity.totalDays} días · ${
+                                subscription.billing_period || "periodo"
+                              }`}
                         </p>
                       </div>
                     </div>
@@ -479,9 +670,11 @@ export default function MiPlan() {
                       </strong>
                     </p>
                   </div>
-                </section>
+                  </section>
+                )}
 
-                {isCommissionPlan &&
+                {!isPaymentOnlyMode &&
+                  isCommissionPlan &&
                   commissionStatement &&
                   !commissionCycleClosed && (
                     <section className="rounded-2xl border border-violet-300/15 bg-gradient-to-br from-violet-400/[0.07] via-neutral-900/80 to-neutral-900 p-5 sm:p-6">
@@ -525,7 +718,7 @@ export default function MiPlan() {
                     </section>
                   )}
 
-                {showPaymentPanel && (
+                {(isPaymentOnlyMode || showPaymentPanel) && (
                   <>
                     <div className="overflow-hidden rounded-2xl border border-rose-300/15 bg-gradient-to-br from-rose-400/[0.08] via-neutral-900/80 to-neutral-900">
                       <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
@@ -552,7 +745,9 @@ export default function MiPlan() {
                             )}
                             <p className="mt-1 max-w-xl text-xs leading-relaxed text-neutral-400">
                               {isCommissionPlan
-                                ? `Ciclo vencido ${formatDate(commissionStatement.cycle_starts_at)} – ${formatDate(commissionStatement.cycle_ends_at)}: ${commissionStatement.order_count} tickets sumaron ${formatCurrency(commissionStatement.sales_total)} en ventas. La comisión del ${commissionStatement.commission_rate}% calculada y redondeada por ticket suma ${formatCurrency(commissionStatement.commission_total)}. Se compara con el mínimo de ${formatCurrency(commissionStatement.minimum_amount)}; el total fijado para pagar es ${formatCurrency(commissionStatement.amount_due)}. Al aprobar el pago, se activa el siguiente ciclo.`
+                                ? commissionStatement
+                                  ? `Ciclo vencido ${formatDate(commissionStatement.cycle_starts_at)} – ${formatDate(commissionStatement.cycle_ends_at)}: ${commissionStatement.order_count} tickets sumaron ${formatCurrency(commissionStatement.sales_total)} en ventas. La comisión del ${commissionStatement.commission_rate}% calculada y redondeada por ticket suma ${formatCurrency(commissionStatement.commission_total)}. Se compara con el mínimo de ${formatCurrency(commissionStatement.minimum_amount)}; el total fijado para pagar es ${formatCurrency(commissionStatement.amount_due)}. Al aprobar el pago, se activa el siguiente ciclo.`
+                                  : "No se pudo calcular el valor del ciclo vencido. Intenta actualizar la página o contacta a soporte."
                                 : planHasExpired
                                   ? `Tu periodo terminó el ${formatDate(planEndDate)}. Este es el precio para renovar tu plan.`
                                   : subscription.status === "suspended"

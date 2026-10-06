@@ -60,7 +60,7 @@ const Login = () => {
         resetAttempts();
         navigate("/pos");
       }
-    } catch (err) {
+    } catch {
       setErrorMsg("Ocurrió un error al intentar entrar");
     } finally {
       setLoading(false);

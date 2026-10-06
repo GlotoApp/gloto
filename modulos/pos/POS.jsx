@@ -522,6 +522,7 @@ const POS = () => {
   const [pendingOutOfStockQuantity, setPendingOutOfStockQuantity] =
     useState(null);
   const [showOrderSentModal, setShowOrderSentModal] = useState(false);
+  const [showTicketLimitNotice, setShowTicketLimitNotice] = useState(false);
   const [showUpdateSuccessModal, setShowUpdateSuccessModal] = useState(false);
   const [showReservationSuccessModal, setShowReservationSuccessModal] =
     useState(false);
@@ -546,6 +547,7 @@ const POS = () => {
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [isProductCatalogReady, setIsProductCatalogReady] = useState(false);
   const [businessId, setBusinessId] = useState(null);
+  const [inventoryEnabled, setInventoryEnabled] = useState(false);
   const [deliverySettings, setDeliverySettings] = useState(null);
   const [deliveryClock, setDeliveryClock] = useState(() => new Date());
   const [deliveryBusinessLogoUrl, setDeliveryBusinessLogoUrl] = useState("");
@@ -852,6 +854,7 @@ const POS = () => {
     const loadProfile = async () => {
       if (!user?.id) {
         setBusinessId(null);
+        setInventoryEnabled(false);
         setDeliverySettings(null);
         setDeliveryBusinessLogoUrl("");
         setIsLoadingDeliverySettings(false);
@@ -873,6 +876,7 @@ const POS = () => {
       if (error) {
         console.error("Error cargando perfil:", error);
         setBusinessId(null);
+        setInventoryEnabled(false);
         setDeliverySettings(null);
         setDeliveryBusinessLogoUrl("");
         setIsLoadingDeliverySettings(false);
@@ -885,6 +889,7 @@ const POS = () => {
 
       if (!profile?.business_id) {
         setBusinessId(null);
+        setInventoryEnabled(false);
         setDeliverySettings(null);
         setDeliveryBusinessLogoUrl("");
         setIsLoadingDeliverySettings(false);
@@ -914,6 +919,27 @@ const POS = () => {
 
     loadProfile();
   }, [user]);
+
+  useEffect(() => {
+    if (!businessId) return undefined;
+
+    let cancelled = false;
+    const loadPlanAccess = async () => {
+      const { data, error } = await supabase.rpc("get_business_plan_access");
+      if (cancelled) return;
+      if (error) {
+        console.error("Error consultando acceso al inventario:", error);
+        setInventoryEnabled(true);
+        return;
+      }
+      setInventoryEnabled(Boolean(data?.inventory_enabled));
+    };
+
+    loadPlanAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
 
   useEffect(() => {
     if (!businessId) return undefined;
@@ -1590,7 +1616,8 @@ const POS = () => {
         0,
       ) || 0;
     const numericStock = Number(product?.stock);
-    const hasFiniteStock = Number.isFinite(numericStock);
+    const hasFiniteStock =
+      inventoryEnabled && Number.isFinite(numericStock);
     const editQuantityLimit =
       isEditingTableOrder && originalQuantityInEdit > 0 && hasFiniteStock
         ? Math.max(0, numericStock + originalQuantityInEdit)
@@ -1620,7 +1647,9 @@ const POS = () => {
       setOutOfStockProduct(product);
       setOutOfStockMessage(
         isOutOfStock
-          ? "El sistema marca este producto como AGOTADO porque su inventario está en cero o en negativo. Aun así, puedes continuar la venta; el faltante quedará registrado en el inventario."
+          ? inventoryEnabled
+            ? "El sistema marca este producto como AGOTADO por su inventario. Aun así, puedes continuar la venta; el faltante quedará registrado en el inventario."
+            : "Este producto está marcado manualmente como agotado. Aun así, puedes continuar esta venta desde el POS."
           : `El sistema indica que solo hay ${numericStock} ${getProductUnitLabel(product)} disponibles. Puedes continuar la venta; el excedente quedará registrado como faltante en el inventario.`,
       );
       setOutOfStockCartId(null);
@@ -1774,6 +1803,7 @@ const POS = () => {
     );
     const availableStock = Number(activeProduct.stock);
     if (
+      inventoryEnabled &&
       Number.isFinite(availableStock) &&
       existingQuantity + requestedQuantity > availableStock
     ) {
@@ -1966,20 +1996,26 @@ const POS = () => {
       ) || 0;
     const numericStock = Number(product.stock);
     const isOutOfStock =
-      product.soldOut || (Number.isFinite(numericStock) && numericStock <= 0);
+      product.soldOut ||
+      (inventoryEnabled &&
+        Number.isFinite(numericStock) &&
+        numericStock <= 0);
 
     if (isOutOfStock) {
       setOutOfStockProduct(product);
       setOutOfStockCartId(cartItem.cartId);
       setPendingOutOfStockQuantity(null);
       setOutOfStockMessage(
-        "El sistema marca este producto como AGOTADO porque su inventario está en cero o en negativo. Aun así, puedes continuar la venta; el faltante quedará registrado en el inventario.",
+        inventoryEnabled
+          ? "El sistema marca este producto como AGOTADO por su inventario. Aun así, puedes continuar la venta; el faltante quedará registrado en el inventario."
+          : "Este producto está marcado manualmente como agotado. Aun así, puedes continuar esta venta desde el POS.",
       );
       setShowOutOfStockWarning(true);
       return;
     }
 
     if (
+      inventoryEnabled &&
       isEditingTableOrder &&
       originalQuantityInEdit > 0 &&
       Number.isFinite(numericStock)
@@ -1998,6 +2034,7 @@ const POS = () => {
     }
 
     const exceedsAvailableStock =
+      inventoryEnabled &&
       !isEditingTableOrder &&
       Number.isFinite(numericStock) &&
       Number(cartItem.qty) + quantityStep > Math.max(0, numericStock);
@@ -2061,6 +2098,7 @@ const POS = () => {
     const numericStock = Number(product?.stock);
 
     if (
+      inventoryEnabled &&
       isEditingTableOrder &&
       originalQuantityInEdit > 0 &&
       Number.isFinite(numericStock)
@@ -2485,6 +2523,7 @@ const POS = () => {
     paymentMethod === "efectivo" ? parseFloat(moneyPaid) || 0 : 0;
   const isCashPaymentBelowTotal =
     paymentMethod === "efectivo" &&
+    inventoryEnabled &&
     !isEditingTableOrder &&
     total > 0 &&
     paidAmount < total;
@@ -3113,6 +3152,12 @@ const POS = () => {
 
       if (error) {
         console.error("Error guardando orden desde POS:", error);
+        if (
+          error.message?.includes("TICKET_LIMIT_REACHED") ||
+          error.message?.includes("ACTIVE_PLAN_REQUIRED")
+        ) {
+          setShowTicketLimitNotice(true);
+        }
         return;
       }
 
@@ -3132,6 +3177,12 @@ const POS = () => {
       resetAllPOSState(true);
     } catch (error) {
       console.error("Error guardando orden desde POS:", error);
+      if (
+        error.message?.includes("TICKET_LIMIT_REACHED") ||
+        error.message?.includes("ACTIVE_PLAN_REQUIRED")
+      ) {
+        setShowTicketLimitNotice(true);
+      }
     } finally {
       submittingOrderRef.current = false;
       setIsSubmittingOrder(false);
@@ -3889,19 +3940,24 @@ const POS = () => {
                         : "cursor-wait opacity-80"
                     }`}
                   >
-                    <div
-                      className={`absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-full text-white text-[10px] font-bold uppercase tracking-wider ${
-                        product.soldOut || Number(product.stock) <= 0
-                          ? "bg-red-600"
-                          : "bg-green-600"
-                      }`}
-                    >
-                      {product.soldOut || Number(product.stock) <= 0
-                        ? "Agotado"
-                        : Number(product.stock) > 99
-                          ? "Stock: 99+"
-                          : `Stock: ${Number(product.stock)}`}
-                    </div>
+                    {(inventoryEnabled || product.soldOut) && (
+                      <div
+                        className={`absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-full text-white text-[10px] font-bold uppercase tracking-wider ${
+                          product.soldOut ||
+                          (inventoryEnabled && Number(product.stock) <= 0)
+                            ? "bg-red-600"
+                            : "bg-green-600"
+                        }`}
+                      >
+                        {product.soldOut
+                          ? "Agotado"
+                          : inventoryEnabled
+                            ? Number(product.stock) > 99
+                              ? "Stock: 99+"
+                              : `Stock: ${Number(product.stock)}`
+                            : "Disponible"}
+                      </div>
+                    )}
                     {/* Botón Info - Elevado con Glassmorphism */}
                     <button
                       onClick={(e) => {
@@ -5319,6 +5375,48 @@ const POS = () => {
           </div>
         )}
       </div>
+
+      {showTicketLimitNotice && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="ticket-limit-title"
+            className="w-full max-w-md rounded-2xl border border-violet-400/30 bg-surface p-6 shadow-2xl"
+          >
+            <h2
+              id="ticket-limit-title"
+              className="text-lg font-black uppercase text-on-surface"
+            >
+              Límite de tickets alcanzado
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">
+              Tu plan llegó al máximo de tickets del ciclo. Las órdenes y el
+              historial siguen disponibles; cambia a un plan superior para
+              continuar creando ventas.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowTicketLimitNotice(false)}
+                className="flex-1 rounded-xl border border-outline px-4 py-3 text-xs font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface"
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTicketLimitNotice(false);
+                  navigate("/pos/planes");
+                }}
+                className="flex-1 rounded-xl bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-violet-500"
+              >
+                Ver planes
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {showOutOfStockWarning && outOfStockProduct && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">

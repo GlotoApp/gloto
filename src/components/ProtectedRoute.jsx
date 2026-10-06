@@ -8,9 +8,9 @@ export const ProtectedRoute = ({ children }) => {
   if (loading) return <div>Cargando...</div>;
 
   if (!user) {
-    // Si intentas entrar a superadmin, vas al login especial
-    if (location.pathname === "/superadmin") {
-      return <Navigate to="/login-superadmin" replace />;
+    // El acceso a gestión requiere autenticación.
+    if (location.pathname === "/gestion") {
+      return <Navigate to="/acceso" replace />;
     }
     // Si intentas entrar al POS, vas al login normal
     return <Navigate to="/login" replace />;

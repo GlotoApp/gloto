@@ -4,6 +4,7 @@ import {
   Routes,
   Route,
   Navigate,
+  Link,
   useLocation,
 } from "react-router-dom";
 import Marketplace from "../modulos/marketplace/Marketplace";
@@ -61,18 +62,102 @@ const Mercado = lazy(() => import("../modulos/admin/Mercado"));
 const Finanzas = lazy(() => import("../modulos/admin/Finanzas"));
 const Sistema = lazy(() => import("../modulos/admin/Sistema"));
 const Login = lazy(() => import("../modulos/pos/Login"));
+const ConfiguracionInicial = lazy(
+  () => import("../modulos/pos/ConfiguracionInicial"),
+);
 
 // Componentes protectores
 const RequireAdmin = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return <Loading />;
-  return user ? children : <Navigate to="/login-superadmin" replace />;
+  return user ? children : <Navigate to="/acceso" replace />;
 };
 
 const RequireAuth = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return <Loading />;
   return user ? children : <Navigate to="/login" replace />;
+};
+
+const LegacyAdminRouteRedirect = () => {
+  const location = useLocation();
+  const genericPath = location.pathname.replace(
+    /^\/superadmin(?=\/|$)/,
+    "/gestion",
+  );
+  return (
+    <Navigate
+      to={`${genericPath}${location.search}${location.hash}`}
+      replace
+    />
+  );
+};
+
+const AccountSetupGate = ({ children }) => {
+  const { user } = useAuth();
+  const [setupStatus, setSetupStatus] = useState("loading");
+  const [retryKey, setRetryKey] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkSetup = async () => {
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("onboarding_completed")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (error || !profile) {
+        console.error("No se pudo verificar la configuración inicial:", error);
+        if (isMounted) setSetupStatus("error");
+        return;
+      }
+
+      const requiresSetup =
+        !profile.onboarding_completed ||
+        Boolean(user.user_metadata?.must_change_password);
+      if (isMounted) setSetupStatus(requiresSetup ? "required" : "complete");
+    };
+
+    checkSetup();
+    return () => {
+      isMounted = false;
+    };
+  }, [retryKey, user.id, user.user_metadata?.must_change_password]);
+
+  if (setupStatus === "loading") return <Loading />;
+  if (setupStatus === "error") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-neutral-950 px-4 text-white">
+        <section className="w-full max-w-lg rounded-2xl border border-rose-500/20 bg-neutral-900 p-6 text-center">
+          <h1 className="text-xl font-black">
+            No se pudo verificar tu configuración
+          </h1>
+          <p className="mt-2 text-sm text-neutral-300">
+            Para proteger tu cuenta, el POS permanecerá bloqueado hasta validar
+            si debes completar la configuración inicial.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setSetupStatus("loading");
+              setRetryKey((current) => current + 1);
+            }}
+            className="mt-5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-black uppercase tracking-wider hover:bg-violet-500"
+          >
+            Reintentar
+          </button>
+        </section>
+      </div>
+    );
+  }
+
+  return setupStatus === "required" ? (
+    <Navigate to="/configuracion-inicial" replace />
+  ) : (
+    children
+  );
 };
 
 const PlanAccessGate = ({ children }) => {
@@ -107,21 +192,47 @@ const PlanAccessGate = ({ children }) => {
         return;
       }
 
-      const { data: isSuspended, error: subscriptionError } =
-        await supabase.rpc("is_business_subscription_suspended", {
+      const [
+        { data: isSuspended, error: subscriptionError },
+        { data: currentSubscription, error: currentSubscriptionError },
+      ] = await Promise.all([
+        supabase.rpc("is_business_subscription_suspended", {
           p_business_id: profile.business_id,
-        });
+        }),
+        supabase
+          .from("subscriptions")
+          .select("status,ends_at")
+          .eq("business_id", profile.business_id)
+          .in("status", ["active", "expired", "suspended"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
 
-      if (subscriptionError) {
+      if (subscriptionError || currentSubscriptionError) {
         console.error(
           "No se pudo verificar la vigencia del plan:",
-          subscriptionError,
+          subscriptionError || currentSubscriptionError,
         );
         if (isMounted) setAccessStatus("error");
         return;
       }
 
-      if (isMounted) setAccessStatus(isSuspended ? "suspended" : "allowed");
+      const isExpired =
+        currentSubscription?.ends_at &&
+        new Date(currentSubscription.ends_at).getTime() <= Date.now();
+      const requiresPayment =
+        currentSubscription?.status === "suspended" || isExpired;
+
+      if (isMounted) {
+        setAccessStatus(
+          requiresPayment
+            ? "payment_only"
+            : isSuspended
+              ? "suspended"
+              : "allowed",
+        );
+      }
     };
 
     checkPlanAccess();
@@ -157,6 +268,13 @@ const PlanAccessGate = ({ children }) => {
         </section>
       </div>
     );
+  }
+
+  if (accessStatus === "payment_only") {
+    if (location.pathname !== "/pos/mi-plan") {
+      return <Navigate to="/pos/mi-plan" replace />;
+    }
+    return <MiPlan />;
   }
 
   if (accessStatus === "suspended") {
@@ -212,6 +330,78 @@ const PlanAccessGate = ({ children }) => {
   return children;
 };
 
+const RequireInventoryPlan = ({ children }) => {
+  const [status, setStatus] = useState("loading");
+  const [retryKey, setRetryKey] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkInventoryAccess = async () => {
+      const { data, error } = await supabase.rpc("get_business_plan_access");
+      if (error) {
+        console.error("No se pudo verificar el acceso a inventario:", error);
+        if (isMounted) setStatus("error");
+        return;
+      }
+      if (isMounted) {
+        setStatus(data?.inventory_enabled ? "allowed" : "restricted");
+      }
+    };
+
+    checkInventoryAccess();
+    return () => {
+      isMounted = false;
+    };
+  }, [retryKey]);
+
+  if (status === "loading") return <Loading />;
+  if (status === "allowed") return children;
+
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center px-4 text-white">
+      <section
+        className={`w-full max-w-xl rounded-2xl bg-neutral-900 p-6 text-center ${
+          status === "error"
+            ? "border border-rose-500/20"
+            : "border border-violet-500/20"
+        }`}
+        role={status === "error" ? "alert" : undefined}
+      >
+        <h1 className="text-xl font-black">
+          {status === "error"
+            ? "No se pudo verificar tu plan"
+            : "Inventario disponible en Pro y Premium"}
+        </h1>
+        <p className="mt-2 text-sm leading-6 text-neutral-300">
+          {status === "error"
+            ? "No pudimos comprobar si tu plan incluye inventario. Inténtalo de nuevo."
+            : "Cambia tu plan para gestionar insumos, movimientos y recetas. Tus datos se conservan."}
+        </p>
+        {status === "error" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setStatus("loading");
+              setRetryKey((current) => current + 1);
+            }}
+            className="mt-5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-black uppercase tracking-wider hover:bg-violet-500"
+          >
+            Reintentar
+          </button>
+        ) : (
+          <Link
+            to="/pos/planes"
+            className="mt-5 inline-flex rounded-lg bg-violet-600 px-4 py-2 text-xs font-black uppercase tracking-wider hover:bg-violet-500"
+          >
+            Ver planes
+          </Link>
+        )}
+      </section>
+    </div>
+  );
+};
+
 function App() {
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== "undefined" ? navigator.onLine : true,
@@ -242,14 +432,26 @@ function App() {
         <Routes>
           {/* Rutas Públicas */}
           <Route path="/login" element={<Login />} />
-          <Route path="/login-superadmin" element={<Acceso />} />
+          <Route path="/acceso" element={<Acceso />} />
+          <Route
+            path="/login-superadmin"
+            element={<Navigate to="/acceso" replace />}
+          />
+          <Route
+            path="/configuracion-inicial"
+            element={
+              <RequireAuth>
+                <ConfiguracionInicial />
+              </RequireAuth>
+            }
+          />
           <Route path="/marketplace/*" element={<Marketplace />} />
           <Route path="/" element={<Navigate to="/marketplace" replace />} />
           <Route path="*" element={<Upss />} />
 
-          {/* Ruta Protegida: SuperAdmin */}
+          {/* Área protegida de administración */}
           <Route
-            path="/superadmin"
+            path="/gestion"
             element={
               <RequireAdmin>
                 <EstructuraAdmin />
@@ -295,12 +497,20 @@ function App() {
             <Route path="sistema" element={<Sistema />} />
           </Route>
           <Route
-            path="/superadmin-actual"
+            path="/gestion-general"
             element={
               <RequireAdmin>
                 <GestionCompleta />
               </RequireAdmin>
             }
+          />
+          <Route
+            path="/superadmin/*"
+            element={<LegacyAdminRouteRedirect />}
+          />
+          <Route
+            path="/superadmin-actual"
+            element={<Navigate to="/gestion-general" replace />}
           />
 
           {/* Rutas Protegidas: POS */}
@@ -308,9 +518,11 @@ function App() {
             path="/pos"
             element={
               <RequireAuth>
-                <PlanAccessGate>
-                  <Layout />
-                </PlanAccessGate>
+                <AccountSetupGate>
+                  <PlanAccessGate>
+                    <Layout />
+                  </PlanAccessGate>
+                </AccountSetupGate>
               </RequireAuth>
             }
           >
@@ -334,15 +546,27 @@ function App() {
             <Route path="promociones" element={<Promociones />} />
             <Route
               path="inventario"
-              element={<Inventario initialTab="insumos" standalone />}
+              element={
+                <RequireInventoryPlan>
+                  <Inventario initialTab="insumos" standalone />
+                </RequireInventoryPlan>
+              }
             />
             <Route
               path="inventario/categorias"
-              element={<InventarioCategorias />}
+              element={
+                <RequireInventoryPlan>
+                  <InventarioCategorias />
+                </RequireInventoryPlan>
+              }
             />
             <Route
               path="inventario/movimientos"
-              element={<InventarioMovimientos />}
+              element={
+                <RequireInventoryPlan>
+                  <InventarioMovimientos />
+                </RequireInventoryPlan>
+              }
             />
             <Route path="caja" element={<Caja />} />
             <Route path="caja/historial" element={<HistorialCierres />} />

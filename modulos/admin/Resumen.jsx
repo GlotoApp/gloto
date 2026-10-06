@@ -170,7 +170,7 @@ const SuperAdminDashboardData = () => {
 
   if (!metrics) {
     return (
-      <SuperAdminSectionShell title="Resumen" badge="Superadmin">
+      <SuperAdminSectionShell title="Resumen" badge="Administración">
         <p className="text-sm text-neutral-400">Cargando resumen...</p>
       </SuperAdminSectionShell>
     );
@@ -180,7 +180,7 @@ const SuperAdminDashboardData = () => {
     <SuperAdminSectionShell
       title="Resumen"
       subtitle="Indicadores generales de operación, suscripciones y pagos."
-      badge="Superadmin"
+      badge="Administración"
     >
       {metrics.hasErrors && (
         <p className="text-sm text-amber-300">

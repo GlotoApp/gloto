@@ -21,6 +21,18 @@ const isValidSlug = (slug: string) =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const createTemporaryPassword = () => {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+};
+
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -32,7 +44,7 @@ Deno.serve(async (request: Request) => {
 
   const authorization = request.headers.get("Authorization");
   if (!authorization?.startsWith("Bearer ")) {
-    return jsonResponse(401, { error: "Debes iniciar sesión como superadmin." });
+    return jsonResponse(401, { error: "Debes iniciar sesión con una cuenta de administración." });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -65,10 +77,10 @@ Deno.serve(async (request: Request) => {
 
   if (profileLookupError) {
     console.error("No se pudo validar el rol del solicitante:", profileLookupError);
-    return jsonResponse(500, { error: "No se pudo validar el permiso de superadmin." });
+    return jsonResponse(500, { error: "No se pudo validar el permiso de administración." });
   }
   if (callerProfile?.role !== "superadmin") {
-    return jsonResponse(403, { error: "Solo un superadmin puede crear cuentas." });
+    return jsonResponse(403, { error: "Solo una cuenta de administración puede crear negocios." });
   }
 
   let parsedBody: unknown;
@@ -86,13 +98,7 @@ Deno.serve(async (request: Request) => {
     typeof body.businessName === "string" ? body.businessName.trim() : "";
   const businessSlug =
     typeof body.businessSlug === "string" ? body.businessSlug.trim() : "";
-  const categoryId =
-    typeof body.categoryId === "string" ? body.categoryId.trim() : "";
-  const whatsappPhone =
-    typeof body.whatsappPhone === "string" ? body.whatsappPhone.trim() : "";
-  const address = typeof body.address === "string" ? body.address.trim() : "";
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  const password = typeof body.password === "string" ? body.password : "";
 
   if (!businessName || businessName.length > 120) {
     return jsonResponse(400, { error: "El nombre del negocio es obligatorio." });
@@ -100,38 +106,34 @@ Deno.serve(async (request: Request) => {
   if (!isValidSlug(businessSlug)) {
     return jsonResponse(400, { error: "El slug debe contener letras minúsculas, números y guiones." });
   }
-  if (!categoryId) {
-    return jsonResponse(400, { error: "Selecciona una categoría para el negocio." });
-  }
-  if (!whatsappPhone || whatsappPhone.length > 40) {
-    return jsonResponse(400, { error: "Ingresa un WhatsApp de contacto válido." });
-  }
-  if (address.length > 500) {
-    return jsonResponse(400, { error: "La dirección no puede superar 500 caracteres." });
-  }
   if (
     email.length > 254 ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   ) {
     return jsonResponse(400, { error: "Ingresa un correo válido." });
   }
-  if (password.length < 8 || password.length > 128) {
-    return jsonResponse(400, { error: "La contraseña debe tener entre 8 y 128 caracteres." });
-  }
+  const temporaryPassword = createTemporaryPassword();
 
   let businessId: string | null = null;
   let userId: string | null = null;
 
   try {
-    const { data: category, error: categoryError } = await adminClient
-      .from("categories")
-      .select("id,name")
-      .eq("id", categoryId)
+    const { data: initialPeriod, error: initialPeriodError } = await adminClient
+      .from("billing_plan_periods")
+      .select(
+        "id,plan_code,plan_name,billing_type,plan_is_active,code,label,duration_days,price_amount,commission_rate,minimum_amount,is_active",
+      )
+      .eq("plan_code", "inicial")
+      .eq("code", "monthly")
+      .eq("plan_is_active", true)
+      .eq("is_active", true)
       .maybeSingle();
 
-    if (categoryError) throw categoryError;
-    if (!category) {
-      return jsonResponse(400, { error: "La categoría seleccionada no existe." });
+    if (initialPeriodError) throw initialPeriodError;
+    if (!initialPeriod) {
+      throw new Error(
+        "El plan Inicial no está disponible. Actívalo antes de crear negocios.",
+      );
     }
 
     const { data: business, error: businessError } = await adminClient
@@ -150,8 +152,9 @@ Deno.serve(async (request: Request) => {
     const { data: createdUser, error: createUserError } =
       await adminClient.auth.admin.createUser({
         email,
-        password,
+        password: temporaryPassword,
         email_confirm: true,
+        user_metadata: { must_change_password: true },
       });
 
     if (createUserError) throw createUserError;
@@ -169,26 +172,37 @@ Deno.serve(async (request: Request) => {
           email,
           role: "admin",
           business_id: businessId,
+          onboarding_completed: false,
         },
         { onConflict: "id" },
       );
 
     if (upsertProfileError) throw upsertProfileError;
 
-    const { error: businessInfoError } = await adminClient
-      .from("business_info")
-      .upsert(
-        {
-          business_id: businessId,
-          category_id: category.id,
-          categoria: category.name,
-          whatsapp_phone: whatsappPhone,
-          address: address || null,
-        },
-        { onConflict: "business_id" },
-      );
+    const startsAt = new Date();
+    const endsAt = new Date(
+      startsAt.getTime() + initialPeriod.duration_days * 24 * 60 * 60 * 1000,
+    );
+    const subscriptionAmount =
+      initialPeriod.billing_type === "commission"
+        ? Number(initialPeriod.minimum_amount || 0)
+        : Number(initialPeriod.price_amount || 0);
+    const { error: subscriptionError } = await adminClient
+      .from("subscriptions")
+      .insert({
+        business_id: businessId,
+        plan_code: initialPeriod.plan_code,
+        plan_name: initialPeriod.plan_name,
+        period_id: initialPeriod.id,
+        duration_days: initialPeriod.duration_days,
+        billing_period: initialPeriod.label,
+        amount: subscriptionAmount,
+        status: "active",
+        starts_at: startsAt.toISOString(),
+        ends_at: endsAt.toISOString(),
+      });
 
-    if (businessInfoError) throw businessInfoError;
+    if (subscriptionError) throw subscriptionError;
 
     return jsonResponse(200, {
       success: true,
@@ -196,6 +210,9 @@ Deno.serve(async (request: Request) => {
       email,
       businessId,
       businessSlug,
+      planName: initialPeriod.plan_name,
+      planEndsAt: endsAt.toISOString(),
+      temporaryPassword,
     });
   } catch (error) {
     console.error("Error creando usuario/negocio:", error);
@@ -231,7 +248,11 @@ Deno.serve(async (request: Request) => {
     }
 
     const message =
-      error instanceof Error ? error.message : "Error desconocido al crear la cuenta.";
+      error instanceof Error
+        ? error.message
+        : isRecord(error) && typeof error.message === "string"
+          ? error.message
+          : "Error desconocido al crear la cuenta.";
     return jsonResponse(rollbackFailed ? 500 : 400, {
       error: rollbackFailed
         ? `La creación falló y no se pudieron revertir todos los datos. Contacta soporte. Detalle: ${message}`

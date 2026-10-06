@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
+  Check,
   Image,
   LoaderCircle,
   LocateFixed,
   MapPin,
   Maximize2,
   Minimize2,
+  Pencil,
   Save,
   Store,
 } from "lucide-react";
@@ -67,6 +69,22 @@ const canvasToFile = (canvas, fileName, type, quality) =>
     );
   });
 
+const setMapEditing = (map, enabled) => {
+  [
+    "dragging",
+    "touchZoom",
+    "doubleClickZoom",
+    "scrollWheelZoom",
+    "boxZoom",
+    "keyboard",
+  ].forEach((interaction) => {
+    const handler = map[interaction];
+    if (!handler) return;
+    if (enabled) handler.enable();
+    else handler.disable();
+  });
+};
+
 const createCroppedImage = async (editor, crop) => {
   const image = await loadEditorImage(editor);
   const isCover = editor.type === "cover";
@@ -91,7 +109,7 @@ const createCroppedImage = async (editor, crop) => {
     : canvasToFile(canvas, "logo.png", "image/png");
 };
 
-const ConfiguracionTienda = () => {
+const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   const [businessId, setBusinessId] = useState(null);
   const [categories, setCategories] = useState([]);
   const [data, setData] = useState(EMPTY_DATA);
@@ -106,11 +124,13 @@ const ConfiguracionTienda = () => {
   const [saveAttempted, setSaveAttempted] = useState(false);
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const [isCssMapFullscreen, setIsCssMapFullscreen] = useState(false);
+  const [isMapEditing, setIsMapEditing] = useState(false);
   const [message, setMessage] = useState("");
   const logoInput = useRef(null);
   const coverInput = useRef(null);
   const mapElement = useRef(null);
   const mapInstance = useRef(null);
+  const isMapEditingRef = useRef(false);
 
   useEffect(
     () => () => {
@@ -224,9 +244,18 @@ const ConfiguracionTienda = () => {
 
       const initialCenter = coordinatesRef.current || [10.373842, -75.473796];
       const map = L.default
-        .map(mapElement.current, { zoomControl: true })
+        .map(mapElement.current, {
+          zoomControl: true,
+          dragging: false,
+          touchZoom: false,
+          doubleClickZoom: false,
+          scrollWheelZoom: false,
+          boxZoom: false,
+          keyboard: false,
+        })
         .setView(initialCenter, coordinates ? 15 : 12);
 
+      setMapEditing(map, isMapEditingRef.current);
       L.default
         .tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
           attribution: "&copy; OpenStreetMap contributors",
@@ -235,6 +264,7 @@ const ConfiguracionTienda = () => {
         .addTo(map);
 
       map.on("moveend", () => {
+        if (!isMapEditingRef.current) return;
         const center = map.getCenter();
         setData((current) => ({
           ...current,
@@ -253,6 +283,15 @@ const ConfiguracionTienda = () => {
       }
     };
   }, [loading]);
+
+  const toggleMapEditing = () => {
+    const nextEditingState = !isMapEditingRef.current;
+    isMapEditingRef.current = nextEditingState;
+    setIsMapEditing(nextEditingState);
+    if (mapInstance.current) {
+      setMapEditing(mapInstance.current, nextEditingState);
+    }
+  };
 
   useEffect(() => {
     const map = mapInstance.current;
@@ -339,7 +378,7 @@ const ConfiguracionTienda = () => {
     setIsMapFullscreen(true);
   };
 
-  const useCurrentLocation = () => {
+  const locateCurrentLocation = () => {
     if (!navigator.geolocation)
       return setMessage("Tu navegador no permite obtener la ubicación.");
     setLocating(true);
@@ -378,8 +417,12 @@ const ConfiguracionTienda = () => {
       ["Costo máximo de domicilio", data.max_delivery_fee],
       ["Latitud", data.latitude],
       ["Longitud", data.longitude],
-      ["Logo", logoUrl],
-      ["Portada", coverUrl],
+      ...(onboardingMode
+        ? []
+        : [
+            ["Logo", logoUrl],
+            ["Portada", coverUrl],
+          ]),
     ];
     const emptyField = requiredFields.find(
       ([, value]) => String(value ?? "").trim() === "",
@@ -395,6 +438,19 @@ const ConfiguracionTienda = () => {
     const longitude = Number(data.longitude);
     if (minimumDelivery > maximumDelivery) {
       setMessage("El costo mínimo no puede ser mayor que el costo máximo.");
+      return;
+    }
+    if (Number(data.delivery_time_max) < Number(data.delivery_time_min)) {
+      setMessage("El tiempo máximo no puede ser menor que el tiempo mínimo.");
+      return;
+    }
+    if (
+      !Number.isFinite(Number(data.delivery_time_min)) ||
+      Number(data.delivery_time_min) <= 0 ||
+      !Number.isFinite(Number(data.delivery_time_max)) ||
+      Number(data.delivery_time_max) <= 0
+    ) {
+      setMessage("Los tiempos de entrega deben ser mayores que cero.");
       return;
     }
     const nightSurchargePercent = Number(
@@ -474,9 +530,36 @@ const ConfiguracionTienda = () => {
       ),
     ]);
     const error = businessError || infoError;
-    setMessage(
-      error ? error.message : "Información de tienda y ubicación guardadas",
-    );
+    if (error) {
+      console.error("No se pudo guardar la configuración de la tienda:", error);
+      setMessage(error.message || "No se pudo guardar la información de la tienda.");
+      setSaving(false);
+      return;
+    }
+
+    if (onboardingMode) {
+      const { error: onboardingError } = await supabase.rpc(
+        "complete_business_onboarding",
+      );
+      if (onboardingError) {
+        console.error(
+          "No se pudo completar la configuración inicial:",
+          onboardingError,
+        );
+        setMessage(
+          onboardingError.message ||
+            "No se pudo completar la configuración inicial.",
+        );
+        setSaving(false);
+        return;
+      }
+      setMessage("Configuración completa. Ya puedes empezar a usar tu tienda.");
+      setSaving(false);
+      onCompleted?.();
+      return;
+    } else {
+      setMessage("Información de tienda y ubicación guardadas");
+    }
     setSaving(false);
   };
 
@@ -568,7 +651,7 @@ const ConfiguracionTienda = () => {
   const applyImageEdit = async (crop) => {
     if (!imageEditor || uploadingImage) return;
 
-    let editedFile = imageEditor.file;
+    let editedFile;
     try {
       editedFile = await createCroppedImage(imageEditor, crop);
     } catch (error) {
@@ -587,16 +670,19 @@ const ConfiguracionTienda = () => {
   return (
     <section className="space-y-6" data-save-attempted={saveAttempted}>
       <style>{`section[data-save-attempted="true"] input:placeholder-shown { border-color: rgb(239 68 68 / 0.9); }`}</style>
-      <style>{`section.space-y-6 > div:nth-of-type(3) > div:first-child > div:last-child > button:nth-child(2) { display: none; }`}</style>
-      <header className="flex items-start gap-3 border-b border-white/[0.06] pb-5">
+      <header className="flex items-start gap-3 pb-5">
         <Store className="mt-0.5 text-violet-400" size={20} />
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-400">
             Información pública
           </p>
-          <h2 className="mt-1 text-xl font-black text-white">Tienda</h2>
+          <h2 className="mt-1 text-xl font-black text-white">
+            {onboardingMode ? "Configura tu tienda" : "Tienda"}
+          </h2>
           <p className="mt-1 text-xs text-neutral-500">
-            Aquí está todo lo que tus clientes ven y necesitan para encontrarte.
+            {onboardingMode
+              ? "Completa los datos del negocio, contacto, entrega y ubicación para poder empezar a vender."
+              : "Aquí está todo lo que tus clientes ven y necesitan para encontrarte."}
           </p>
         </div>
       </header>
@@ -610,11 +696,11 @@ const ConfiguracionTienda = () => {
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-4">
+            <div className="flex flex-col items-center justify-center rounded-2xl bg-neutral-900/45 p-4">
               <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-neutral-500">
                 Logo
               </p>
-              <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-dashed border-neutral-700 bg-neutral-950">
+              <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl bg-neutral-950">
                 {logoUrl ? (
                   <img
                     src={logoUrl}
@@ -647,7 +733,7 @@ const ConfiguracionTienda = () => {
                 />
               </div>
             </div>
-            <div className="overflow-hidden rounded-2xl border border-white/[0.07] bg-neutral-900/45">
+            <div className="overflow-hidden rounded-2xl bg-neutral-900/45">
               <div className="relative h-48">
                 {coverUrl ? (
                   <img
@@ -692,7 +778,7 @@ const ConfiguracionTienda = () => {
             saving={Boolean(uploadingImage)}
             error={imageEditorError}
           />
-          <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
+          <div className="rounded-2xl bg-neutral-900/45 p-5 md:p-6">
             <h3 className="mb-5 text-sm font-black uppercase tracking-wider text-neutral-300">
               Identidad y contacto
             </h3>
@@ -739,31 +825,61 @@ const ConfiguracionTienda = () => {
               />
             </div>
           </div>
-          <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
+          <div className="rounded-2xl bg-neutral-900/45 p-5 md:p-6">
             <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 className="text-sm font-black uppercase tracking-wider text-neutral-300">
                   Ubicación en el mapa
                 </h3>
                 <p className="mt-1 text-xs text-neutral-500">
-                  Mueve el mapa debajo del puntero fijo para elegir la
-                  ubicación.
+                  {isMapEditing
+                    ? "Mueve el mapa debajo del puntero fijo y confirma al terminar."
+                    : "El mapa está bloqueado para evitar movimientos accidentales."}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={useCurrentLocation}
-                  disabled={locating}
-                  className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-[10px] font-black uppercase text-violet-300 disabled:opacity-50"
+                  onClick={toggleMapEditing}
+                  className={`flex items-center gap-2 rounded-xl px-3 py-2 text-[10px] font-black uppercase transition ${
+                    isMapEditing
+                      ? "bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
+                      : "bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
+                  }`}
+                  aria-pressed={isMapEditing}
                 >
-                  <LocateFixed size={14} />{" "}
+                  {isMapEditing ? <Check size={14} /> : <Pencil size={14} />}
+                  {isMapEditing ? "Listo" : "Editar mapa"}
+                </button>
+              </div>
+            </div>
+            <div
+              ref={mapElement}
+              className={`isolate overflow-hidden bg-neutral-950 [&:fullscreen]:mb-0 [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0 ${
+                isCssMapFullscreen
+                  ? "fixed inset-0 z-[1000] m-0 h-[100dvh] w-screen rounded-none border-0"
+                  : "relative mb-5 h-72 rounded-2xl"
+              }`}
+              aria-label="Mapa interactivo de ubicación de la tienda"
+            >
+              <div className="absolute right-4 top-4 z-[600] flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    locateCurrentLocation();
+                  }}
+                  disabled={locating}
+                  aria-busy={locating}
+                  className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-neutral-950/85 px-3 py-2 text-[10px] font-black uppercase text-violet-300 shadow-lg backdrop-blur-md disabled:opacity-50"
+                >
+                  <LocateFixed size={14} />
                   {locating ? "Localizando..." : "Usar mi ubicación"}
                 </button>
                 <button
                   type="button"
                   onClick={toggleMapFullscreen}
-                  className="rounded-xl border border-white/10 bg-white/[0.05] p-2 text-neutral-300 hover:bg-white/10"
+                  className="rounded-xl border border-white/20 bg-neutral-950/85 p-2 text-white shadow-lg backdrop-blur-md"
                   aria-label={
                     isMapFullscreen
                       ? "Salir de pantalla completa"
@@ -776,43 +892,12 @@ const ConfiguracionTienda = () => {
                   }
                 >
                   {isMapFullscreen ? (
-                    <Minimize2 size={16} />
+                    <Minimize2 size={18} />
                   ) : (
-                    <Maximize2 size={16} />
+                    <Maximize2 size={18} />
                   )}
                 </button>
               </div>
-            </div>
-            <div
-              ref={mapElement}
-              className={`overflow-hidden bg-neutral-950 [&:fullscreen]:mb-0 [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0 ${
-                isCssMapFullscreen
-                  ? "fixed inset-0 z-[1000] m-0 h-[100dvh] w-screen rounded-none border-0"
-                  : "relative mb-5 h-72 rounded-2xl border border-white/[0.08]"
-              }`}
-              aria-label="Mapa interactivo de ubicación de la tienda"
-            >
-              <button
-                type="button"
-                onClick={toggleMapFullscreen}
-                className="absolute right-4 top-4 z-[600] rounded-xl border border-white/20 bg-neutral-950/85 p-2 text-white shadow-lg backdrop-blur-md"
-                aria-label={
-                  isMapFullscreen
-                    ? "Salir de pantalla completa"
-                    : "Abrir pantalla completa"
-                }
-                title={
-                  isMapFullscreen
-                    ? "Salir de pantalla completa"
-                    : "Abrir pantalla completa"
-                }
-              >
-                {isMapFullscreen ? (
-                  <Minimize2 size={18} />
-                ) : (
-                  <Maximize2 size={18} />
-                )}
-              </button>
               <div className="pointer-events-none absolute left-1/2 top-1/2 z-[500] -translate-x-1/2 -translate-y-full text-violet-600 drop-shadow-[0_3px_4px_rgba(0,0,0,0.65)]">
                 <MapPin
                   size={42}
@@ -837,7 +922,7 @@ const ConfiguracionTienda = () => {
               />
             </div>
           </div>
-          <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
+          <div className="rounded-2xl bg-neutral-900/45 p-5 md:p-6">
             <h3 className="mb-5 text-sm font-black uppercase tracking-wider text-neutral-300">
               Entrega y domicilio
             </h3>
@@ -879,7 +964,7 @@ const ConfiguracionTienda = () => {
                 }
               />
             </div>
-            <div className="mt-6 rounded-xl border border-white/[0.07] bg-neutral-950/50 p-4">
+            <div className="mt-6 rounded-xl bg-neutral-950/50 p-4">
               <label className="flex cursor-pointer items-center gap-3 text-sm font-bold text-neutral-200">
                 <input
                   type="checkbox"
@@ -929,7 +1014,7 @@ const ConfiguracionTienda = () => {
               </p>
             </div>
           </div>
-          <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/45 p-5 md:p-6">
+          <div className="rounded-2xl bg-neutral-900/45 p-5 md:p-6">
             <h3 className="mb-2 text-sm font-black uppercase tracking-wider text-neutral-300">
               Propina en POS
             </h3>
@@ -950,7 +1035,7 @@ const ConfiguracionTienda = () => {
               />
             </div>
           </div>
-          <footer className="sticky bottom-4 z-10 flex items-center justify-between gap-4 rounded-2xl border border-violet-400/20 bg-neutral-950/95 p-4 shadow-xl backdrop-blur-md">
+          <footer className="sticky bottom-4 z-10 flex items-center justify-between gap-4 rounded-2xl bg-neutral-950/95 p-4 shadow-xl backdrop-blur-md">
             <span className="text-xs text-emerald-300">{message}</span>
             <button
               type="button"
@@ -958,7 +1043,12 @@ const ConfiguracionTienda = () => {
               disabled={saving || loading || Boolean(uploadingImage)}
               className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
             >
-              <Save size={14} /> {saving ? "Guardando..." : "Guardar tienda"}
+              <Save size={14} />{" "}
+              {saving
+                ? "Guardando..."
+                : onboardingMode
+                  ? "Guardar y comenzar"
+                  : "Guardar tienda"}
             </button>
           </footer>
         </>

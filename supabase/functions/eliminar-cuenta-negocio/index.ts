@@ -61,7 +61,7 @@ Deno.serve(async (request: Request) => {
 
   const authorization = request.headers.get("Authorization");
   if (!authorization?.startsWith("Bearer ")) {
-    return jsonResponse(401, { error: "Debes iniciar sesión como superadmin." });
+    return jsonResponse(401, { error: "Debes iniciar sesión con una cuenta de administración." });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -92,10 +92,10 @@ Deno.serve(async (request: Request) => {
     .maybeSingle();
   if (profileLookupError) {
     console.error("No se pudo validar el rol del solicitante:", profileLookupError);
-    return jsonResponse(500, { error: "No se pudo validar el permiso de superadmin." });
+    return jsonResponse(500, { error: "No se pudo validar el permiso de administración." });
   }
   if (callerProfile?.role !== "superadmin") {
-    return jsonResponse(403, { error: "Solo un superadmin puede eliminar cuentas." });
+    return jsonResponse(403, { error: "Solo una cuenta de administración puede eliminar negocios." });
   }
 
   let body: unknown;
@@ -151,7 +151,7 @@ Deno.serve(async (request: Request) => {
     )
   ) {
     return jsonResponse(409, {
-      error: "No se puede eliminar una tienda asociada a un usuario superadmin.",
+      error: "No se puede eliminar una tienda asociada a una cuenta de administración.",
     });
   }
 

@@ -6,8 +6,11 @@ import {
   Ban,
   Camera,
   Check,
+  CheckCircle2,
   Clock3,
+  Copy,
   Image as ImageIcon,
+  KeyRound,
   LocateFixed,
   LoaderCircle,
   MapPin,
@@ -134,6 +137,14 @@ const TiendaArchivo = () => {
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deletingBusiness, setDeletingBusiness] = useState(false);
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [passwordResetUsers, setPasswordResetUsers] = useState([]);
+  const [selectedPasswordUserId, setSelectedPasswordUserId] = useState("");
+  const [passwordResetCredentials, setPasswordResetCredentials] =
+    useState(null);
+  const [passwordResetLoading, setPasswordResetLoading] = useState(false);
+  const [passwordResetError, setPasswordResetError] = useState("");
+  const [passwordCopied, setPasswordCopied] = useState(false);
   const [logoUrl, setLogoUrl] = useState("");
   const [coverUrl, setCoverUrl] = useState("");
   const logoInputRef = useRef(null);
@@ -1145,12 +1156,129 @@ const TiendaArchivo = () => {
       if (data.warning) {
         window.alert(data.warning);
       }
-      navigate("/superadmin/tiendas", { replace: true });
+      navigate("/gestion/tiendas", { replace: true });
     } catch (error) {
-      console.error("Error eliminando la tienda desde Superadmin:", error);
+      console.error("Error eliminando la tienda desde administración:", error);
       setDeleteError(error.message || "No se pudo eliminar la tienda.");
     } finally {
       setDeletingBusiness(false);
+    }
+  };
+
+  const invokePasswordReset = async (body) => {
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.refreshSession();
+    if (sessionError || !session?.access_token) {
+      throw new Error(
+        "Tu sesión expiró. Inicia sesión de nuevo como administrador.",
+      );
+    }
+
+    const { data, error } = await supabase.functions.invoke(
+      "restablecer-contrasena-negocio",
+      {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body,
+      },
+    );
+    if (error) {
+      let message = error.message;
+      if (error.context && typeof error.context.json === "function") {
+        try {
+          const responseBody = await error.context.json();
+          message = responseBody?.error || message;
+        } catch (parseError) {
+          console.warn(
+            "No se pudo leer el error de restablecimiento:",
+            parseError,
+          );
+        }
+      }
+      throw new Error(message || "No se pudo restablecer la contraseña.");
+    }
+    return data;
+  };
+
+  const openPasswordResetDialog = async () => {
+    setPasswordDialogOpen(true);
+    setPasswordResetLoading(true);
+    setPasswordResetError("");
+    setPasswordResetCredentials(null);
+    setPasswordCopied(false);
+    setPasswordResetUsers([]);
+    setSelectedPasswordUserId("");
+
+    try {
+      const data = await invokePasswordReset({
+        action: "list",
+        businessId: id,
+      });
+      if (!data?.success || !Array.isArray(data.users)) {
+        throw new Error(data?.error || "No se pudieron cargar los usuarios.");
+      }
+      setPasswordResetUsers(data.users);
+      setSelectedPasswordUserId(data.users[0]?.id || "");
+      if (data.users.length === 0) {
+        setPasswordResetError(
+          "Esta tienda no tiene administradores activos para restablecer.",
+        );
+      }
+    } catch (error) {
+      console.error("No se pudieron cargar los usuarios de la tienda:", error);
+      setPasswordResetError(
+        error.message || "No se pudieron cargar los usuarios.",
+      );
+    } finally {
+      setPasswordResetLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async (event) => {
+    event.preventDefault();
+    if (!selectedPasswordUserId || passwordResetLoading) return;
+
+    setPasswordResetLoading(true);
+    setPasswordResetError("");
+    setPasswordResetCredentials(null);
+    setPasswordCopied(false);
+    try {
+      const data = await invokePasswordReset({
+        action: "reset",
+        businessId: id,
+        userId: selectedPasswordUserId,
+      });
+      if (!data?.success || !data?.temporaryPassword) {
+        throw new Error(data?.error || "No se recibió la contraseña temporal.");
+      }
+      setPasswordResetCredentials({
+        email: data.email,
+        password: data.temporaryPassword,
+      });
+    } catch (error) {
+      console.error("No se pudo restablecer la contraseña:", error);
+      setPasswordResetError(
+        error.message || "No se pudo restablecer la contraseña.",
+      );
+    } finally {
+      setPasswordResetLoading(false);
+    }
+  };
+
+  const copyTemporaryPassword = async () => {
+    if (!passwordResetCredentials) return;
+    try {
+      await navigator.clipboard.writeText(
+        `Correo: ${passwordResetCredentials.email}\nContraseña temporal: ${passwordResetCredentials.password}`,
+      );
+      setPasswordCopied(true);
+      setPasswordResetError("");
+    } catch (error) {
+      console.error("No se pudo copiar la contraseña temporal:", error);
+      setPasswordResetError(
+        "No se pudo copiar. Selecciona los datos y cópialos manualmente.",
+      );
     }
   };
 
@@ -1160,7 +1288,7 @@ const TiendaArchivo = () => {
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => navigate("/superadmin/tiendas")}
+            onClick={() => navigate("/gestion/tiendas")}
             className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-white transition hover:border-violet-400 hover:bg-violet-500/10"
           >
             <ArrowLeft size={16} />
@@ -1168,6 +1296,17 @@ const TiendaArchivo = () => {
           </button>
 
           <div className="flex flex-wrap items-center gap-2">
+            {store && !loading && (
+              <button
+                type="button"
+                onClick={openPasswordResetDialog}
+                disabled={passwordResetLoading}
+                className="inline-flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm font-medium text-amber-100 transition hover:bg-amber-400/20 disabled:cursor-wait disabled:opacity-60"
+              >
+                <KeyRound size={16} />
+                Restablecer contraseña
+              </button>
+            )}
             {store && !loading && (
               <button
                 type="button"
@@ -2025,7 +2164,7 @@ const TiendaArchivo = () => {
             </div>
             {store.admin_suspended && store.admin_suspension_reason && (
               <p className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-200">
-                Suspendida por superadmin. Motivo:{" "}
+                Suspendida por administración. Motivo:{" "}
                 {store.admin_suspension_reason}
               </p>
             )}
@@ -2034,6 +2173,130 @@ const TiendaArchivo = () => {
           <TiendaDetalle store={store} detail={detail} />
         )}
       </div>
+      {passwordDialogOpen && store && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => {
+            if (!passwordResetLoading) setPasswordDialogOpen(false);
+          }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reset-password-title"
+            onSubmit={handlePasswordReset}
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-lg space-y-4 rounded-2xl border border-amber-400/20 bg-neutral-900 p-5 shadow-2xl"
+          >
+            <div>
+              <h2 id="reset-password-title" className="text-lg font-black">
+                Restablecer contraseña
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-neutral-400">
+                No es posible consultar la contraseña anterior. Se generará una
+                nueva temporal, que el usuario deberá cambiar al iniciar sesión.
+              </p>
+            </div>
+            {passwordResetCredentials ? (
+              <div className="space-y-3 rounded-xl border border-emerald-400/20 bg-emerald-500/5 p-4">
+                <div className="flex items-start gap-2 text-sm text-emerald-100">
+                  <CheckCircle2 className="mt-0.5 shrink-0" size={17} />
+                  <p>
+                    Contraseña temporal generada. Cópiala ahora; no se volverá
+                    a mostrar cuando cierres esta ventana.
+                  </p>
+                </div>
+                <label className="block space-y-1.5 text-xs font-semibold text-neutral-400">
+                  Correo de acceso
+                  <input
+                    readOnly
+                    value={passwordResetCredentials.email || ""}
+                    className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 font-mono text-sm text-white"
+                  />
+                </label>
+                <label className="block space-y-1.5 text-xs font-semibold text-neutral-400">
+                  Contraseña temporal
+                  <input
+                    readOnly
+                    value={passwordResetCredentials.password}
+                    onFocus={(event) => event.target.select()}
+                    className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 font-mono text-sm text-white"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={copyTemporaryPassword}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-500"
+                >
+                  {passwordCopied ? <Check size={16} /> : <Copy size={16} />}
+                  {passwordCopied ? "Credenciales copiadas" : "Copiar credenciales"}
+                </button>
+              </div>
+            ) : (
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-neutral-200">
+                  Administrador de la tienda
+                </span>
+                <select
+                  required
+                  value={selectedPasswordUserId}
+                  onChange={(event) =>
+                    setSelectedPasswordUserId(event.target.value)
+                  }
+                  disabled={passwordResetLoading || passwordResetUsers.length === 0}
+                  className="w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-400"
+                >
+                  <option value="">
+                    {passwordResetLoading
+                      ? "Cargando administradores..."
+                      : "Selecciona un administrador"}
+                  </option>
+                  {passwordResetUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.email || user.username || user.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {passwordResetError && (
+              <p role="alert" className="text-sm text-red-300">
+                {passwordResetError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={passwordResetLoading}
+                onClick={() => setPasswordDialogOpen(false)}
+                className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-neutral-300 hover:bg-white/5 disabled:opacity-60"
+              >
+                Cerrar
+              </button>
+              {!passwordResetCredentials && (
+                <button
+                  type="submit"
+                  disabled={
+                    passwordResetLoading ||
+                    !selectedPasswordUserId ||
+                    passwordResetUsers.length === 0
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-neutral-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {passwordResetLoading ? (
+                    <LoaderCircle className="animate-spin" size={16} />
+                  ) : (
+                    <KeyRound size={16} />
+                  )}
+                  {passwordResetLoading
+                    ? "Restableciendo..."
+                    : "Generar contraseña temporal"}
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+      )}
       {suspensionDialogOpen && store && (
         <div
           className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"

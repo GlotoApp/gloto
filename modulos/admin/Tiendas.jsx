@@ -196,7 +196,7 @@ const SuperAdminTiendasPanel = ({}) => {
   };
 
   const openStoreDetail = (id) => {
-    navigate(`/superadmin/tiendas/${id}`);
+    navigate(`/gestion/tiendas/${id}`);
   };
 
   return (
@@ -206,7 +206,7 @@ const SuperAdminTiendasPanel = ({}) => {
       badge="Operación"
       actions={
         <Link
-          to="/superadmin-actual"
+          to="/gestion-general"
           className="inline-flex items-center justify-center rounded-xl bg-violet-500 px-3 py-2 text-sm font-bold text-white transition hover:bg-violet-400"
         >
           Abrir gestión

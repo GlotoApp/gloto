@@ -1,5 +1,12 @@
-import { useEffect, useState } from "react";
-import { CheckCircle2, LoaderCircle, UserPlus } from "lucide-react";
+import { useState } from "react";
+import {
+  Check,
+  CheckCircle2,
+  Copy,
+  KeyRound,
+  LoaderCircle,
+  UserPlus,
+} from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import SuperAdminSectionShell from "./ContenedorSeccion";
 
@@ -19,41 +26,12 @@ const CrearCuentaSuperAdmin = () => {
   const [businessName, setBusinessName] = useState("");
   const [businessSlug, setBusinessSlug] = useState("");
   const [slugWasEdited, setSlugWasEdited] = useState(false);
-  const [categoryId, setCategoryId] = useState("");
-  const [whatsappPhone, setWhatsappPhone] = useState("");
-  const [address, setAddress] = useState("");
-  const [categories, setCategories] = useState([]);
-  const [categoriesLoading, setCategoriesLoading] = useState(true);
-  const [categoriesError, setCategoriesError] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState(null);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadCategories = async () => {
-      const { data, error } = await supabase
-        .from("categories")
-        .select("id,name")
-        .order("name", { ascending: true });
-
-      if (!isMounted) return;
-      if (error) {
-        console.error("No se pudieron cargar las categorías:", error);
-        setCategoriesError("No se pudieron cargar las categorías de la tienda.");
-      } else {
-        setCategories(data || []);
-      }
-      setCategoriesLoading(false);
-    };
-
-    loadCategories();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  const [createdCredentials, setCreatedCredentials] = useState(null);
+  const [credentialsCopied, setCredentialsCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
 
   const updateBusinessName = (value) => {
     setBusinessName(value);
@@ -73,19 +51,32 @@ const CrearCuentaSuperAdmin = () => {
 
     setIsSubmitting(true);
     setFeedback(null);
+    setCreatedCredentials(null);
+    setCredentialsCopied(false);
+    setCopyError("");
 
     try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.refreshSession();
+
+      if (sessionError || !session?.access_token) {
+        throw new Error(
+          "Tu sesión expiró. Inicia sesión de nuevo como administrador.",
+        );
+      }
+
       const { data, error } = await supabase.functions.invoke(
         "crear-cuenta-negocio",
         {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
           body: {
             businessName: businessName.trim(),
             businessSlug: businessSlug.trim(),
-            categoryId,
-            whatsappPhone: whatsappPhone.trim(),
-            address: address.trim(),
             email: email.trim().toLowerCase(),
-            password,
           },
         },
       );
@@ -97,30 +88,31 @@ const CrearCuentaSuperAdmin = () => {
             const responseBody = await error.context.json();
             message = responseBody?.error || message;
           } catch (parseError) {
-            console.warn("No se pudo leer el error de creación de cuenta:", parseError);
+            console.warn(
+              "No se pudo leer el error de creación de cuenta:",
+              parseError,
+            );
           }
         }
         throw new Error(message || "No se pudo crear la cuenta.");
       }
 
-      if (!data?.success) {
-        throw new Error(data?.error || "No se pudo crear la cuenta.");
+      if (!data?.success || !data?.temporaryPassword) {
+        throw new Error(data?.error || "No se recibió la contraseña temporal.");
       }
 
-      setFeedback({
-        type: "success",
-        message: `Cuenta creada para ${data.email}. Negocio: ${data.businessSlug}.`,
+      setCreatedCredentials({
+        email: data.email,
+        password: data.temporaryPassword,
+        businessSlug: data.businessSlug,
+        planName: data.planName,
       });
       setBusinessName("");
       setBusinessSlug("");
       setSlugWasEdited(false);
-      setCategoryId("");
-      setWhatsappPhone("");
-      setAddress("");
       setEmail("");
-      setPassword("");
     } catch (error) {
-      console.error("Error creando cuenta desde Superadmin:", error);
+      console.error("Error creando cuenta desde administración:", error);
       setFeedback({
         type: "error",
         message: error.message || "No se pudo crear la cuenta.",
@@ -130,10 +122,26 @@ const CrearCuentaSuperAdmin = () => {
     }
   };
 
+  const copyCredentials = async () => {
+    if (!createdCredentials) return;
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(
+        `Correo: ${createdCredentials.email}\nContraseña temporal: ${createdCredentials.password}`,
+      );
+      setCredentialsCopied(true);
+    } catch (error) {
+      console.error("No se pudieron copiar las credenciales:", error);
+      setCopyError(
+        "No se pudieron copiar. Selecciona el correo y la contraseña y cópialos manualmente.",
+      );
+    }
+  };
+
   return (
     <SuperAdminSectionShell
       title="Crear cuenta de negocio"
-      subtitle="Registra los datos principales del negocio y crea su usuario administrador."
+      subtitle="Crea el acceso del negocio y comparte su contraseña temporal. El usuario terminará la configuración al ingresar."
       badge="Cuentas"
     >
       <form
@@ -143,9 +151,11 @@ const CrearCuentaSuperAdmin = () => {
         <div className="flex items-start gap-3 rounded-xl border border-violet-400/15 bg-violet-500/5 p-4">
           <UserPlus className="mt-0.5 shrink-0 text-violet-300" size={18} />
           <p className="text-sm leading-6 text-neutral-300">
-            Se creará un negocio nuevo junto con una cuenta administradora
-            asociada. La cuenta quedará confirmada y podrá entrar con el correo
-            y la contraseña que definas aquí.
+            Solo necesitas el nombre del negocio, su slug y el correo de acceso.
+            Se generará una contraseña temporal segura que podrás copiar y
+            enviarle. La tienda recibirá el plan Inicial activo por 30 días, sin
+            registrar un pago. En su primer ingreso, el usuario deberá cambiar
+            su contraseña y completar los datos de la tienda.
           </p>
         </div>
 
@@ -183,68 +193,6 @@ const CrearCuentaSuperAdmin = () => {
           </label>
 
           <label className="text-xs font-bold text-neutral-300 sm:col-span-2">
-            Categoría del negocio
-            <select
-              required
-              className={inputClassName}
-              value={categoryId}
-              disabled={categoriesLoading || Boolean(categoriesError)}
-              onChange={(event) => {
-                setCategoryId(event.target.value);
-                setFeedback(null);
-              }}
-            >
-              <option value="">
-                {categoriesLoading
-                  ? "Cargando categorías..."
-                  : "Selecciona una categoría"}
-              </option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-            {categoriesError && (
-              <span role="alert" className="mt-1 block font-normal text-red-300">
-                {categoriesError}
-              </span>
-            )}
-          </label>
-
-          <label className="text-xs font-bold text-neutral-300 sm:col-span-2">
-            WhatsApp de contacto
-            <input
-              required
-              type="tel"
-              maxLength={40}
-              autoComplete="tel"
-              className={inputClassName}
-              value={whatsappPhone}
-              onChange={(event) => {
-                setWhatsappPhone(event.target.value);
-                setFeedback(null);
-              }}
-              placeholder="Ej.: +57 300 123 4567"
-            />
-          </label>
-
-          <label className="text-xs font-bold text-neutral-300 sm:col-span-2">
-            Dirección del negocio
-            <input
-              maxLength={500}
-              autoComplete="street-address"
-              className={inputClassName}
-              value={address}
-              onChange={(event) => {
-                setAddress(event.target.value);
-                setFeedback(null);
-              }}
-              placeholder="Dirección que verá el cliente (opcional)"
-            />
-          </label>
-
-          <label className="text-xs font-bold text-neutral-300 sm:col-span-2">
             Correo de acceso
             <input
               required
@@ -260,37 +208,13 @@ const CrearCuentaSuperAdmin = () => {
               placeholder="admin@negocio.com"
             />
           </label>
-
-          <label className="text-xs font-bold text-neutral-300 sm:col-span-2">
-            Contraseña inicial
-            <input
-              required
-              type="password"
-              minLength={8}
-              autoComplete="new-password"
-              className={inputClassName}
-              value={password}
-              onChange={(event) => {
-                setPassword(event.target.value);
-                setFeedback(null);
-              }}
-              placeholder="Mínimo 8 caracteres"
-            />
-          </label>
         </div>
 
         {feedback && (
           <div
             role={feedback.type === "error" ? "alert" : "status"}
-            className={`rounded-xl border px-4 py-3 text-sm ${
-              feedback.type === "success"
-                ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
-                : "border-red-400/20 bg-red-500/10 text-red-200"
-            }`}
+            className="rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-200"
           >
-            {feedback.type === "success" && (
-              <CheckCircle2 className="mr-2 inline-block" size={16} />
-            )}
             {feedback.message}
           </div>
         )}
@@ -301,12 +225,7 @@ const CrearCuentaSuperAdmin = () => {
             isSubmitting ||
             !businessName.trim() ||
             !businessSlug.trim() ||
-            !categoryId ||
-            !whatsappPhone.trim() ||
-            categoriesLoading ||
-            Boolean(categoriesError) ||
-            !email.trim() ||
-            password.length < 8
+            !email.trim()
           }
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
         >
@@ -318,11 +237,71 @@ const CrearCuentaSuperAdmin = () => {
           ) : (
             <>
               <UserPlus size={17} />
-              Crear cuenta y negocio
+              Crear cuenta y generar contraseña
             </>
           )}
         </button>
       </form>
+
+      {createdCredentials && (
+        <section
+          aria-labelledby="created-account-title"
+          className="mx-auto mt-6 w-full max-w-2xl space-y-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/5 p-5 sm:p-7"
+        >
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-300" size={20} />
+            <div>
+              <h2 id="created-account-title" className="font-black text-white">
+                Cuenta creada: {createdCredentials.businessSlug}
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-neutral-300">
+                Comparte estas credenciales de forma privada. La contraseña
+                temporal se muestra solo ahora; el usuario deberá cambiarla al
+                iniciar sesión.
+              </p>
+              <p className="mt-2 text-sm font-semibold text-emerald-200">
+                Plan {createdCredentials.planName || "Inicial"} activo por 30 días.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-xs font-bold text-neutral-400">
+              Correo de acceso
+              <input
+                readOnly
+                value={createdCredentials.email}
+                className={inputClassName}
+                onFocus={(event) => event.target.select()}
+              />
+            </label>
+            <label className="text-xs font-bold text-neutral-400">
+              Contraseña temporal
+              <input
+                readOnly
+                value={createdCredentials.password}
+                className={`${inputClassName} font-mono`}
+                onFocus={(event) => event.target.select()}
+              />
+            </label>
+          </div>
+
+          {copyError && (
+            <p role="alert" className="text-sm text-amber-200">
+              {copyError}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={copyCredentials}
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-500"
+          >
+            {credentialsCopied ? <Check size={17} /> : <Copy size={17} />}
+            {credentialsCopied ? "Credenciales copiadas" : "Copiar credenciales"}
+            <KeyRound size={16} />
+          </button>
+        </section>
+      )}
     </SuperAdminSectionShell>
   );
 };

@@ -1,4 +1,3 @@
-import React from "react";
 import { useLocation } from "react-router-dom";
 import ConfiguracionDatos from "./ConfiguracionDatos";
 import ConfiguracionEmpleados from "./ConfiguracionEmpleados";
@@ -31,7 +30,7 @@ const Configuracion = () => {
   return (
     <div className="min-h-screen bg-background px-4 py-6 font-sans text-white sm:px-8 sm:py-10">
       <div className="mx-auto max-w-5xl">
-        <header className="mb-6 border-b border-white/[0.06] pb-5">
+        <header className="mb-6 pb-5">
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
             Configuración
           </p>
@@ -40,7 +39,7 @@ const Configuracion = () => {
           </h1>
           <p className="mt-1 text-xs text-neutral-500">{section.description}</p>
         </header>
-        <main className="rounded-3xl border border-white/[0.06] bg-neutral-900/10 p-3 backdrop-blur-md md:p-5">
+        <main className="rounded-3xl bg-neutral-900/10 p-3 backdrop-blur-md md:p-5">
           <ActiveComponent />
         </main>
       </div>

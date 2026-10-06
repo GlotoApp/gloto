@@ -894,7 +894,7 @@ const SuperAdmin = ({ onVolver }) => {
     } catch (err) {
       console.error("No se pudo cerrar la sesión:", err);
     }
-    navigate("/login-superadmin");
+    navigate("/acceso");
   };
 
   const abrirCrear = () => {
@@ -990,7 +990,7 @@ const SuperAdmin = ({ onVolver }) => {
 
       if (!businessId) {
         throw new Error(
-          "No se pudo crear la tienda en Supabase. Revisa las políticas RLS de businesses y asegúrate de que el superadmin tenga permisos.",
+          "No se pudo crear la tienda en Supabase. Revisa las políticas RLS de businesses y asegúrate de que tu cuenta tenga permisos de administración.",
         );
       }
 

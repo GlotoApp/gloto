@@ -174,7 +174,7 @@ const TiendaDetalle = ({ store, detail }) => {
     {
       label: "Estado",
       value: store.admin_suspended
-        ? "Suspendida por superadmin"
+        ? "Suspendida por administración"
         : store.is_active
           ? "Activa"
           : "Inactiva",
