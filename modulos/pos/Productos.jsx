@@ -67,6 +67,11 @@ const formatStockQuantity = (value) =>
     Number(value) || 0,
   );
 
+const isProductLowStock = (product) =>
+  Number(product.stock) > 0 &&
+  Number(product.minStock) > 0 &&
+  Number(product.stock) <= Number(product.minStock);
+
 const formatSentenceInput = (value) => {
   return formatSentenceText(value);
 };
@@ -796,6 +801,10 @@ const Productos = ({ section = "productos" }) => {
       result = result.filter((p) => p.isActive && p.isSoldOut);
     } else if (filterStatus === "archivados") {
       result = result.filter((p) => !p.isActive);
+    } else if (filterStatus === "bajo_stock") {
+      result = result.filter(
+        (p) => p.isActive && !p.isSoldOut && isProductLowStock(p),
+      );
     }
 
     // Ordenar
@@ -2084,6 +2093,7 @@ const Productos = ({ section = "productos" }) => {
               >
                 <option value="todos">Todos</option>
                 <option value="activos">Activos</option>
+                <option value="bajo_stock">Bajo stock</option>
                 <option value="agotados">Agotados</option>
                 <option value="archivados">Archivados</option>
               </select>
@@ -2155,16 +2165,20 @@ const Productos = ({ section = "productos" }) => {
                       className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
                         !item.isActive
                           ? "bg-slate-500/80 text-slate-100 border-slate-400/30"
-                          : !item.isSoldOut
-                            ? "bg-emerald-500 text-fff border-emerald-500/30"
-                            : "bg-red-500 text-red-fff border-red-500/30"
+                          : item.isSoldOut
+                            ? "bg-red-500 text-red-fff border-red-500/30"
+                            : isProductLowStock(item)
+                              ? "bg-amber-500/20 text-amber-300 border-amber-400/30"
+                              : "bg-emerald-500 text-fff border-emerald-500/30"
                       }`}
                     >
                       {!item.isActive
                         ? "Archivado"
-                        : !item.isSoldOut
-                          ? "Activo"
-                          : "Agotado"}
+                        : item.isSoldOut
+                          ? "Agotado"
+                          : isProductLowStock(item)
+                            ? "Bajo stock"
+                            : "Activo"}
                     </div>
                   </div>
 

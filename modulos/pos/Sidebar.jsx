@@ -78,7 +78,7 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
   ];
 
   const ordersSubMenu = [
-    { name: "Órdenes activas", path: "/pos/ordenes" },
+    { name: "Órdenes", path: "/pos/ordenes" },
     { name: "Órdenes eliminadas", path: "/pos/ordenes/eliminadas" },
   ];
 
@@ -552,8 +552,13 @@ const Sidebar = ({ isExpanded, toggleSidebar, onMouseEnter, onMouseLeave }) => {
                           : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
                       }`}
                     />
-                    <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center ${isOrdersActive ? "text-primary-container" : ""}`}>
-                      <ClipboardList size={20} strokeWidth={isOrdersActive ? 2.5 : 2} />
+                    <div
+                      className={`flex h-5 w-5 flex-shrink-0 items-center justify-center ${isOrdersActive ? "text-primary-container" : ""}`}
+                    >
+                      <ClipboardList
+                        size={20}
+                        strokeWidth={isOrdersActive ? 2.5 : 2}
+                      />
                     </div>
                     <span
                       className={`truncate text-left text-xs font-bold uppercase tracking-tight transition-all ${

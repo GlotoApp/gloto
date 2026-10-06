@@ -517,12 +517,7 @@ const OrderCard = memo(
                     color="border-white/10 bg-white/5 text-neutral-400 hover:bg-white/10"
                     onClick={() => onInvoice(orden)}
                   />
-                  <ActionButton
-                    icon={Clipboard}
-                    label="Compartir"
-                    color="border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:bg-emerald-500 hover:text-white"
-                    onClick={() => onShare(orden)}
-                  />
+
                   {orden.trackingToken ? (
                     <>
                       <ActionButton
@@ -543,6 +538,12 @@ const OrderCard = memo(
                       Sin enlace de rastreo
                     </span>
                   )}
+                  <ActionButton
+                    icon={Clipboard}
+                    label="Compartir factura PDF"
+                    color="border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:bg-emerald-500 hover:text-white"
+                    onClick={() => onShare(orden)}
+                  />
                   <ActionButton
                     icon={Save}
                     label="Guardar PDF"
@@ -720,18 +721,24 @@ const InvoicePreview = ({ order, business, onClose, onPrint }) => {
               Subtotal: <strong>{formatMoney(itemsSubtotal)}</strong>
             </p>
             {order.deliveryFee > 0 && (
-              <p>Domicilio: <strong>{formatMoney(order.deliveryFee)}</strong></p>
+              <p>
+                Domicilio: <strong>{formatMoney(order.deliveryFee)}</strong>
+              </p>
             )}
             <p className="text-base font-black">
               TOTAL A PAGAR: {formatMoney(order.total)}
             </p>
           </div>
           <div className="mt-4 border-t border-dashed border-black pt-3 text-[11px]">
-            <p className="mb-1"><strong>Método(s) de pago:</strong></p>
+            <p className="mb-1">
+              <strong>Método(s) de pago:</strong>
+            </p>
             {paymentDetails.map((payment, index) => (
               <p key={`${payment.method}-${index}`}>
                 {payment.method}
-                {payment.amount !== null ? `: ${formatMoney(payment.amount)}` : ""}
+                {payment.amount !== null
+                  ? `: ${formatMoney(payment.amount)}`
+                  : ""}
               </p>
             ))}
             {order.observaciones && (
@@ -998,10 +1005,14 @@ const buildInvoicePrintHtml = (order, business = {}) => {
     )
     .join("");
   const deliveryDetails = [
-    order.deliveryAddress && `<p><strong>Dirección:</strong> ${escapeInvoiceHtml(order.deliveryAddress)}</p>`,
-    order.deliveryInstructions && `<p><strong>Referencia:</strong> ${escapeInvoiceHtml(order.deliveryInstructions)}</p>`,
-    order.mesa && `<p><strong>Mesa:</strong> ${escapeInvoiceHtml(order.mesa)}</p>`,
-    order.punto && `<p><strong>Punto:</strong> ${escapeInvoiceHtml(order.punto)}</p>`,
+    order.deliveryAddress &&
+      `<p><strong>Dirección:</strong> ${escapeInvoiceHtml(order.deliveryAddress)}</p>`,
+    order.deliveryInstructions &&
+      `<p><strong>Referencia:</strong> ${escapeInvoiceHtml(order.deliveryInstructions)}</p>`,
+    order.mesa &&
+      `<p><strong>Mesa:</strong> ${escapeInvoiceHtml(order.mesa)}</p>`,
+    order.punto &&
+      `<p><strong>Punto:</strong> ${escapeInvoiceHtml(order.punto)}</p>`,
   ]
     .filter(Boolean)
     .join("");
@@ -1130,6 +1141,7 @@ const Ordenes = () => {
   const [hasMoreOrders, setHasMoreOrders] = useState(true);
   const [loadingMoreOrders, setLoadingMoreOrders] = useState(false);
   const [invoiceOrder, setInvoiceOrder] = useState(null);
+  const [trackingOrder, setTrackingOrder] = useState(null);
   const [orderPendingDeletion, setOrderPendingDeletion] = useState(null);
   const [deleteConfirmationNumber, setDeleteConfirmationNumber] = useState("");
   const [deleteReasonCode, setDeleteReasonCode] = useState("");
@@ -1216,10 +1228,16 @@ const Ordenes = () => {
       }
 
       if (businessResult.error) {
-        console.error("Error cargando datos de la tienda para la factura:", businessResult.error);
+        console.error(
+          "Error cargando datos de la tienda para la factura:",
+          businessResult.error,
+        );
       }
       if (businessInfoResult.error) {
-        console.error("Error cargando contacto de la tienda para la factura:", businessInfoResult.error);
+        console.error(
+          "Error cargando contacto de la tienda para la factura:",
+          businessInfoResult.error,
+        );
       }
       setInvoiceBusiness({
         name: businessResult.data?.name || "",
@@ -1279,7 +1297,10 @@ const Ordenes = () => {
       try {
         ordersWithUnits = await hydrateOrderItemUnits(data || []);
       } catch (unitError) {
-        console.error("No se pudieron completar las unidades de las órdenes:", unitError);
+        console.error(
+          "No se pudieron completar las unidades de las órdenes:",
+          unitError,
+        );
         setLoadingMoreOrders(false);
         return;
       }
@@ -1410,7 +1431,8 @@ const Ordenes = () => {
     event.preventDefault();
     if (
       !orderPendingDeletion ||
-      deleteConfirmationNumber !== String(orderPendingDeletion.numeroFactura || orderPendingDeletion.id) ||
+      deleteConfirmationNumber !==
+        String(orderPendingDeletion.numeroFactura || orderPendingDeletion.id) ||
       !deleteReasonCode ||
       (deleteReasonCode === "other" && !deleteReasonDetails.trim())
     ) {
@@ -1477,7 +1499,7 @@ const Ordenes = () => {
       alert("Esta orden no tiene un enlace de seguimiento disponible.");
       return;
     }
-    window.open(trackingUrl, "_blank", "noopener,noreferrer");
+    setTrackingOrder({ ...orden, trackingUrl });
   };
 
   const handleShareTracking = async (orden) => {
@@ -1498,11 +1520,16 @@ const Ordenes = () => {
 
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(trackingUrl);
-        alert("Enlace de seguimiento copiado. Ya puedes compartirlo con el cliente.");
+        alert(
+          "Enlace de seguimiento copiado. Ya puedes compartirlo con el cliente.",
+        );
         return;
       }
 
-      window.prompt("Copia este enlace de seguimiento para compartirlo:", trackingUrl);
+      window.prompt(
+        "Copia este enlace de seguimiento para compartirlo:",
+        trackingUrl,
+      );
     } catch (error) {
       if (error?.name === "AbortError") return;
       console.error("Error compartiendo el enlace de seguimiento:", error);
@@ -1657,7 +1684,9 @@ const Ordenes = () => {
                 type="button"
                 onClick={loadBusinessOrders}
                 disabled={refreshing}
-                title={refreshing ? "Actualizando órdenes" : "Actualizar órdenes"}
+                title={
+                  refreshing ? "Actualizando órdenes" : "Actualizar órdenes"
+                }
                 aria-label="Actualizar órdenes"
                 className="inline-flex items-center justify-center rounded-xl p-2 text-violet-300 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -1953,6 +1982,49 @@ const Ordenes = () => {
         onClose={() => setInvoiceOrder(null)}
         onPrint={handlePrint}
       />
+      {trackingOrder && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-2 backdrop-blur-sm sm:p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setTrackingOrder(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="order-tracking-title"
+            className="flex h-[95dvh] max-h-[95dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-950 shadow-2xl"
+          >
+            <header className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-3 sm:px-5">
+              <div>
+                <h2
+                  id="order-tracking-title"
+                  className="text-sm font-black uppercase tracking-widest text-white"
+                >
+                  Seguimiento del pedido
+                </h2>
+                <p className="mt-1 text-xs text-neutral-400">
+                  Orden {trackingOrder.numeroFactura}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTrackingOrder(null)}
+                aria-label="Cerrar seguimiento"
+                className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <iframe
+              key={trackingOrder.trackingUrl}
+              title={`Seguimiento del pedido ${trackingOrder.numeroFactura}`}
+              src={trackingOrder.trackingUrl}
+              className="min-h-0 w-full flex-1 border-0 bg-neutral-950"
+            />
+          </section>
+        </div>
+      )}
       {orderPendingDeletion && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
           <form
@@ -1990,7 +2062,9 @@ const Ordenes = () => {
                 Describe el motivo
                 <textarea
                   value={deleteReasonDetails}
-                  onChange={(event) => setDeleteReasonDetails(event.target.value)}
+                  onChange={(event) =>
+                    setDeleteReasonDetails(event.target.value)
+                  }
                   className="mt-2 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-red-500/50"
                   rows={3}
                   required
@@ -2001,7 +2075,9 @@ const Ordenes = () => {
               autoFocus
               type="text"
               value={deleteConfirmationNumber}
-              onChange={(event) => setDeleteConfirmationNumber(event.target.value)}
+              onChange={(event) =>
+                setDeleteConfirmationNumber(event.target.value)
+              }
               placeholder="Escribe el número de la orden"
               aria-label="Escribe el número de la orden para confirmar la eliminación"
               className="mt-4 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-red-500/50"
@@ -2031,7 +2107,10 @@ const Ordenes = () => {
                 disabled={
                   isDeletingOrder ||
                   deleteConfirmationNumber !==
-                    String(orderPendingDeletion.numeroFactura || orderPendingDeletion.id) ||
+                    String(
+                      orderPendingDeletion.numeroFactura ||
+                        orderPendingDeletion.id,
+                    ) ||
                   !deleteReasonCode ||
                   (deleteReasonCode === "other" && !deleteReasonDetails.trim())
                 }

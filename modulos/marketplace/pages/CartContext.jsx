@@ -347,7 +347,11 @@ export const CartProvider = ({ children }) => {
     const orderNumber = generarNumeroPedido(datosCliente.telefono);
     const deliveryFee =
       Number(deliveryFeeOverride ?? datosCliente.deliveryFee) || 0;
-    const tipAmount = Number(datosCliente.propina) || 0;
+    const tipPercent = Math.max(
+      0,
+      Math.min(100, Number(deliverySettings?.tip_percent) || 0),
+    );
+    const tipAmount = Math.round((totalPrecio * tipPercent) / 100);
     const paymentMethod = metodoPago
       .map((item) => (item.metodo || "desconocido").toString().trim())
       .filter(Boolean)
@@ -372,6 +376,10 @@ export const CartProvider = ({ children }) => {
       fecha: new Date(),
       items,
       total: totalPrecio,
+      deliveryFee,
+      tipAmount,
+      tipPercent,
+      canal: "marketplace",
       metodoEntrega,
       metodoPago,
       datosCliente: { ...datosCliente },
@@ -407,6 +415,7 @@ export const CartProvider = ({ children }) => {
         canal: "marketplace",
         createdFrom: "web_app",
         metodoEntrega,
+        tip_percent: tipPercent,
         tracking_token: trackingToken,
         business_whatsapp: normalizeWhatsappNumber(businessWhatsapp) || null,
         payment_methods: metodoPago

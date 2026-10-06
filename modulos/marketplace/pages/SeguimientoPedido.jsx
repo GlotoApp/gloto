@@ -117,6 +117,7 @@ const mapOrderStatusToTrackingStatus = (status, metodoEntrega) => {
 const SeguimientoPedido = ({ onCerrar }) => {
   const { pedidoActivo, estadoPedido, avanzarEstadoPedido, logoTienda } =
     useCart();
+  const isEmbedded = window.self !== window.top;
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const tokenParam = searchParams.get("token");
@@ -217,13 +218,11 @@ const SeguimientoPedido = ({ onCerrar }) => {
           const optionPricesByProductAndName = new Map();
 
           if (productIds.length > 0) {
-            const {
-              data: productOptions,
-              error: productOptionsError,
-            } = await supabase
-              .from("products_items")
-              .select("*")
-              .in("product_id", productIds);
+            const { data: productOptions, error: productOptionsError } =
+              await supabase
+                .from("products_items")
+                .select("*")
+                .in("product_id", productIds);
 
             if (productOptionsError) {
               console.error(
@@ -323,9 +322,20 @@ const SeguimientoPedido = ({ onCerrar }) => {
             datosCliente: {
               nombre: data.customer_name || "",
               telefono: data.customer_phone || "",
-              direccion: data.delivery_address || "",
-              referencia: data.delivery_instructions || "",
-              puntoRetiro: "",
+              mesa: data.mesa ?? data.metadata?.cliente?.mesa ?? "",
+              direccion:
+                data.delivery_address ||
+                data.metadata?.cliente?.direccion ||
+                "",
+              referencia:
+                data.delivery_instructions ||
+                data.metadata?.cliente?.referencia ||
+                "",
+              puntoRetiro:
+                data.punto ||
+                data.metadata?.punto ||
+                data.metadata?.cliente?.puntoRetiro ||
+                "",
               deliveryFee: Number(data.delivery_fee) || 0,
               propina: Number(data.tip_amount) || 0,
             },
@@ -443,6 +453,64 @@ const SeguimientoPedido = ({ onCerrar }) => {
   const indiceActual = ETAPAS.findIndex((e) => e.id === estadoPedidoActual);
   const esEtapaFinal = indiceActual === ETAPAS.length - 1;
   const { datosCliente, metodoEntrega, metodoPago } = pedido;
+  const tipAmount = Math.max(
+    0,
+    Number(pedido.tipAmount ?? pedido.tip_amount ?? datosCliente?.propina) || 0,
+  );
+  const deliveryFee = Math.max(
+    0,
+    Number(pedido.deliveryFee) ||
+      Number(pedido.delivery_fee) ||
+      Number(datosCliente?.deliveryFee) ||
+      0,
+  );
+  const isMarketplaceOrder =
+    pedido.canal === "marketplace" || pedido.metadata?.canal === "marketplace";
+  const totalDue = Math.max(
+    0,
+    Number(pedido.total || 0) +
+      (isMarketplaceOrder ? deliveryFee : 0) -
+      (isMarketplaceOrder ? 0 : tipAmount),
+  );
+  const datosEntrega =
+    {
+      domicilio: [
+        { Icon: MapPin, label: "Dirección", value: datosCliente?.direccion },
+        {
+          Icon: Navigation,
+          label: "Referencia",
+          value: datosCliente?.referencia || datosCliente?.puntoRetiro,
+        },
+      ],
+      recoger: [
+        {
+          Icon: Store,
+          label: "Lugar de recogida",
+          value: pedido.nombreTienda || "En tienda",
+        },
+      ],
+      mesa: [
+        {
+          Icon: Armchair,
+          label: "Mesa",
+          value: datosCliente?.mesa,
+        },
+      ],
+      punto: [
+        {
+          Icon: Navigation,
+          label: "Punto de encuentro",
+          value: datosCliente?.puntoRetiro,
+        },
+      ],
+    }[metodoEntrega] || [];
+  const filasDatosEntrega = [
+    { Icon: User, label: "Cliente", value: datosCliente?.nombre },
+    { Icon: Phone, label: "Teléfono", value: datosCliente?.telefono },
+    ...datosEntrega,
+  ].filter(
+    ({ value }) => value !== null && value !== undefined && value !== "",
+  );
   const etapaActual = ETAPAS[indiceActual];
 
   const whatsappDestino = String(pedido?.businessWhatsapp || "").replace(
@@ -613,25 +681,27 @@ const SeguimientoPedido = ({ onCerrar }) => {
           flexShrink: 0,
         }}
       >
-        <button
-          type="button"
-          onClick={cerrar}
-          style={{
-            width: "40px",
-            height: "40px",
-            borderRadius: "14px",
-            background: "rgba(255,255,255,0.06)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            flexShrink: 0,
-          }}
-          aria-label="Cerrar seguimiento"
-        >
-          <X size={18} color="#fff" />
-        </button>
+        {!isEmbedded && (
+          <button
+            type="button"
+            onClick={cerrar}
+            style={{
+              width: "40px",
+              height: "40px",
+              borderRadius: "14px",
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+            aria-label="Cerrar seguimiento"
+          >
+            <X size={18} color="#fff" />
+          </button>
+        )}
 
         <div
           style={{
@@ -932,69 +1002,49 @@ const SeguimientoPedido = ({ onCerrar }) => {
             {ENTREGA_LABEL[metodoEntrega] || "Entrega"}
           </p>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <User size={15} color="#a78bfa" />
-              <span
-                style={{ fontSize: "13px", color: "rgba(255,255,255,0.86)" }}
-              >
-                {datosCliente?.nombre}
-              </span>
-            </div>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <Phone size={15} color="#a78bfa" />
-              <span
-                style={{ fontSize: "13px", color: "rgba(255,255,255,0.86)" }}
-              >
-                {datosCliente?.telefono}
-              </span>
-            </div>
-            {metodoEntrega === "mesa" && datosCliente?.mesa && (
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+          >
+            {filasDatosEntrega.map(({ Icon, label, value }) => (
               <div
-                style={{ display: "flex", gap: "8px", alignItems: "center" }}
+                key={label}
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  alignItems: "flex-start",
+                }}
               >
-                <Armchair size={14} color="rgba(255,255,255,0.4)" />
-                <span style={{ fontSize: "13px" }}>
-                  Mesa {datosCliente.mesa}
-                </span>
-              </div>
-            )}
-            {metodoEntrega === "domicilio" && datosCliente?.direccion && (
-              <div
-                style={{ display: "flex", gap: "8px", alignItems: "center" }}
-              >
-                <MapPin size={14} color="rgba(255,255,255,0.4)" />
-                <span style={{ fontSize: "13px" }}>
-                  {datosCliente.direccion}
-                </span>
-              </div>
-            )}
-            {metodoEntrega === "domicilio" &&
-              (datosCliente?.referencia || datosCliente?.puntoRetiro) && (
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "8px",
-                    alignItems: "center",
-                    marginTop: "6px",
-                  }}
-                >
-                  <Navigation size={14} color="rgba(255,255,255,0.4)" />
-                  <span style={{ fontSize: "13px" }}>
-                    {datosCliente.referencia || datosCliente.puntoRetiro}
-                  </span>
+                <Icon
+                  size={15}
+                  color="#a78bfa"
+                  style={{ flexShrink: 0, marginTop: "2px" }}
+                />
+                <div style={{ minWidth: 0 }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      color: "rgba(255,255,255,0.48)",
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      letterSpacing: "0.04em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {label}
+                  </p>
+                  <p
+                    style={{
+                      margin: "2px 0 0",
+                      color: "rgba(255,255,255,0.9)",
+                      fontSize: "13px",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {value}
+                  </p>
                 </div>
-              )}
-            {metodoEntrega === "punto" && datosCliente?.puntoRetiro && (
-              <div
-                style={{ display: "flex", gap: "8px", alignItems: "center" }}
-              >
-                <Navigation size={14} color="rgba(255,255,255,0.4)" />
-                <span style={{ fontSize: "13px" }}>
-                  {datosCliente.puntoRetiro}
-                </span>
               </div>
-            )}
+            ))}
           </div>
         </div>
 
@@ -1139,20 +1189,93 @@ const SeguimientoPedido = ({ onCerrar }) => {
             </div>
           )}
 
+          {deliveryFee > 0 && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginTop: "12px",
+                fontSize: "13px",
+                color: "rgba(255,255,255,0.72)",
+              }}
+            >
+              <span>Costo de domicilio</span>
+              <span>{fmt(deliveryFee)}</span>
+            </div>
+          )}
+
+          {tipAmount > 0 && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginTop: "12px",
+                fontSize: "13px",
+                color: "rgba(255,255,255,0.62)",
+              }}
+            >
+              <span>Propina (opcional)</span>
+              <span>{fmt(tipAmount)}</span>
+            </div>
+          )}
+
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
+              alignItems: "center",
+              gap: "12px",
               marginTop: "14px",
-              paddingTop: "14px",
+              padding: tipAmount > 0 ? "10px 4px" : "16px 14px",
               borderTop: "1px solid rgba(255,255,255,0.08)",
               fontSize: "14px",
               fontWeight: 800,
+              color: tipAmount > 0 ? "rgba(255,255,255,0.62)" : "inherit",
             }}
           >
-            <span>Total</span>
-            <span>{fmt(pedido.total)}</span>
+            <span>
+              {tipAmount > 0 ? "Total a pagar (sin propina)" : "Total a pagar"}
+            </span>
+            <span
+              style={{
+                flexShrink: 0,
+                fontSize: tipAmount > 0 ? "15px" : "13px",
+                color: tipAmount > 0 ? "rgba(255,255,255,0.75)" : "inherit",
+              }}
+            >
+              {fmt(totalDue)}
+            </span>
           </div>
+
+          {tipAmount > 0 && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+                marginTop: "10px",
+                padding: "16px 14px",
+                borderRadius: "14px",
+                background: "rgba(124,58,237,0.12)",
+                color: "#fff",
+                fontSize: "14px",
+                fontWeight: 800,
+              }}
+            >
+              <span>TOTAL A PAGAR</span>
+              <span
+                style={{
+                  flexShrink: 0,
+                  fontSize: "24px",
+                  lineHeight: 1.1,
+                  color: "#c4b5fd",
+                }}
+              >
+                {fmt(totalDue + tipAmount)}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Información de pago */}
@@ -1186,45 +1309,25 @@ const SeguimientoPedido = ({ onCerrar }) => {
                   key={m.id}
                   style={{ display: "flex", justifyContent: "space-between" }}
                 >
-                  <span style={{ fontSize: "13px" }}>{m.metodo || "-"}</span>
+                  <span
+                    style={{ fontSize: "13px", textTransform: "uppercase" }}
+                  >
+                    {m.metodo || "-"}
+                  </span>
                   <span style={{ fontSize: "13px", fontWeight: 800 }}>
                     {fmt(Number(m.monto) || 0)}
                   </span>
                 </div>
               ))
             ) : metodoPago && metodoPago.length === 1 ? (
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: "13px" }}>
-                  {metodoPago[0].metodo || "-"}
-                </span>
-                <span style={{ fontSize: "13px", fontWeight: 800 }}>
-                  {fmt(Number(metodoPago[0].monto) || pedido.total)}
-                </span>
-              </div>
+              <span style={{ fontSize: "13px", textTransform: "uppercase" }}>
+                {metodoPago[0].metodo || "-"}
+              </span>
             ) : (
               <div
                 style={{ color: "rgba(255,255,255,0.45)", fontSize: "13px" }}
               >
                 No especificado
-              </div>
-            )}
-
-            {/* Delivery y propina si existen */}
-            {Number(pedido.datosCliente?.deliveryFee) > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: "13px" }}>Costo de domicilio</span>
-                <span style={{ fontSize: "13px", fontWeight: 800 }}>
-                  {fmt(Number(pedido.datosCliente.deliveryFee) || 0)}
-                </span>
-              </div>
-            )}
-
-            {Number(pedido.datosCliente?.propina) > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: "13px" }}>Propina</span>
-                <span style={{ fontSize: "13px", fontWeight: 800 }}>
-                  {fmt(Number(pedido.datosCliente.propina) || 0)}
-                </span>
               </div>
             )}
           </div>
