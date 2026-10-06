@@ -104,6 +104,25 @@ export const generateOrderInvoicePdf = async (order, business = {}) => {
       paddingBottom: "12mm",
       overflow: "visible",
     });
+    const qrContainer = pdfContent.querySelector(".map-qr-code");
+    const qrCode = qrContainer?.querySelector("svg");
+    if (qrContainer && qrCode) {
+      Object.assign(qrContainer.style, {
+        display: "grid",
+        width: "100%",
+        maxWidth: "100%",
+        placeItems: "center",
+        overflow: "visible",
+      });
+      Object.assign(qrCode.style, {
+        display: "block",
+        width: "40mm",
+        height: "40mm",
+        maxWidth: "100%",
+        margin: "8px auto 0",
+        overflow: "visible",
+      });
+    }
     const pdfContainer = document.createElement("div");
     Object.assign(pdfContainer.style, {
       position: "fixed",
