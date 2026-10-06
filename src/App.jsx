@@ -50,6 +50,9 @@ const GestionCompleta = lazy(() => import("../modulos/admin/GestionCompleta"));
 const EstructuraAdmin = lazy(() => import("../modulos/admin/Estructura"));
 const Resumen = lazy(() => import("../modulos/admin/Resumen"));
 const Tiendas = lazy(() => import("../modulos/admin/Tiendas"));
+const CrearCuentaSuperAdmin = lazy(
+  () => import("../modulos/admin/CrearCuenta"),
+);
 const TiendaArchivo = lazy(() => import("../modulos/admin/TiendaArchivo"));
 const PlanesFacturacion = lazy(
   () => import("../modulos/admin/PlanesFacturacion"),
@@ -256,6 +259,10 @@ function App() {
             <Route index element={<Navigate to="resumen" replace />} />
             <Route path="resumen" element={<Resumen />} />
             <Route path="tiendas" element={<Tiendas />} />
+            <Route
+              path="cuentas/nueva"
+              element={<CrearCuentaSuperAdmin />}
+            />
             <Route path="tiendas/:id" element={<TiendaArchivo />} />
             <Route path="marketplace" element={<Mercado />} />
             <Route path="planes" element={<PlanesFacturacion />} />

@@ -9,6 +9,7 @@ import {
   Clock3,
   Image as ImageIcon,
   LocateFixed,
+  LoaderCircle,
   MapPin,
   Percent,
   PencilLine,
@@ -129,6 +130,10 @@ const TiendaArchivo = () => {
   const [suspensionReason, setSuspensionReason] = useState("");
   const [suspensionError, setSuspensionError] = useState("");
   const [suspensionSaving, setSuspensionSaving] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deletingBusiness, setDeletingBusiness] = useState(false);
   const [logoUrl, setLogoUrl] = useState("");
   const [coverUrl, setCoverUrl] = useState("");
   const logoInputRef = useRef(null);
@@ -1097,6 +1102,58 @@ const TiendaArchivo = () => {
     }
   };
 
+  const handleDeleteBusiness = async (event) => {
+    event.preventDefault();
+    if (
+      !store ||
+      deletingBusiness ||
+      deleteConfirmation.trim() !== store.slug
+    ) {
+      return;
+    }
+
+    setDeletingBusiness(true);
+    setDeleteError("");
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "eliminar-cuenta-negocio",
+        {
+          body: {
+            businessId: store.id,
+            confirmationSlug: deleteConfirmation.trim(),
+          },
+        },
+      );
+
+      if (error) {
+        let message = error.message;
+        if (error.context && typeof error.context.json === "function") {
+          try {
+            const responseBody = await error.context.json();
+            message = responseBody?.error || message;
+          } catch (parseError) {
+            console.warn("No se pudo leer el error de eliminación:", parseError);
+          }
+        }
+        throw new Error(message || "No se pudo eliminar la tienda.");
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || "No se pudo eliminar la tienda.");
+      }
+
+      if (data.warning) {
+        window.alert(data.warning);
+      }
+      navigate("/superadmin/tiendas", { replace: true });
+    } catch (error) {
+      console.error("Error eliminando la tienda desde Superadmin:", error);
+      setDeleteError(error.message || "No se pudo eliminar la tienda.");
+    } finally {
+      setDeletingBusiness(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 px-4 py-5 text-white md:px-8 md:py-8">
       <div className="mx-auto max-w-7xl">
@@ -1111,6 +1168,21 @@ const TiendaArchivo = () => {
           </button>
 
           <div className="flex flex-wrap items-center gap-2">
+            {store && !loading && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteConfirmation("");
+                  setDeleteError("");
+                  setDeleteDialogOpen(true);
+                }}
+                disabled={deletingBusiness}
+                className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500/20 disabled:cursor-wait disabled:opacity-60"
+              >
+                <Trash2 size={16} />
+                Eliminar tienda
+              </button>
+            )}
             {store &&
               !loading &&
               (store.admin_suspended ? (
@@ -2022,6 +2094,79 @@ const TiendaArchivo = () => {
               >
                 <Ban size={16} />
                 {suspensionSaving ? "Suspendiendo..." : "Suspender tienda"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {deleteDialogOpen && store && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => {
+            if (!deletingBusiness) setDeleteDialogOpen(false);
+          }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-store-title"
+            onSubmit={handleDeleteBusiness}
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-lg space-y-4 rounded-2xl border border-red-500/20 bg-neutral-900 p-5 shadow-2xl"
+          >
+            <div>
+              <h2 id="delete-store-title" className="text-lg font-black text-red-100">
+                Eliminar permanentemente {store.name}
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-neutral-300">
+                Se borrarán la tienda, sus productos, inventario, pedidos,
+                configuración, archivos y las cuentas de acceso vinculadas.
+                Esta acción no se puede deshacer.
+              </p>
+            </div>
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-neutral-200">
+                Escribe <code className="text-red-200">{store.slug}</code> para confirmar
+              </span>
+              <input
+                autoFocus
+                required
+                value={deleteConfirmation}
+                onChange={(event) => {
+                  setDeleteConfirmation(event.target.value);
+                  setDeleteError("");
+                }}
+                autoComplete="off"
+                className="w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-red-400"
+              />
+            </label>
+            {deleteError && (
+              <p role="alert" className="text-sm text-red-300">
+                {deleteError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={deletingBusiness}
+                onClick={() => setDeleteDialogOpen(false)}
+                className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-neutral-300 hover:bg-white/5 disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  deletingBusiness || deleteConfirmation.trim() !== store.slug
+                }
+                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deletingBusiness ? (
+                  <LoaderCircle className="animate-spin" size={16} />
+                ) : (
+                  <Trash2 size={16} />
+                )}
+                {deletingBusiness ? "Eliminando..." : "Eliminar definitivamente"}
               </button>
             </div>
           </form>

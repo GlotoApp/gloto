@@ -1,0 +1,7 @@
+project_id = "gloto"
+
+[functions.crear-cuenta-negocio]
+verify_jwt = true
+
+[functions.eliminar-cuenta-negocio]
+verify_jwt = true

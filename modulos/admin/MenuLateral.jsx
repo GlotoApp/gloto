@@ -10,6 +10,7 @@ import {
   Settings,
   Store,
   Tag,
+  UserPlus,
   WalletCards,
   X,
 } from "lucide-react";
@@ -18,6 +19,7 @@ const navItems = [
   { label: "Resumen", path: "/superadmin/resumen", icon: LayoutDashboard },
   { label: "Marketplace", path: "/superadmin/marketplace", icon: Tag },
   { label: "Tiendas", path: "/superadmin/tiendas", icon: Store },
+  { label: "Crear cuenta", path: "/superadmin/cuentas/nueva", icon: UserPlus },
   {
     label: "Suscripciones",
     path: "/superadmin/finanzas/suscripciones",
