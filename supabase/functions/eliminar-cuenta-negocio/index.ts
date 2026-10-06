@@ -181,10 +181,24 @@ Deno.serve(async (request: Request) => {
   }
 
   for (const userId of userIds) {
-    const { error } = await adminClient.auth.admin.deleteUser(userId);
-    if (error) {
-      console.error(`No se pudo eliminar el usuario de Auth ${userId}:`, error);
-      cleanupWarnings.push("uno o más usuarios de acceso");
+    const { error: deleteProfileError } = await adminClient
+      .from("profiles")
+      .delete()
+      .eq("id", userId);
+    if (deleteProfileError) {
+      console.error(`No se pudo eliminar el perfil ${userId}:`, deleteProfileError);
+      cleanupWarnings.push("uno o más perfiles");
+      continue;
+    }
+
+    const { error: deleteAuthUserError } =
+      await adminClient.auth.admin.deleteUser(userId);
+    if (deleteAuthUserError) {
+      console.error(
+        `No se pudo eliminar el usuario de Auth ${userId}:`,
+        deleteAuthUserError,
+      );
+      cleanupWarnings.push("uno o más usuarios de Auth");
     }
   }
 

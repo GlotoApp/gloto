@@ -25,7 +25,11 @@ La función `eliminar-cuenta-negocio` también exige una sesión válida de
 superadmin. Elimina permanentemente el negocio y sus datos relacionados, los
 archivos almacenados bajo el identificador del negocio y los usuarios
 vinculados. La pantalla pide escribir el slug de la tienda antes de confirmar.
-Para habilitarla, despliega:
+Antes de habilitar la eliminación, ejecuta
+`supabase/113_auth_user_review_references_set_null.sql` en el SQL Editor de
+Supabase. Esto conserva los registros financieros y de cambios de plan, pero
+quita la referencia al usuario eliminado en su campo `reviewed_by`. Después,
+despliega:
 
 ```sh
 supabase functions deploy eliminar-cuenta-negocio
