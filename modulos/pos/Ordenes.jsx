@@ -350,9 +350,11 @@ const OrderCard = memo(
               </p>
             </div>
             <div className="col-span-2 text-right">
-              <p className="text-xs text-neutral-500">Total</p>
+              <p className="text-xs text-neutral-500">
+                {orden.tipAmount > 0 ? "Total con propina" : "Total"}
+              </p>
               <p className="text-lg font-bold text-emerald-400">
-                {formatMoney(orden.total)}
+                {formatMoney(orden.totalWithTip)}
               </p>
             </div>
             <div className="col-span-2 flex justify-end items-center gap-2">
@@ -421,7 +423,34 @@ const OrderCard = memo(
                       ))}
                     </>
                   ) : null}
-                  <DetailBox label="Total" value={formatMoney(orden.total)} />
+                  <DetailBox
+                    label={
+                      orden.tipAmount > 0 ? "Total sin propina" : "Total a pagar"
+                    }
+                    value={formatMoney(
+                      orden.tipAmount > 0
+                        ? orden.totalWithoutTip
+                        : orden.totalWithTip,
+                    )}
+                  />
+                  {orden.tipAmount > 0 && (
+                    <>
+                      <DetailBox
+                        label={
+                          orden.tipPercent > 0
+                            ? `Propina (${orden.tipPercent}%)`
+                            : "Propina"
+                        }
+                        value={formatMoney(orden.tipAmount)}
+                        color="text-emerald-300"
+                      />
+                      <DetailBox
+                        label="Total con propina"
+                        value={formatMoney(orden.totalWithTip)}
+                        color="text-emerald-300"
+                      />
+                    </>
+                  )}
                 </div>
 
                 {orden.metodoEntrega === "domicilio" && (
@@ -1061,6 +1090,17 @@ const mapDatabaseOrderToUi = (order) => {
       metadata = {};
     }
   }
+  const canal = metadata.canal || "POS";
+  const total = Number(order.total || 0);
+  const deliveryFee = Number(order.delivery_fee || 0);
+  const tipAmount = Number(order.tip_amount || 0);
+  const isMarketplaceOrder = String(canal).toLowerCase() === "marketplace";
+  const totalWithoutTip = isMarketplaceOrder
+    ? total + deliveryFee
+    : Math.max(0, total - tipAmount);
+  const totalWithTip = isMarketplaceOrder
+    ? totalWithoutTip + tipAmount
+    : total;
 
   return {
     id: order.id,
@@ -1073,9 +1113,11 @@ const mapDatabaseOrderToUi = (order) => {
       order.delivery_instructions ||
       (order.mesa ? `Mesa ${order.mesa}` : "Sin detalle"),
     deliveryDetails: getDeliveryDetails(order),
-    total: Number(order.total || 0),
-    deliveryFee: Number(order.delivery_fee || 0),
-    tipAmount: Number(order.tip_amount || 0),
+    total,
+    totalWithoutTip,
+    totalWithTip,
+    deliveryFee,
+    tipAmount,
     tipPercent: Number(metadata.tip_percent || 0),
     status: normalizeStatus(order.status),
     databaseStatus: String(order.status || "pending").toLowerCase(),
@@ -1093,7 +1135,7 @@ const mapDatabaseOrderToUi = (order) => {
       "",
     deliveryMapLink: order.linkmaps || metadata.linkmaps || "",
     deliveryLocation: metadata.delivery_location || null,
-    canal: metadata.canal || "POS",
+    canal,
     punto: order.punto || "",
     paymentMethods: Array.isArray(metadata.payment_methods)
       ? metadata.payment_methods
