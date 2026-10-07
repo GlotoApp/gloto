@@ -452,8 +452,10 @@ const Shop = () => {
           businessInfoQuery,
           supabase
             .from("categories_shop")
-            .select("id,name")
-            .eq("business_id", data.id),
+            .select("id,name,icon_url,order_index,created_at")
+            .eq("business_id", data.id)
+            .order("order_index", { ascending: true })
+            .order("created_at", { ascending: true }),
           supabase
             .from("products")
             .select(
@@ -559,6 +561,7 @@ const Shop = () => {
             id: categoria.id,
             nombre: categoria.name,
             icon: categoria.icon_url,
+            orderIndex: Number(categoria.order_index || 0),
           }),
         );
 
@@ -685,6 +688,8 @@ const Shop = () => {
                     !Boolean(producto.is_sold_out || producto.is_soldout))
                 : !Boolean(producto.is_sold_out || producto.is_soldout),
               orderIndex: Number(producto.order_index || 0),
+              categoryOrderIndex:
+                categoria?.orderIndex ?? Number.MAX_SAFE_INTEGER,
               cat: categoria?.nombre || "Otros",
               image: producto.image_url,
               isActive: producto.is_active,
@@ -695,7 +700,11 @@ const Shop = () => {
             };
           });
 
-        const productosMapeados = mapearProductos();
+        const productosMapeados = mapearProductos().sort(
+          (first, second) =>
+            first.categoryOrderIndex - second.categoryOrderIndex ||
+            first.orderIndex - second.orderIndex,
+        );
 
         // Pintar la tienda con los datos críticos sin esperar opciones secundarias.
         setCategorias(categoriasMapeadas);
@@ -1050,6 +1059,28 @@ const Shop = () => {
             String(p.desc || "").toLowerCase().includes(q)
           );
         });
+  const displayedProductGroups =
+    catActiva === "Todos"
+      ? [
+          ...categorias
+            .map((categoria) => ({
+              name: categoria.nombre,
+              products: displayedProducts.filter(
+                (product) => product.cat === categoria.nombre,
+              ),
+            }))
+            .filter((group) => group.products.length > 0),
+          {
+            name: "Otros",
+            products: displayedProducts.filter(
+              (product) =>
+                !categorias.some(
+                  (categoria) => categoria.nombre === product.cat,
+                ),
+            ),
+          },
+        ].filter((group) => group.products.length > 0)
+      : [{ name: null, products: displayedProducts }];
 
   const obtenerCantidadProducto = (producto) => {
     const baseCantidad = carrito[producto.id] || 0;
@@ -1208,7 +1239,14 @@ const Shop = () => {
         {/* Wrapper sin overflow:hidden para que el logo sobresalga */}
         <div style={{ position: "relative", height: "250px" }}>
           {/* Imagen recortada dentro de su propio div */}
-          <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+          <div
+            style={{
+              position: "absolute",
+              inset: "0 0 -220px",
+              overflow: "hidden",
+              zIndex: 0,
+            }}
+          >
             {isLoadingProductos ? (
               <div
                 style={skeletonBlock({
@@ -1239,7 +1277,7 @@ const Shop = () => {
                 position: "absolute",
                 inset: 0,
                 background:
-                  "linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(10,10,10,0.85) 85%, #0a0a0a 100%)",
+                  "linear-gradient(to bottom, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.16) 20%, rgba(0,0,0,0.34) 42%, rgba(0,0,0,0.62) 65%, rgba(0,0,0,0.9) 86%, #0a0a0a 100%)",
               }}
             />
           </div>
@@ -1259,12 +1297,10 @@ const Shop = () => {
                 width: "72px",
                 height: "72px",
                 borderRadius: "20px",
-                background: "#131313",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 fontSize: "36px",
-                boxShadow: "0 4px 24px rgba(0,0,0,0.7)",
               }}
             >
               {isLoadingProductos ? (
@@ -1409,7 +1445,14 @@ const Shop = () => {
         </div>
 
         {/* ── INFO DEL LOCAL ── */}
-        <div style={{ padding: "48px 20px 0", textAlign: "center" }}>
+        <div
+          style={{
+            position: "relative",
+            zIndex: 1,
+            padding: "48px 20px 0",
+            textAlign: "center",
+          }}
+        >
           {isLoadingProductos ? (
             <>
               <div
@@ -1872,18 +1915,38 @@ const Shop = () => {
               </p>
             </div>
           ) : (
-            displayedProducts.map((p, idx) => {
-              const qty = obtenerCantidadProducto(p);
-              const tieneOpcionesProducto = tieneOpciones(p);
-              const precioExtraMax = Math.max(
-                0,
-                ...(Array.isArray(p.variantes) ? p.variantes : []).map((item) =>
-                  Number(item.precioExtra || 0),
-                ),
-              );
-              const isLast = idx === displayedProducts.length - 1;
-              return (
-                <div key={p.id}>
+            displayedProductGroups.map((group, groupIndex) => (
+              <section key={group.name || catActiva}>
+                {group.name && (
+                  <h3
+                    style={{
+                      margin: "14px 20px 4px",
+                      padding: "10px 0",
+                      color: "#c4b5fd",
+                      fontSize: "12px",
+                      fontWeight: 800,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      borderBottom: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    {group.name}
+                  </h3>
+                )}
+                {group.products.map((p, idx) => {
+                  const qty = obtenerCantidadProducto(p);
+                  const tieneOpcionesProducto = tieneOpciones(p);
+                  const precioExtraMax = Math.max(
+                    0,
+                    ...(Array.isArray(p.variantes) ? p.variantes : []).map(
+                      (item) => Number(item.precioExtra || 0),
+                    ),
+                  );
+                  const isLast =
+                    groupIndex === displayedProductGroups.length - 1 &&
+                    idx === group.products.length - 1;
+                  return (
+                    <div key={p.id}>
                   <div
                     onClick={() => abrirDetalleProducto(p)}
                     style={{
@@ -2091,9 +2154,11 @@ const Shop = () => {
                       }}
                     />
                   )}
-                </div>
-              );
-            })
+                    </div>
+                  );
+                })}
+              </section>
+            ))
           )}
         </div>
       </div>

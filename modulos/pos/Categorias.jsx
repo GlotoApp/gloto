@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import SubLoading from "./SubLoading";
 import {
   Plus,
@@ -15,6 +16,7 @@ import {
   ChevronUp,
   ShoppingBag,
   Info,
+  GripVertical,
 } from "lucide-react";
 
 const formatCategoryName = (value) => {
@@ -44,18 +46,26 @@ const CategoriasAdmin = ({
       : categories.map((name, index) => ({ id: index + 1, name }));
 
     setCategoriesList(
-      records.map((cat, index) => ({
-        ...cat,
-        name: cat.name,
-        color:
-          index % 8 === 0
-            ? "violet"
-            : index % 8 === 1
-              ? "blue"
-              : index % 8 === 2
-                ? "emerald"
-                : "amber",
-      })),
+      [...records]
+        .sort(
+          (first, second) =>
+            Number(first.order_index || 0) - Number(second.order_index || 0) ||
+            String(first.created_at || "").localeCompare(
+              String(second.created_at || ""),
+            ),
+        )
+        .map((cat, index) => ({
+          ...cat,
+          name: cat.name,
+          color:
+            index % 8 === 0
+              ? "violet"
+              : index % 8 === 1
+                ? "blue"
+                : index % 8 === 2
+                  ? "emerald"
+                  : "amber",
+        })),
     );
   }, [categories, categoryRecords]);
 
@@ -64,7 +74,11 @@ const CategoriasAdmin = ({
   const [editingIndex, setEditingIndex] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [sortBy, setSortBy] = useState("created");
+  const [sortBy, setSortBy] = useState("order");
+  const [draggedCategoryId, setDraggedCategoryId] = useState(null);
+  const [dropTargetCategoryId, setDropTargetCategoryId] = useState(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const categoryDragRef = useRef(null);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -140,7 +154,7 @@ const CategoriasAdmin = ({
     setIsModalOpen(true);
   };
 
-  const handleSaveCategory = () => {
+  const handleSaveCategory = async () => {
     const categoryName = formatCategoryName(formData.name);
     if (!categoryName) {
       alert("Completa el nombre de la categoría");
@@ -160,12 +174,97 @@ const CategoriasAdmin = ({
         business_id: businessId,
         name: categoryName,
         color: formData.color,
+        order_index:
+          Math.max(
+            -1,
+            ...categoriesList.map((category) =>
+              Number(category.order_index ?? 0),
+            ),
+          ) + 1,
       });
     }
 
+    const saved = await onUpdateCategories(updated);
+    if (saved === false) return;
     setCategoriesList(updated);
     setIsModalOpen(false);
-    onUpdateCategories(updated);
+  };
+
+  const handleCategoryDragStart = (event, categoryId) => {
+    if (sortBy !== "order" || searchTerm.trim() || savingOrder) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    categoryDragRef.current = {
+      categoryId,
+      pointerId: event.pointerId,
+      original: categoriesList,
+      order: categoriesList,
+    };
+    setDraggedCategoryId(categoryId);
+    setDropTargetCategoryId(null);
+  };
+
+  const handleCategoryDragMove = (event) => {
+    const drag = categoryDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    const target = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest("[data-category-id]");
+    const targetId = target?.getAttribute("data-category-id");
+    if (!targetId || targetId === drag.categoryId) {
+      setDropTargetCategoryId(null);
+      return;
+    }
+    setDropTargetCategoryId(targetId);
+
+    const sourceIndex = drag.order.findIndex(
+      (category) => category.id === drag.categoryId,
+    );
+    const targetIndex = drag.order.findIndex(
+      (category) => String(category.id) === targetId,
+    );
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    const nextOrder = [...drag.order];
+    const [movingCategory] = nextOrder.splice(sourceIndex, 1);
+    nextOrder.splice(targetIndex, 0, movingCategory);
+    drag.order = nextOrder;
+    setCategoriesList(nextOrder);
+  };
+
+  const handleCategoryDragEnd = async (event) => {
+    const drag = categoryDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    categoryDragRef.current = null;
+    setDraggedCategoryId(null);
+    setDropTargetCategoryId(null);
+
+    if (
+      drag.order.every(
+        (category, index) => category.id === drag.original[index]?.id,
+      )
+    ) {
+      return;
+    }
+
+    const orderedCategories = drag.order.map((category, index) => ({
+      ...category,
+      order_index: index,
+    }));
+    setSavingOrder(true);
+    const saved = await onUpdateCategories(orderedCategories);
+    setCategoriesList(saved === false ? drag.original : orderedCategories);
+    setSavingOrder(false);
+  };
+
+  const handleCategoryDragCancel = (event) => {
+    const drag = categoryDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    categoryDragRef.current = null;
+    setDraggedCategoryId(null);
+    setDropTargetCategoryId(null);
+    setCategoriesList(drag.original);
   };
 
   const handleDeleteCategoryFinal = (index) => {
@@ -201,6 +300,18 @@ const CategoriasAdmin = ({
         if (sortBy === "name-asc") return first.name.localeCompare(second.name);
         if (sortBy === "name-desc")
           return second.name.localeCompare(first.name);
+        if (sortBy === "created")
+          return String(first.created_at || "").localeCompare(
+            String(second.created_at || ""),
+          );
+        if (sortBy === "order")
+          return (
+            Number(first.order_index || 0) -
+              Number(second.order_index || 0) ||
+            String(first.created_at || "").localeCompare(
+              String(second.created_at || ""),
+            )
+          );
         return 0;
       });
   }, [categoriesList, products, searchTerm, sortBy]);
@@ -247,6 +358,7 @@ const CategoriasAdmin = ({
             onChange={(event) => setSortBy(event.target.value)}
             className="rounded-xl border border-white/5 bg-neutral-950/50 px-3 py-2 text-xs text-neutral-300 outline-none focus:border-violet-500/50"
           >
+            <option value="order">Orden personalizado</option>
             <option value="created">Orden de creación</option>
             <option value="name-asc">Nombre: A-Z</option>
             <option value="name-desc">Nombre: Z-A</option>
@@ -254,6 +366,41 @@ const CategoriasAdmin = ({
             <option value="products-asc">Menos productos</option>
           </select>
         </div>
+
+        {sortBy === "order" && !searchTerm.trim() && (
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={draggedCategoryId || "drag-hint"}
+              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.98 }}
+              transition={{ duration: 0.18 }}
+              className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-[10px] font-semibold ${
+                draggedCategoryId
+                  ? "border-violet-400/40 bg-violet-500/15 text-violet-200 shadow-lg shadow-violet-950/30"
+                  : "border-white/5 bg-white/[0.02] text-neutral-500"
+              }`}
+              role="status"
+              aria-live="polite"
+            >
+              <GripVertical
+                size={14}
+                className={
+                  draggedCategoryId
+                    ? "animate-pulse text-violet-300"
+                    : "text-violet-400"
+                }
+              />
+              {draggedCategoryId
+                ? `Moviendo ${
+                    categoriesList.find(
+                      (category) => category.id === draggedCategoryId,
+                    )?.name || "categoría"
+                  } · suelta para guardar`
+                : "Arrastra el asa de una categoría para cambiar su orden"}
+            </motion.div>
+          </AnimatePresence>
+        )}
 
         {loading && visibleCategories.length === 0 ? (
           <SubLoading
@@ -269,14 +416,69 @@ const CategoriasAdmin = ({
               );
               const isExpanded = expandedCategories.has(category.id);
               return (
-                <div
+                <motion.div
                   key={category.id}
-                  className={`flex flex-col rounded-2xl border overflow-hidden transition-all duration-150 ${"bg-neutral-900/40 border-white/5"}`}
+                  data-category-id={category.id}
+                  layout="position"
+                  initial={false}
+                  animate={{
+                    scale: draggedCategoryId === category.id ? 1.025 : 1,
+                    rotate: draggedCategoryId === category.id ? -0.6 : 0,
+                    opacity: draggedCategoryId === category.id ? 0.96 : 1,
+                    boxShadow:
+                      draggedCategoryId === category.id
+                        ? "0 18px 45px rgba(124, 58, 237, 0.28)"
+                        : "0 0px 0px rgba(0, 0, 0, 0)",
+                  }}
+                  transition={{
+                    layout: { type: "spring", stiffness: 420, damping: 34 },
+                    scale: { type: "spring", stiffness: 420, damping: 24 },
+                    rotate: { type: "spring", stiffness: 420, damping: 24 },
+                    opacity: { duration: 0.16 },
+                    boxShadow: { duration: 0.16 },
+                  }}
+                  className={`relative flex flex-col rounded-2xl border overflow-hidden transition-colors duration-200 ${
+                    draggedCategoryId === category.id
+                      ? "z-10 border-violet-300/70 bg-neutral-800 ring-2 ring-violet-400/30"
+                      : dropTargetCategoryId === String(category.id)
+                        ? "border-violet-400/60 bg-violet-500/[0.08] ring-1 ring-violet-400/30"
+                        : "border-white/5 bg-neutral-900/40"
+                  }`}
                 >
                   <div className="flex flex-col w-full">
                     {/* FILA PRINCIPAL */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-4">
                       <div className="flex items-center gap-3.5 min-w-0">
+                        <button
+                          type="button"
+                          disabled={
+                            sortBy !== "order" ||
+                            Boolean(searchTerm.trim()) ||
+                            savingOrder
+                          }
+                          onPointerDown={(event) =>
+                            handleCategoryDragStart(event, category.id)
+                          }
+                          onPointerMove={handleCategoryDragMove}
+                          onPointerUp={handleCategoryDragEnd}
+                          onPointerCancel={handleCategoryDragCancel}
+                          className={`touch-none cursor-grab rounded-lg p-2 transition-all active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-30 ${
+                            draggedCategoryId === category.id
+                              ? "scale-110 bg-violet-500/20 text-violet-200 shadow-md shadow-violet-950/40"
+                              : "text-neutral-400 hover:bg-violet-500/10 hover:text-white"
+                          }`}
+                          title="Mantén y arrastra para ordenar"
+                          aria-label={`Arrastrar ${category.name} para cambiar su orden`}
+                        >
+                          <GripVertical
+                            size={16}
+                            className={
+                              draggedCategoryId === category.id
+                                ? "animate-pulse"
+                                : ""
+                            }
+                          />
+                        </button>
                         <div
                           className={`w-3.5 h-3.5 rounded-full border border-white/20 flex-shrink-0 ${
                             colorClasses[category.color].split(" ")[0]
@@ -395,7 +597,7 @@ const CategoriasAdmin = ({
                       </div>
                     )}
                   </div>
-                </div>
+                </motion.div>
               );
             })}
           </div>

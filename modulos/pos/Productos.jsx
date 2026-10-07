@@ -72,6 +72,9 @@ const isProductLowStock = (product) =>
   Number(product.minStock) > 0 &&
   Number(product.stock) <= Number(product.minStock);
 
+const isProductSoldOut = (product, inventoryEnabled) =>
+  product.isSoldOut || (inventoryEnabled && Number(product.stock) <= 0);
+
 const formatSentenceInput = (value) => {
   return formatSentenceText(value);
 };
@@ -129,11 +132,26 @@ const Productos = ({ section = "productos" }) => {
       id: category.id,
       business_id: category.business_id || businessId,
       name: category.name,
+      order_index: Number(category.order_index || 0),
     }));
+    const { error } = await supabase.from("categories_shop").upsert(records);
+    if (error) {
+      console.error("Error guardando categorías:", error);
+      alert("No se pudo guardar el orden de las categorías.");
+      return false;
+    }
+
     setCategoryRecords(records);
     setCategories(records.map((category) => category.name));
-    const { error } = await supabase.from("categories_shop").upsert(records);
-    if (error) console.error("Error guardando categorías:", error);
+    const cachedCatalog = readCatalogCache(businessId);
+    if (cachedCatalog) {
+      writeCatalogCache(businessId, {
+        ...cachedCatalog,
+        categories: records.map((category) => category.name),
+        categoryRecords: records,
+      });
+    }
+    return true;
   };
 
   const handleQuickCategoryCreate = async () => {
@@ -158,10 +176,17 @@ const Productos = ({ section = "productos" }) => {
     }
 
     setSavingQuickCategory(true);
+    const orderIndex =
+      Math.max(
+        -1,
+        ...categoryRecords.map((category) =>
+          Number(category.order_index ?? 0),
+        ),
+      ) + 1;
     const { data, error } = await supabase
       .from("categories_shop")
-      .insert({ business_id: businessId, name })
-      .select("id,business_id,name")
+      .insert({ business_id: businessId, name, order_index: orderIndex })
+      .select("id,business_id,name,order_index,created_at")
       .single();
 
     if (error) {
@@ -175,9 +200,7 @@ const Productos = ({ section = "productos" }) => {
       return;
     }
 
-    const nextCategoryRecords = [...categoryRecords, data].sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    const nextCategoryRecords = [...categoryRecords, data];
     setCategoryRecords(nextCategoryRecords);
     setCategories(nextCategoryRecords.map((category) => category.name));
     setFormData((current) => ({
@@ -410,8 +433,10 @@ const Productos = ({ section = "productos" }) => {
       ] = await Promise.all([
         supabase
           .from("categories_shop")
-          .select("id, business_id, name")
-          .eq("business_id", profile.business_id),
+          .select("id, business_id, name, order_index, created_at")
+          .eq("business_id", profile.business_id)
+          .order("order_index", { ascending: true })
+          .order("created_at", { ascending: true }),
         supabase
           .from("products")
           .select("*")
@@ -817,14 +842,19 @@ const Productos = ({ section = "productos" }) => {
 
     // Filtro por disponibilidad
     if (filterStatus === "activos") {
-      result = result.filter((p) => p.isActive && !p.isSoldOut);
+      result = result.filter((p) => p.isActive && !isProductSoldOut(p, inventoryEnabled));
     } else if (filterStatus === "agotados") {
-      result = result.filter((p) => p.isActive && p.isSoldOut);
+      result = result.filter(
+        (p) => p.isActive && isProductSoldOut(p, inventoryEnabled),
+      );
     } else if (filterStatus === "archivados") {
       result = result.filter((p) => !p.isActive);
     } else if (inventoryEnabled && filterStatus === "bajo_stock") {
       result = result.filter(
-        (p) => p.isActive && !p.isSoldOut && isProductLowStock(p),
+        (p) =>
+          p.isActive &&
+          !isProductSoldOut(p, inventoryEnabled) &&
+          isProductLowStock(p),
       );
     }
 
@@ -850,10 +880,10 @@ const Productos = ({ section = "productos" }) => {
     selectedProducts.has(product.id),
   );
   const canActivateSelected = selectedProductRecords.some(
-    (product) => product.isActive && product.isSoldOut,
+    (product) => product.isActive && isProductSoldOut(product, inventoryEnabled),
   );
   const canExhaustSelected = selectedProductRecords.some(
-    (product) => product.isActive && !product.isSoldOut,
+    (product) => product.isActive && !isProductSoldOut(product, inventoryEnabled),
   );
   const canArchiveSelected = selectedProductRecords.some(
     (product) => product.isActive,
@@ -874,8 +904,8 @@ const Productos = ({ section = "productos" }) => {
     setQuickCategoryName("");
     const newFormData = {
       name: "",
-      categoryId: categoryRecords[0]?.id || "",
-      category: categoryRecords[0]?.name || "",
+      categoryId: "",
+      category: "",
       price: "",
       description: "",
       stock: 0,
@@ -1868,7 +1898,11 @@ const Productos = ({ section = "productos" }) => {
                   <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
                     <span className="text-emerald-400 font-black">
                       {
-                        products.filter((p) => p.isActive && !p.isSoldOut).length
+                        products.filter(
+                          (p) =>
+                            p.isActive &&
+                            !isProductSoldOut(p, inventoryEnabled),
+                        ).length
                       }
                     </span>{" "}
                     Activos
@@ -1880,7 +1914,13 @@ const Productos = ({ section = "productos" }) => {
                     <div className="w-1.5 h-1.5 rounded-full bg-rose-500/80" />
                     <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
                       <span className="text-rose-400 font-black">
-                        {products.filter((p) => p.isActive && p.isSoldOut).length}
+                        {
+                          products.filter(
+                            (p) =>
+                              p.isActive &&
+                              isProductSoldOut(p, inventoryEnabled),
+                          ).length
+                        }
                       </span>{" "}
                       Agotados
                     </span>
@@ -2175,7 +2215,7 @@ const Productos = ({ section = "productos" }) => {
                 className={`rounded-2xl overflow-hidden border transition-all duration-300 group cursor-pointer hover:shadow-xl hover:shadow-violet-500/10 flex flex-col justify-between h-full ${
                   !item.isActive
                     ? "bg-slate-500/5 border-slate-500/20 hover:border-slate-400/40 hover:bg-slate-500/10"
-                    : !item.isSoldOut
+                    : !isProductSoldOut(item, inventoryEnabled)
                       ? "bg-neutral-900/40 border-white/5 hover:border-violet-500/30 hover:bg-neutral-900/60"
                       : "bg-red-500/5 border-red-500/20 hover:border-red-500/40 hover:bg-red-500/10"
                 }`}
@@ -2196,7 +2236,7 @@ const Productos = ({ section = "productos" }) => {
                       className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
                         !item.isActive
                           ? "bg-slate-500/80 text-slate-100 border-slate-400/30"
-                          : item.isSoldOut
+                          : isProductSoldOut(item, inventoryEnabled)
                             ? "bg-red-500 text-red-fff border-red-500/30"
                             : inventoryEnabled && isProductLowStock(item)
                               ? "bg-amber-500/20 text-amber-300 border-amber-400/30"
@@ -2205,7 +2245,7 @@ const Productos = ({ section = "productos" }) => {
                     >
                       {!item.isActive
                         ? "Archivado"
-                        : item.isSoldOut
+                        : isProductSoldOut(item, inventoryEnabled)
                           ? "Agotado"
                           : inventoryEnabled && isProductLowStock(item)
                             ? "Bajo stock"
@@ -2392,17 +2432,32 @@ const Productos = ({ section = "productos" }) => {
                         handleToggleSoldOut(item.id);
                       }}
                       aria-label={
-                        item.isSoldOut
+                        isProductSoldOut(item, inventoryEnabled)
                           ? "Marcar como disponible"
                           : "Marcar como agotado"
                       }
+                      disabled={
+                        inventoryEnabled && Number(item.stock) <= 0
+                      }
                       className={`flex min-h-10 w-full min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-2 text-[9px] font-bold uppercase tracking-normal leading-none whitespace-nowrap transition-colors ${
-                        item.isSoldOut ? "bg-red-500" : "bg-emerald-500"
+                        isProductSoldOut(item, inventoryEnabled)
+                          ? "bg-red-500"
+                          : "bg-emerald-500"
                       }`}
-                      title={item.isSoldOut ? "Agotado" : "Disponible"}
+                      title={
+                        inventoryEnabled && Number(item.stock) <= 0
+                          ? "Agotado: actualiza el stock para marcarlo disponible"
+                          : item.isSoldOut
+                            ? "Agotado"
+                            : "Disponible"
+                      }
                     >
                       <span className="h-2 w-2 rounded-full bg-white" />
-                      <span>{item.isSoldOut ? "Agotado" : "Disponible"}</span>
+                      <span>
+                        {isProductSoldOut(item, inventoryEnabled)
+                          ? "Agotado"
+                          : "Disponible"}
+                      </span>
                     </button>
                   </div>
                 </div>

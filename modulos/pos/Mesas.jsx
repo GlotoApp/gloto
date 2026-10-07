@@ -1192,8 +1192,10 @@ export default function MesasPOS() {
 
       const { data: categoryData, error: categoryError } = await supabase
         .from("categories_shop")
-        .select("id,name")
-        .eq("business_id", businessIdParam);
+        .select("id,name,order_index,created_at")
+        .eq("business_id", businessIdParam)
+        .order("order_index", { ascending: true })
+        .order("created_at", { ascending: true });
 
       if (categoryError) {
         console.error("Error cargando categorías:", categoryError);

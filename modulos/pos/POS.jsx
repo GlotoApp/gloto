@@ -610,8 +610,10 @@ const POS = () => {
     try {
       const { data, error } = await supabase
         .from("categories_shop")
-        .select("id,name")
-        .eq("business_id", businessId);
+        .select("id,name,order_index,created_at")
+        .eq("business_id", businessId)
+        .order("order_index", { ascending: true })
+        .order("created_at", { ascending: true });
 
       if (error) {
         console.error("Error cargando categorías:", error);
