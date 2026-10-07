@@ -8,6 +8,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import Marketplace from "../modulos/marketplace/Marketplace";
+import SinConexionMarketplace from "../modulos/marketplace/pages/SinConexionMarketplace";
 import Layout from "../modulos/pos/Layout";
 import { Loading } from "../modulos/pos/Loading";
 import SinConexion from "../modulos/pos/SinConexion";
@@ -423,6 +424,12 @@ function App() {
   }, []);
 
   if (!isOnline) {
+    const pathname =
+      typeof window !== "undefined" ? window.location.pathname : "/";
+    if (pathname === "/" || pathname.startsWith("/marketplace")) {
+      return <SinConexionMarketplace />;
+    }
+
     return <SinConexion />;
   }
 

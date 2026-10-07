@@ -2005,9 +2005,8 @@ const Shop = () => {
                         style={{
                           display: "flex",
                           alignItems: "baseline",
-                          gap: "8px",
                           flexWrap: "wrap",
-                          columnGap: "8px",
+                          columnGap: "3px",
                           rowGap: "4px",
                         }}
                       >
