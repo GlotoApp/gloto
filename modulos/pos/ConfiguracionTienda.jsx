@@ -50,6 +50,40 @@ const parseThousands = (value) => {
   return digits ? Number(digits) : 0;
 };
 
+const formatCoordinatePair = (latitude, longitude) => {
+  const lat = Number(String(latitude ?? "").trim());
+  const lng = Number(String(longitude ?? "").trim());
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
+  return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+};
+
+const parseCoordinatePair = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return { latitude: "", longitude: "" };
+
+  const numbers = raw.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) || [];
+  if (numbers.length < 2) return { latitude: "", longitude: "" };
+
+  const latitude = Number(numbers[0]);
+  const longitude = Number(numbers[1]);
+
+  if (
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return { latitude: "", longitude: "" };
+  }
+
+  return {
+    latitude: latitude.toFixed(6),
+    longitude: longitude.toFixed(6),
+  };
+};
+
 const loadEditorImage = async (editor) => {
   const image = new window.Image();
   image.src = editor.url;
@@ -113,8 +147,10 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   const [businessId, setBusinessId] = useState(null);
   const [categories, setCategories] = useState([]);
   const [data, setData] = useState(EMPTY_DATA);
+  const [initialData, setInitialData] = useState(EMPTY_DATA);
   const [logoUrl, setLogoUrl] = useState("");
   const [coverUrl, setCoverUrl] = useState("");
+  const [initialMediaUrls, setInitialMediaUrls] = useState({ logo: "", cover: "" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(null);
@@ -125,7 +161,9 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const [isCssMapFullscreen, setIsCssMapFullscreen] = useState(false);
   const [isMapEditing, setIsMapEditing] = useState(false);
+  const [locationInput, setLocationInput] = useState("");
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("success");
   const logoInput = useRef(null);
   const coverInput = useRef(null);
   const mapElement = useRef(null);
@@ -179,9 +217,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
         );
         setMessage("No se pudo cargar toda la información de la tienda.");
       }
-      setCategories(categoryData || []);
-      setData((current) => ({
-        ...current,
+      const loadedData = {
         name: business?.name || "",
         category:
           info?.category_id ||
@@ -206,9 +242,17 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
         tip_percent: info?.tip_percent ?? "",
         latitude: info?.latitude ?? "",
         longitude: info?.longitude ?? "",
-      }));
+      };
+      setCategories(categoryData || []);
+      setData(loadedData);
+      setInitialData(loadedData);
+      setLocationInput(formatCoordinatePair(loadedData.latitude, loadedData.longitude));
       setLogoUrl(business?.logo_url || "");
       setCoverUrl(business?.cover_url || "");
+      setInitialMediaUrls({
+        logo: business?.logo_url || "",
+        cover: business?.cover_url || "",
+      });
       setLoading(false);
     };
     load();
@@ -217,6 +261,22 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   const update = (key, value) =>
     setData((current) => ({ ...current, [key]: value }));
   const updateMoney = (key, value) => update(key, formatThousands(value));
+  const updateLocationInput = (nextValue) => {
+    setLocationInput(nextValue);
+    const parsed = parseCoordinatePair(nextValue);
+    if (!parsed.latitude || !parsed.longitude) return;
+    update("latitude", parsed.latitude);
+    update("longitude", parsed.longitude);
+  };
+  const hasUnsavedChanges = useMemo(() => {
+    const sameData =
+      JSON.stringify(data) === JSON.stringify(initialData);
+    const sameMedia =
+      logoUrl === initialMediaUrls.logo &&
+      coverUrl === initialMediaUrls.cover;
+
+    return !sameData || !sameMedia;
+  }, [coverUrl, data, initialData, initialMediaUrls.cover, initialMediaUrls.logo, logoUrl]);
   const coordinates = useMemo(() => {
     const latitude = Number(String(data.latitude ?? "").trim());
     const longitude = Number(String(data.longitude ?? "").trim());
@@ -233,6 +293,10 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   useEffect(() => {
     coordinatesRef.current = coordinates;
   }, [coordinates]);
+
+  useEffect(() => {
+    setLocationInput(formatCoordinatePair(data.latitude, data.longitude));
+  }, [data.latitude, data.longitude]);
 
   useEffect(() => {
     if (loading) return undefined;
@@ -284,12 +348,35 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     };
   }, [loading]);
 
+  const syncMapCenterToForm = () => {
+    if (!mapInstance.current) return;
+    const center = mapInstance.current.getCenter();
+    const latitude = Number(center.lat).toFixed(6);
+    const longitude = Number(center.lng).toFixed(6);
+    setData((current) => {
+      if (
+        current.latitude === latitude &&
+        current.longitude === longitude
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        latitude,
+        longitude,
+      };
+    });
+  };
+
   const toggleMapEditing = () => {
     const nextEditingState = !isMapEditingRef.current;
     isMapEditingRef.current = nextEditingState;
     setIsMapEditing(nextEditingState);
     if (mapInstance.current) {
       setMapEditing(mapInstance.current, nextEditingState);
+      if (!nextEditingState) {
+        syncMapCenterToForm();
+      }
     }
   };
 
@@ -316,9 +403,26 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       setIsMapFullscreen(nativeFullscreen || isCssMapFullscreen);
       setTimeout(() => mapInstance.current?.invalidateSize(), 100);
     };
+    const handleMapResize = () => {
+      requestAnimationFrame(() =>
+        mapInstance.current?.invalidateSize({ pan: false }),
+      );
+    };
+    const handleVisibilityChange = () => {
+      if (!document.hidden) handleMapResize();
+    };
+
     document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () =>
+    window.addEventListener("resize", handleMapResize);
+    window.addEventListener("orientationchange", handleMapResize);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      window.removeEventListener("resize", handleMapResize);
+      window.removeEventListener("orientationchange", handleMapResize);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [isCssMapFullscreen]);
 
   useEffect(() => {
@@ -417,18 +521,13 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       ["Costo máximo de domicilio", data.max_delivery_fee],
       ["Latitud", data.latitude],
       ["Longitud", data.longitude],
-      ...(onboardingMode
-        ? []
-        : [
-            ["Logo", logoUrl],
-            ["Portada", coverUrl],
-          ]),
     ];
     const emptyField = requiredFields.find(
       ([, value]) => String(value ?? "").trim() === "",
     );
     if (emptyField) {
-      setMessage("");
+      setMessageType("error");
+      setMessage("Completa todos los campos obligatorios antes de guardar.");
       return;
     }
 
@@ -437,10 +536,12 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     const latitude = Number(data.latitude);
     const longitude = Number(data.longitude);
     if (minimumDelivery > maximumDelivery) {
+      setMessageType("error");
       setMessage("El costo mínimo no puede ser mayor que el costo máximo.");
       return;
     }
     if (Number(data.delivery_time_max) < Number(data.delivery_time_min)) {
+      setMessageType("error");
       setMessage("El tiempo máximo no puede ser menor que el tiempo mínimo.");
       return;
     }
@@ -450,6 +551,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       !Number.isFinite(Number(data.delivery_time_max)) ||
       Number(data.delivery_time_max) <= 0
     ) {
+      setMessageType("error");
       setMessage("Los tiempos de entrega deben ser mayores que cero.");
       return;
     }
@@ -461,6 +563,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       data.tip_percent !== "" &&
       (!Number.isFinite(tipPercent) || tipPercent < 0 || tipPercent > 100)
     ) {
+      setMessageType("error");
       setMessage("El porcentaje de propina debe estar entre 0 y 100.");
       return;
     }
@@ -471,24 +574,29 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
         data.night_delivery_surcharge_start ===
           data.night_delivery_surcharge_end
       ) {
+        setMessageType("error");
         setMessage("Define un horario nocturno válido.");
         return;
       }
       if (!Number.isFinite(nightSurchargePercent) || nightSurchargePercent <= 0) {
+        setMessageType("error");
         setMessage("El porcentaje del recargo nocturno debe ser mayor que cero.");
         return;
       }
     }
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+      setMessageType("error");
       setMessage("La latitud debe estar entre -90 y 90.");
       return;
     }
     if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+      setMessageType("error");
       setMessage("La longitud debe estar entre -180 y 180.");
       return;
     }
 
     setSaving(true);
+    setMessageType("info");
     setMessage("");
     const selectedCategory = categories.find(
       (category) => category.id === data.category,
@@ -546,6 +654,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
           "No se pudo completar la configuración inicial:",
           onboardingError,
         );
+        setMessageType("error");
         setMessage(
           onboardingError.message ||
             "No se pudo completar la configuración inicial.",
@@ -553,11 +662,13 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
         setSaving(false);
         return;
       }
+      setMessageType("success");
       setMessage("Configuración completa. Ya puedes empezar a usar tu tienda.");
       setSaving(false);
       onCompleted?.();
       return;
     } else {
+      setMessageType("success");
       setMessage("Información de tienda y ubicación guardadas");
     }
     setSaving(false);
@@ -907,19 +1018,21 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
                 />
               </div>
             </div>
-            <div className="grid gap-5 md:grid-cols-2">
-              <ConfiguracionField
-                label="Latitud"
-                value={data.latitude}
-                onChange={(e) => update("latitude", e.target.value)}
-                placeholder="Ej. 10.3910"
-              />
-              <ConfiguracionField
-                label="Longitud"
-                value={data.longitude}
-                onChange={(e) => update("longitude", e.target.value)}
-                placeholder="Ej. -75.4794"
-              />
+            <div className="grid gap-5">
+              <label className="flex flex-col gap-2">
+                <span className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-500">
+                  Ubicación (latitud, longitud)
+                </span>
+                <input
+                  value={locationInput}
+                  onChange={(event) => updateLocationInput(event.target.value)}
+                  placeholder="Ej. 10.382876, -75.473188 o https://maps.google.com/..."
+                  className={`w-full rounded-xl border bg-neutral-950/60 px-4 py-3 text-sm text-white outline-none transition ${saveAttempted && (!data.latitude || !data.longitude) ? "border-red-500 focus:border-red-400" : "border-white/[0.1] focus:border-violet-500/60"}`}
+                />
+                <span className="text-[10px] leading-4 text-neutral-600">
+                  Acepta coordenadas en formato decimal, pares tipo (10.382876, -75.473188) o enlaces de Google Maps.
+                </span>
+              </label>
             </div>
           </div>
           <div className="rounded-2xl bg-neutral-900/45 p-5 md:p-6">
@@ -1036,12 +1149,23 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
             </div>
           </div>
           <footer className="sticky bottom-4 z-10 flex items-center justify-between gap-4 rounded-2xl bg-neutral-950/95 p-4 shadow-xl backdrop-blur-md">
-            <span className="text-xs text-emerald-300">{message}</span>
+            <span
+              aria-live="polite"
+              className={`text-xs ${
+                messageType === "error"
+                  ? "text-red-300"
+                  : messageType === "info"
+                    ? "text-violet-300"
+                    : "text-emerald-300"
+              }`}
+            >
+              {message}
+            </span>
             <button
               type="button"
               onClick={save}
-              disabled={saving || loading || Boolean(uploadingImage)}
-              className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+              disabled={saving || loading || Boolean(uploadingImage) || !hasUnsavedChanges}
+              className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Save size={14} />{" "}
               {saving
