@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   Check,
@@ -61,8 +61,19 @@ const parseCoordinatePair = (value) => {
   const raw = String(value ?? "").trim();
   if (!raw) return { latitude: "", longitude: "" };
 
-  const numbers = raw.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) || [];
-  if (numbers.length < 2) return { latitude: "", longitude: "" };
+  const numberPattern = "[-+]?(?:\\d+\\.?\\d*|\\.\\d+)";
+  const googlePlaceMatch = raw.match(
+    new RegExp(`!3d(${numberPattern})!4d(${numberPattern})`),
+  );
+  const googleViewportMatch = raw.match(
+    new RegExp(`@(${numberPattern}),(${numberPattern})`),
+  );
+  const numbers = googlePlaceMatch
+    ? [googlePlaceMatch[1], googlePlaceMatch[2]]
+    : googleViewportMatch
+      ? [googleViewportMatch[1], googleViewportMatch[2]]
+      : raw.match(new RegExp(numberPattern, "g"));
+  if (!numbers || numbers.length < 2) return { latitude: "", longitude: "" };
 
   const latitude = Number(numbers[0]);
   const longitude = Number(numbers[1]);
@@ -117,6 +128,46 @@ const setMapEditing = (map, enabled) => {
     if (enabled) handler.enable();
     else handler.disable();
   });
+};
+
+const unclipMapAncestors = (mapNode) => {
+  const changedAncestors = [];
+  let ancestor = mapNode?.parentElement;
+
+  while (ancestor && ancestor !== document.body) {
+    const computedStyle = window.getComputedStyle(ancestor);
+    if (
+      computedStyle.overflowX !== "visible" ||
+      computedStyle.overflowY !== "visible" ||
+      computedStyle.transform !== "none" ||
+      computedStyle.filter !== "none" ||
+      computedStyle.backdropFilter !== "none"
+    ) {
+      changedAncestors.push({
+        element: ancestor,
+        overflow: ancestor.style.overflow,
+        transform: ancestor.style.transform,
+        filter: ancestor.style.filter,
+        backdropFilter: ancestor.style.backdropFilter,
+      });
+      ancestor.style.overflow = "visible";
+      ancestor.style.transform = "none";
+      ancestor.style.filter = "none";
+      ancestor.style.backdropFilter = "none";
+    }
+    ancestor = ancestor.parentElement;
+  }
+
+  return () => {
+    changedAncestors.forEach(
+      ({ element, overflow, transform, filter, backdropFilter }) => {
+        element.style.overflow = overflow;
+        element.style.transform = transform;
+        element.style.filter = filter;
+        element.style.backdropFilter = backdropFilter;
+      },
+    );
+  };
 };
 
 const createCroppedImage = async (editor, crop) => {
@@ -261,12 +312,21 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   const update = (key, value) =>
     setData((current) => ({ ...current, [key]: value }));
   const updateMoney = (key, value) => update(key, formatThousands(value));
+  const syncCoordinatesToForm = useCallback((latitude, longitude) => {
+    const nextLatitude = Number(latitude).toFixed(6);
+    const nextLongitude = Number(longitude).toFixed(6);
+    setLocationInput(`${nextLatitude}, ${nextLongitude}`);
+    setData((current) => ({
+      ...current,
+      latitude: nextLatitude,
+      longitude: nextLongitude,
+    }));
+  }, []);
   const updateLocationInput = (nextValue) => {
     setLocationInput(nextValue);
     const parsed = parseCoordinatePair(nextValue);
     if (!parsed.latitude || !parsed.longitude) return;
-    update("latitude", parsed.latitude);
-    update("longitude", parsed.longitude);
+    syncCoordinatesToForm(parsed.latitude, parsed.longitude);
   };
   const hasUnsavedChanges = useMemo(() => {
     const sameData =
@@ -277,6 +337,11 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
 
     return !sameData || !sameMedia;
   }, [coverUrl, data, initialData, initialMediaUrls.cover, initialMediaUrls.logo, logoUrl]);
+  const parsedLocationInput = parseCoordinatePair(locationInput);
+  const canSave =
+    hasUnsavedChanges &&
+    Boolean(parsedLocationInput.latitude) &&
+    Boolean(parsedLocationInput.longitude);
   const coordinates = useMemo(() => {
     const latitude = Number(String(data.latitude ?? "").trim());
     const longitude = Number(String(data.longitude ?? "").trim());
@@ -295,13 +360,10 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   }, [coordinates]);
 
   useEffect(() => {
-    setLocationInput(formatCoordinatePair(data.latitude, data.longitude));
-  }, [data.latitude, data.longitude]);
-
-  useEffect(() => {
     if (loading) return undefined;
 
     let isMounted = true;
+    let mapResizeObserver;
 
     import("leaflet").then((L) => {
       if (!isMounted || !mapElement.current || mapInstance.current) return;
@@ -317,7 +379,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
           boxZoom: false,
           keyboard: false,
         })
-        .setView(initialCenter, coordinates ? 15 : 12);
+        .setView(initialCenter, coordinatesRef.current ? 15 : 12);
 
       setMapEditing(map, isMapEditingRef.current);
       L.default
@@ -326,46 +388,35 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
           maxZoom: 19,
         })
         .addTo(map);
+      if (window.ResizeObserver) {
+        mapResizeObserver = new ResizeObserver(() => {
+          map.invalidateSize({ pan: false });
+        });
+        mapResizeObserver.observe(mapElement.current);
+      }
 
       map.on("moveend", () => {
         if (!isMapEditingRef.current) return;
         const center = map.getCenter();
-        setData((current) => ({
-          ...current,
-          latitude: Number(center.lat).toFixed(6),
-          longitude: Number(center.lng).toFixed(6),
-        }));
+        syncCoordinatesToForm(center.lat, center.lng);
       });
       mapInstance.current = map;
     });
 
     return () => {
       isMounted = false;
+      mapResizeObserver?.disconnect();
       if (mapInstance.current) {
         mapInstance.current.remove();
         mapInstance.current = null;
       }
     };
-  }, [loading]);
+  }, [loading, syncCoordinatesToForm]);
 
   const syncMapCenterToForm = () => {
     if (!mapInstance.current) return;
     const center = mapInstance.current.getCenter();
-    const latitude = Number(center.lat).toFixed(6);
-    const longitude = Number(center.lng).toFixed(6);
-    setData((current) => {
-      if (
-        current.latitude === latitude &&
-        current.longitude === longitude
-      ) {
-        return current;
-      }
-      return {
-        ...current,
-        latitude,
-        longitude,
-      };
-    });
+    syncCoordinatesToForm(center.lat, center.lng);
   };
 
   const toggleMapEditing = () => {
@@ -430,6 +481,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const restoreAncestors = unclipMapAncestors(mapElement.current);
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
         setIsCssMapFullscreen(false);
@@ -438,13 +490,21 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     };
     document.addEventListener("keydown", handleKeyDown);
     const resizeFrame = window.requestAnimationFrame(() =>
-      mapInstance.current?.invalidateSize({ pan: false }),
+      window.requestAnimationFrame(() =>
+        mapInstance.current?.invalidateSize({ pan: false }),
+      ),
+    );
+    const resizeTimeout = window.setTimeout(
+      () => mapInstance.current?.invalidateSize({ pan: false }),
+      250,
     );
 
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", handleKeyDown);
       window.cancelAnimationFrame(resizeFrame);
+      window.clearTimeout(resizeTimeout);
+      restoreAncestors();
       window.requestAnimationFrame(() =>
         mapInstance.current?.invalidateSize({ pan: false }),
       );
@@ -489,8 +549,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     setMessage("");
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        update("latitude", coords.latitude.toFixed(6));
-        update("longitude", coords.longitude.toFixed(6));
+        syncCoordinatesToForm(coords.latitude, coords.longitude);
         setMessage(
           "Ubicación actual cargada. Guarda la tienda para conservarla.",
         );
@@ -1164,7 +1223,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
             <button
               type="button"
               onClick={save}
-              disabled={saving || loading || Boolean(uploadingImage) || !hasUnsavedChanges}
+              disabled={saving || loading || Boolean(uploadingImage) || !canSave}
               className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Save size={14} />{" "}
