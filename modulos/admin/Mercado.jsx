@@ -13,43 +13,36 @@ import {
   resolveCategoryIconUrl,
   supabase,
 } from "../../src/lib/supabaseClient";
+import { compressCanvasToWebP } from "../../src/lib/imageCompression";
 import ImageCropEditor from "../pos/ImageCropEditor";
 import SuperAdminSectionShell from "./ContenedorSeccion";
 
-const crearPngCuadrado = (imageEditor) =>
-  new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => {
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-      if (!context) {
-        reject(new Error("No se pudo preparar el recorte."));
-        return;
-      }
-
-      const size =
-        Math.min(image.naturalWidth, image.naturalHeight) / imageEditor.zoom;
-      const sourceX = (image.naturalWidth - size) * (imageEditor.offsetX / 100);
-      const sourceY =
-        (image.naturalHeight - size) * (imageEditor.offsetY / 100);
-      canvas.width = 512;
-      canvas.height = 512;
-      context.drawImage(image, sourceX, sourceY, size, size, 0, 0, 512, 512);
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          reject(new Error("No se pudo crear el PNG recortado."));
-          return;
-        }
-        const filename =
-          imageEditor.file.name.replace(/\.png$/i, "") || "icono";
-        resolve(
-          new File([blob], `${filename}-cuadrado.png`, { type: "image/png" }),
-        );
-      }, "image/png");
-    };
-    image.onerror = () => reject(new Error("No se pudo abrir la imagen PNG."));
+const crearWebPCuadrado = async (imageEditor) => {
+  const image = new Image();
+  await new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = () => reject(new Error("No se pudo abrir la imagen."));
     image.src = imageEditor.url;
   });
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("No se pudo preparar el recorte.");
+
+  const size =
+    Math.min(image.naturalWidth, image.naturalHeight) / imageEditor.zoom;
+  const sourceX = (image.naturalWidth - size) * (imageEditor.offsetX / 100);
+  const sourceY = (image.naturalHeight - size) * (imageEditor.offsetY / 100);
+  canvas.width = 512;
+  canvas.height = 512;
+  context.drawImage(image, sourceX, sourceY, size, size, 0, 0, 512, 512);
+
+  const webpBlob = await compressCanvasToWebP(canvas);
+  const filename = imageEditor.file.name.replace(/\.[^.]+$/, "") || "icono";
+  return new File([webpBlob], `${filename}-cuadrado.webp`, {
+    type: "image/webp",
+  });
+};
 
 const SuperAdminMarketplacePanel = () => {
   const [frases, setFrases] = useState([]);
@@ -400,13 +393,10 @@ const SuperAdminMarketplacePanel = () => {
 
   const seleccionarIconoCategoria = (id, file) => {
     if (!file) return;
-    const esPng =
-      file.type === "image/png" ||
-      (!file.type && file.name.toLowerCase().endsWith(".png"));
-    if (!esPng || file.size > 2 * 1024 * 1024) {
+    if (!file.type.startsWith("image/")) {
       setMensajeCategorias({
         tipo: "error",
-        texto: "El icono debe ser PNG y pesar máximo 2 MB.",
+        texto: "Selecciona un archivo de imagen válido.",
       });
       return;
     }
@@ -427,7 +417,7 @@ const SuperAdminMarketplacePanel = () => {
     setRecortandoCategoria(true);
 
     try {
-      const croppedFile = await crearPngCuadrado(imageEditor);
+      const croppedFile = await crearWebPCuadrado(imageEditor);
       const displayUrl = URL.createObjectURL(croppedFile);
       setCategorias((actuales) =>
         actuales.map((categoria) =>
@@ -451,7 +441,7 @@ const SuperAdminMarketplacePanel = () => {
       console.error("No se pudo recortar el icono:", error);
       setMensajeCategorias({
         tipo: "error",
-        texto: "No se pudo preparar el recorte PNG.",
+        texto: "No se pudo preparar y comprimir el recorte WebP.",
       });
     } finally {
       setRecortandoCategoria(false);
@@ -548,6 +538,7 @@ const SuperAdminMarketplacePanel = () => {
         let iconUrl = categoria.icon_url || null;
         let iconDisplayUrl = categoria._iconDisplayUrl || null;
         let uploadedPath = null;
+        let operation = "guardar la categoría";
 
         try {
           if (categoria._removeIcon && categoria.icon_url) {
@@ -555,18 +546,24 @@ const SuperAdminMarketplacePanel = () => {
           }
 
           if (categoria._iconFile) {
-            uploadedPath = `sistema/categories generales iconos/${categoryId}/${crypto.randomUUID()}.png`;
+            if (categoria._iconFile.type !== "image/webp") {
+              throw new Error("El icono seleccionado no está en formato WebP.");
+            }
+            uploadedPath = `sistema/categories generales iconos/${crypto.randomUUID()}.webp`;
+            operation = "subir el icono WebP al bucket system";
             const { error: uploadError } = await supabase.storage
               .from("system")
               .upload(uploadedPath, categoria._iconFile, {
-                contentType: "image/png",
+                contentType: "image/webp",
                 upsert: false,
               });
             if (uploadError) throw uploadError;
             iconUrl = uploadedPath;
+            operation = "generar la URL del icono";
             iconDisplayUrl = await resolveCategoryIconUrl(uploadedPath);
           }
 
+          operation = "guardar la categoría en la base de datos";
           const query = categoria._new
             ? supabase.from("categories").insert({
                 id: categoryId,
@@ -658,15 +655,14 @@ const SuperAdminMarketplacePanel = () => {
               await removeStorageObjectIfUnused("system", uploadedPath);
             } catch (cleanupError) {
               console.warn(
-                "No se pudo limpiar el PNG que falló:",
+                "No se pudo limpiar el WebP que falló:",
                 cleanupError,
               );
             }
           }
           setMensajeCategorias({
             tipo: "error",
-            texto:
-              "No se pudieron completar todas las categorías. Revisa permisos y reintenta.",
+            texto: `No se pudo ${operation}: ${error?.message || "error desconocido"}`,
           });
           return;
         }
@@ -919,7 +915,7 @@ const SuperAdminMarketplacePanel = () => {
               <div>
                 <h3 className="font-bold text-white">Categorías visibles</h3>
                 <p className="text-xs text-neutral-400">
-                  Edita nombres y sube iconos PNG de hasta 2 MB.
+                  Edita nombres y sube imágenes; se comprimen y guardan como WebP.
                 </p>
               </div>
             </div>
@@ -985,7 +981,7 @@ const SuperAdminMarketplacePanel = () => {
                           Índice orden
                         </th>
                         <th scope="col" className="px-3 py-2.5">
-                          Icono PNG
+                          Icono
                         </th>
                         <th scope="col" className="px-3 py-2.5 text-center">
                           Acciones
@@ -1050,12 +1046,12 @@ const SuperAdminMarketplacePanel = () => {
                               <label className="inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs font-bold text-neutral-200 transition hover:bg-white/[0.06]">
                                 <Upload size={15} />
                                 <span className="truncate">
-                                  {categoria._iconFile?.name || "Elegir PNG"}
+                                  {categoria._iconFile?.name || "Elegir imagen"}
                                 </span>
                                 <input
                                   type="file"
-                                  accept="image/png,.png"
-                                  aria-label={`Icono PNG para la categoría ${index + 1}`}
+                                  accept="image/*"
+                                  aria-label={`Icono para la categoría ${index + 1}`}
                                   disabled={guardandoCategoria !== null}
                                   onChange={(event) => {
                                     seleccionarIconoCategoria(

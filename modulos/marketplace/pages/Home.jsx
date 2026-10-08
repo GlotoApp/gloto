@@ -21,7 +21,6 @@ import {
   UtensilsCrossed,
   Timer,
   Hamburger,
-  Motorbike,
   ClockFading,
   Star,
   LoaderCircle,
@@ -1324,7 +1323,12 @@ const Home = ({ userLocation }) => {
                         )}
                         {t.domicilio && (
                           <div className="flex items-center gap-0.5">
-                            <Motorbike size={10} />
+                            <span
+                              className="material-symbols-outlined"
+                              style={{ fontSize: "12px", lineHeight: 1 }}
+                            >
+                              delivery_dining
+                            </span>
                             <span>
                               {t.domicilio === "Gratis"
                                 ? "Gratis"

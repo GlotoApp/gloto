@@ -232,7 +232,12 @@ const formatPrice = (price) => {
     .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 };
 
-const formatInteger = (value) => String(value);
+const formatInteger = (value) => {
+  const digits = String(value);
+  return /^\d+$/.test(digits)
+    ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+    : digits;
+};
 
 const parseDecimalQuantity = (value) => {
   const normalized = String(value ?? "").replace(",", ".");
@@ -289,23 +294,6 @@ const normalizeOptionGroup = (group, items = []) => {
     order: Number(group.order_index ?? group.orderIndex ?? group.order ?? 0),
     opciones,
   };
-};
-
-const initializeOptionSelections = (product) => {
-  const selections = {};
-  (product.optionGroups || []).forEach((group) => {
-    const includedOptions = (group.opciones || []).filter(
-      (option) => Number(option.precio_extra || 0) === 0,
-    );
-
-    if (group.selectionType === "multiple") {
-      selections[group.id] = includedOptions.map((option) => option.id);
-    } else {
-      const defaultOption = includedOptions[0] || group.opciones?.[0] || null;
-      selections[group.id] = defaultOption?.id || null;
-    }
-  });
-  return selections;
 };
 
 const getSelectedOptionItems = (product, selections) => {
@@ -579,6 +567,7 @@ const POS = () => {
   const [optionNote, setOptionNote] = useState("");
   const [optionQuantity, setOptionQuantity] = useState(1);
   const [optionValidationError, setOptionValidationError] = useState("");
+  const optionGroupsContainerRef = useRef(null);
   const [instruction, setInstruction] = useState("");
   const [showInfo, setShowInfo] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1605,7 +1594,7 @@ const POS = () => {
   const deliveryLabels = {
     pickup: { label: "Recoger", icon: "flag" },
     table: { label: "Mesa", icon: "table_bar" },
-    delivery: { label: "Domicilio", icon: "local_shipping" },
+    delivery: { label: "Domicilio", icon: "delivery_dining" },
     point: { label: "En Punto", icon: "location_on" },
   };
 
@@ -1706,7 +1695,7 @@ const POS = () => {
 
     if (product?.hasOptionGroups || product?.unit?.allows_fraction) {
       setActiveProduct(product);
-      setOptionSelections(initializeOptionSelections(product));
+      setOptionSelections({});
       setOptionNote("");
       setOptionQuantity("1");
       setOptionValidationError("");
@@ -1820,7 +1809,7 @@ const POS = () => {
     }
     if (product?.hasOptionGroups) {
       setActiveProduct(product);
-      setOptionSelections(initializeOptionSelections(product));
+      setOptionSelections({});
       setOptionNote(existingNote);
       setOptionValidationError("");
       setOptionModalOpen(true);
@@ -1860,17 +1849,39 @@ const POS = () => {
       optionSelections,
     );
 
-    const missingRequired = (activeProduct.optionGroups || []).some((group) => {
-      if (!group.obligatorio) return false;
-      const selected = optionSelections[group.id];
-      if (group.selectionType === "multiple") {
-        return !Array.isArray(selected) || selected.length === 0;
-      }
-      return !selected;
-    });
+    const missingRequiredGroups = (activeProduct.optionGroups || []).filter(
+      (group) => {
+        if (!group.obligatorio) return false;
+        const selected = optionSelections[group.id];
+        return group.selectionType === "multiple"
+          ? !Array.isArray(selected) || selected.length === 0
+          : !selected;
+      },
+    );
 
-    if (missingRequired) {
-      setOptionValidationError("Selecciona todas las opciones obligatorias.");
+    if (missingRequiredGroups.length > 0) {
+      const missingGroupIds = new Set(
+        missingRequiredGroups.map((group) => String(group.id)),
+      );
+      optionGroupsContainerRef.current
+        ?.querySelectorAll("[data-option-group-id]")
+        .forEach((element) => {
+          if (!missingGroupIds.has(element.dataset.optionGroupId)) return;
+          element.getAnimations().forEach((animation) => animation.cancel());
+          element.animate(
+            [
+              { transform: "translateX(0)" },
+              { transform: "translateX(-14px)" },
+              { transform: "translateX(14px)" },
+              { transform: "translateX(-11px)" },
+              { transform: "translateX(11px)" },
+              { transform: "translateX(-6px)" },
+              { transform: "translateX(6px)" },
+              { transform: "translateX(0)" },
+            ],
+            { duration: 650, easing: "ease-in-out" },
+          );
+        });
       return;
     }
 
@@ -2567,13 +2578,20 @@ const POS = () => {
   );
   const paidAmount =
     paymentMethod === "efectivo" ? parseFloat(moneyPaid) || 0 : 0;
+  const cashPaidWithoutTip =
+    paymentMethod === "efectivo" &&
+    paidAmount >= totalWithoutTip &&
+    paidAmount < total;
+  const orderTotal = cashPaidWithoutTip ? totalWithoutTip : total;
+  const orderTipAmount = cashPaidWithoutTip ? 0 : tipAmount;
   const isCashPaymentBelowTotal =
     paymentMethod === "efectivo" &&
     inventoryEnabled &&
     !isEditingTableOrder &&
-    total > 0 &&
-    paidAmount < total;
-  const remaining = paidAmount > 0 ? total - paidAmount : total - assignedTotal;
+    totalWithoutTip > 0 &&
+    paidAmount < totalWithoutTip;
+  const remaining =
+    paidAmount > 0 ? orderTotal - paidAmount : total - assignedTotal;
   const remainingLabel = remaining > 0 ? "Faltante" : "Cambio";
   const remainingDisplay = formatPrice(Math.abs(remaining));
   const totalItems = cart.reduce((sum, item) => sum + item.qty, 0);
@@ -2675,8 +2693,8 @@ const POS = () => {
     if (
       paymentMethod === "efectivo" &&
       !isEditingTableOrder &&
-      total > 0 &&
-      paidAmount < total
+      totalWithoutTip > 0 &&
+      paidAmount < totalWithoutTip
     ) {
       errors.push(
         paidAmount <= 0
@@ -3053,7 +3071,12 @@ const POS = () => {
             )
           : 0;
 
-    const paymentStatus = totalPagado >= total ? "paid" : "pending";
+    const submittedTotal =
+      paymentMethod === "efectivo" ? orderTotal : total;
+    const submittedTipAmount =
+      paymentMethod === "efectivo" ? orderTipAmount : tipAmount;
+    const paymentStatus =
+      totalPagado >= submittedTotal ? "paid" : "pending";
     const orderStatus = paymentStatus === "paid" ? "confirmed" : "pending";
     const deliveryMapLink =
       deliveryMethod === "delivery" && deliveryDestination
@@ -3063,7 +3086,7 @@ const POS = () => {
     const orderPayload = {
       business_id: businessId,
       status: orderStatus,
-      total: Number(total) || 0,
+      total: Number(submittedTotal) || 0,
       order_number: orderNumber,
       updated_at: new Date().toISOString(),
       scheduled_at: null,
@@ -3073,7 +3096,7 @@ const POS = () => {
       delivery_fee: deliveryFee,
       tax_amount: 0,
       discount_amount: 0,
-      tip_amount: tipAmount,
+      tip_amount: submittedTipAmount,
       payment_method: paymentMethodText || null,
       payment_status: paymentStatus,
       order_type: orderTypeMap[deliveryMethod] || "pickup",
@@ -3481,8 +3504,8 @@ const POS = () => {
 
   // Sección única de "Métodos de Pago" reutilizable para desktop y mobile
   const paymentMethodsSection = (
-    <div className="mb-4">
-      <div className="flex justify-between items-center mb-2">
+    <div className="mb-2">
+      <div className="flex justify-between items-center mb-1">
         <label className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">
           Método de Pago
         </label>
@@ -3493,13 +3516,13 @@ const POS = () => {
           <button
             key={method}
             onClick={() => handlePaymentMethodChange(method)}
-            className={`py-2 lg:py-3 rounded-xl  flex flex-col items-center gap-1 transition-all ${
+            className={`py-1.5 lg:py-2 rounded-xl flex flex-col items-center gap-0.5 transition-all ${
               paymentMethod === method
                 ? "bg-primary-container border-primary shadow-lg shadow-primary-container/40 text-on-surface"
                 : "bg-background border-outline text-on-surface-variant hover:border-outline"
             }`}
           >
-            <span className="material-symbols-outlined text-base lg:text-lg">
+            <span className="material-symbols-outlined text-sm lg:text-base">
               {paymentLabels[method].icon}
             </span>
             <span className="text-[7px]  font-black uppercase">
@@ -3509,22 +3532,17 @@ const POS = () => {
         ))}
       </div>
       {paymentMethod === "efectivo" && (
-        <div className="mt-2 animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2.5">
-            <div className="flex items-center justify-between gap-3">
+        <div className="mt-1 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="rounded-xl border border-white/5 bg-white/[0.03] px-2 py-1.5">
+            <div className="flex flex-col gap-1">
               <label
                 htmlFor="cash-amount-received"
-                className="flex min-w-0 items-center gap-2 text-[10px] font-semibold text-neutral-300"
+                className="text-[10px] font-semibold text-neutral-300"
               >
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300">
-                  <span className="material-symbols-outlined text-sm">
-                    payments
-                  </span>
-                </span>
                 Monto recibido
               </label>
               <div
-                className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg border bg-neutral-950 px-3 transition-colors ${
+                className={`flex w-full min-w-0 items-center gap-2 rounded-lg border bg-neutral-950 px-2 transition-colors ${
                   isCashPaymentBelowTotal
                     ? "border-red-400/60 focus-within:border-red-400"
                     : "border-white/10 focus-within:border-violet-400/70"
@@ -3546,7 +3564,7 @@ const POS = () => {
                     setMoneyPaid(val);
                   }}
                   placeholder="0"
-                  className={`min-w-0 w-full bg-transparent py-2 text-right text-sm font-bold outline-none placeholder:text-neutral-600 ${
+                  className={`min-w-0 w-full bg-transparent py-1.5 text-right text-sm font-bold outline-none placeholder:text-neutral-600 ${
                     isCashPaymentBelowTotal ? "text-red-300" : "text-white"
                   }`}
                 />
@@ -4518,7 +4536,7 @@ const POS = () => {
                           : handleQtyInputChange(item.cartId, e.target.value)
                       }
                       onBlur={() => commitQuantityDraft(item.cartId)}
-                      className="w-12 bg-transparent text-center text-[11px] font-black text-on-surface outline-none appearance-none"
+                      className="w-16 bg-transparent text-center text-[11px] font-black text-on-surface outline-none appearance-none"
                       aria-label="Cantidad del producto"
                     />
                     <span className="text-[9px] font-bold text-neutral-400">
@@ -4562,9 +4580,9 @@ const POS = () => {
           </div>
 
           {/* Footer: Totales y Pago */}
-          <div className="p-4 bg-surface border-t border-outline mt-auto flex-shrink-0 shadow-[0_-15px_30px_rgba(0,0,0,0.5)]">
+          <div className="p-3 bg-surface border-t border-outline mt-auto flex-shrink-0 shadow-[0_-15px_30px_rgba(0,0,0,0.5)]">
             {/* Resumen Numérico */}
-            <div className="space-y-1 mb-2">
+            <div className="space-y-0.5 mb-1.5">
               <div className="flex justify-between items-center opacity-60 m-0">
                 <span className="text-[10px] font-bold uppercase tracking-widest">
                   Subtotal
@@ -4596,14 +4614,6 @@ const POS = () => {
                 </>
               )}
 
-              <div className="flex justify-between items-center opacity-70">
-                <span className="text-[10px] font-bold uppercase tracking-widest">
-                  Total sin propina
-                </span>
-                <span className="text-sm font-bold">
-                  $ {formatPrice(totalWithoutTip)}
-                </span>
-              </div>
               {tipAmount > 0 && (
                 <div className="flex justify-between items-center text-emerald-300">
                   <span className="text-[10px] font-bold uppercase tracking-widest">
@@ -4635,29 +4645,30 @@ const POS = () => {
                   </div>
                 )}
 
-              <div className="flex justify-between items-end">
-                <span className="text-[11px] font-black uppercase tracking-[0.2em] text-violet-500">
-                  Total a Pagar
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
+                  Total a pagar
                 </span>
-                <span className="text-2xl font-black text-on-surface tracking-tighter">
+                <span className="text-xl font-black text-on-surface tracking-tighter">
                   $ {formatPrice(total)}
                 </span>
               </div>
               {/* Lectura de número */}
               {total > 0 && (
-                <p className="text-[10px] text-on-surface text-right mt-1 uppercase  tracking-wider">
+                <p className="text-[9px] leading-tight text-on-surface uppercase tracking-wider">
                   {numeroALetras(total)}
                 </p>
               )}
             </div>
 
             {/* Observaciones Generales */}
-            <div className="mb-3">
+            <div className="mb-2">
               <textarea
+                rows={1}
                 value={orderNotes}
                 onChange={(e) => setOrderNotes(e.target.value)}
                 placeholder="Observaciones generales..."
-                className="w-full min-h-[72px] resize-none rounded-2xl border border-outline bg-background px-3 py-3 text-base text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className="w-full min-h-10 resize-none rounded-xl border border-outline bg-background px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary/20"
               />
             </div>
 
@@ -4676,7 +4687,7 @@ const POS = () => {
                 (isEditingTableOrder && !hasEditChanges)
               }
               aria-busy={isSubmittingOrder}
-              className="w-full bg-primary-container hover:bg-success active:scale-[0.98] text-on-surface font-black py-4 rounded-2xl transition-all uppercase text-[11px] tracking-[0.2em] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-primary-container hover:bg-success active:scale-[0.98] text-on-surface font-black py-2.5 rounded-xl transition-all uppercase text-[10px] tracking-[0.2em] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmittingOrder ? (
                 <>
@@ -4861,7 +4872,7 @@ const POS = () => {
                             : handleQtyInputChange(item.cartId, e.target.value)
                         }
                         onBlur={() => commitQuantityDraft(item.cartId)}
-                        className="w-12 bg-transparent text-center text-[11px] font-black text-on-surface outline-none appearance-none"
+                        className="w-16 bg-transparent text-center text-[11px] font-black text-on-surface outline-none appearance-none"
                         aria-label="Cantidad del producto"
                       />
                       <span className="text-[9px] font-bold text-neutral-400">
@@ -4910,9 +4921,9 @@ const POS = () => {
           </div>
 
           {/* Footer: Totales y Pago */}
-          <div className="p-4 bg-surface border-t border-outline mt-auto flex-shrink-0 mb-20 shadow-[0_-15px_30px_rgba(0,0,0,0.5)] overflow-y-auto max-h-[50%] custom-sidebar">
+          <div className="p-3 bg-surface border-t border-outline mt-auto flex-shrink-0 mb-20 shadow-[0_-15px_30px_rgba(0,0,0,0.5)] overflow-y-auto max-h-[50%] custom-sidebar">
             {/* Resumen Numérico */}
-            <div className="space-y-1 mb-2">
+            <div className="space-y-0.5 mb-1.5">
               <div className="flex justify-between items-center opacity-60 m-0">
                 <span className="text-[10px] font-bold uppercase tracking-widest">
                   Subtotal
@@ -4944,14 +4955,6 @@ const POS = () => {
                 </>
               )}
 
-              <div className="flex justify-between items-center opacity-70">
-                <span className="text-[10px] font-bold uppercase tracking-widest">
-                  Total sin propina
-                </span>
-                <span className="text-sm font-bold">
-                  $ {formatPrice(totalWithoutTip)}
-                </span>
-              </div>
               {tipAmount > 0 && (
                 <div className="flex justify-between items-center text-emerald-300">
                   <span className="text-[10px] font-bold uppercase tracking-widest">
@@ -4983,29 +4986,30 @@ const POS = () => {
                   </div>
                 )}
 
-              <div className="flex justify-between items-end">
-                <span className="text-[11px] font-black uppercase tracking-[0.2em] text-violet-500">
-                  Total a Pagar
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
+                  Total a pagar
                 </span>
-                <span className="text-2xl font-black text-on-surface tracking-tighter">
+                <span className="text-xl font-black text-on-surface tracking-tighter">
                   $ {formatPrice(total)}
                 </span>
               </div>
               {/* Lectura de número */}
               {total > 0 && (
-                <p className="text-[10px]  text-on-surface text-right mt-1 uppercase tracking-wider">
+                <p className="text-[9px] leading-tight text-on-surface uppercase tracking-wider">
                   {numeroALetras(total)}
                 </p>
               )}
             </div>
 
             {/* Observaciones Generales */}
-            <div className="mb-3">
+            <div className="mb-2">
               <textarea
+                rows={1}
                 value={orderNotes}
                 onChange={(e) => setOrderNotes(e.target.value)}
                 placeholder="Observaciones generales..."
-                className="w-full min-h-[72px] resize-none rounded-2xl border border-outline bg-background px-3 py-3 text-base text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className="w-full min-h-10 resize-none rounded-xl border border-outline bg-background px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary/20"
               />
             </div>
 
@@ -5025,7 +5029,7 @@ const POS = () => {
                 (isEditingTableOrder && !hasEditChanges)
               }
               aria-busy={isSubmittingOrder}
-              className="w-full bg-primary-container hover:bg-success active:scale-[0.98] text-on-surface font-black py-3 rounded-2xl transition-all uppercase text-[10px] tracking-[0.2em] shadow-xl shadow-primary-container/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-primary-container hover:bg-success active:scale-[0.98] text-on-surface font-black py-2.5 rounded-xl transition-all uppercase text-[10px] tracking-[0.2em] shadow-xl shadow-primary-container/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmittingOrder ? (
                 <>
@@ -5193,7 +5197,10 @@ const POS = () => {
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-4 py-4 lg:px-6 lg:py-5">
+              <div
+                ref={optionGroupsContainerRef}
+                className="flex-1 overflow-y-auto px-4 py-4 lg:px-6 lg:py-5"
+              >
                 {(activeProduct?.description ||
                   activeProduct?.desc ||
                   activeProduct?.descripcion) && (
@@ -5232,7 +5239,10 @@ const POS = () => {
                           </p>
                         ) : null}
                       </div>
-                      <div className="mt-4 grid gap-2">
+                      <div
+                        data-option-group-id={group.id}
+                        className="mt-4 grid gap-2"
+                      >
                         {group.opciones.map((option) => {
                           const isSelected =
                             group.selectionType === "multiple"
@@ -5320,7 +5330,10 @@ const POS = () => {
                   />
                 </div>
                 {optionValidationError ? (
-                  <p className="mt-3 text-sm font-semibold text-error">
+                  <p
+                    role="alert"
+                    className="mt-3 text-sm font-semibold text-error"
+                  >
                     {optionValidationError}
                   </p>
                 ) : null}
@@ -5360,7 +5373,11 @@ const POS = () => {
                           ? "decimal"
                           : "numeric"
                       }
-                      value={optionQuantity}
+                      value={
+                        activeProduct?.unit?.allows_fraction
+                          ? optionQuantity
+                          : formatInteger(optionQuantity)
+                      }
                       onChange={(e) => {
                         const value = e.target.value;
                         if (activeProduct?.unit?.allows_fraction) {
@@ -5378,7 +5395,7 @@ const POS = () => {
                           confirmOptionSelection();
                         }
                       }}
-                      className="w-12 bg-transparent text-center text-[16px] font-semibold text-on-surface outline-none"
+                      className="w-16 bg-transparent text-center text-[16px] font-semibold text-on-surface outline-none"
                     />
                     <button
                       type="button"

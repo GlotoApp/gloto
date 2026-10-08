@@ -7,7 +7,6 @@ import {
   Share2,
   Star,
   Clock3,
-  Bike,
   X,
   MapPin,
   Home,
@@ -1652,10 +1651,15 @@ const Shop = () => {
                         gap: "5px",
                       }}
                     >
-                      <Bike
-                        size={13}
-                        style={{ color: "rgba(255,255,255,0.5)" }}
-                      />
+                      <span
+                        className="material-symbols-outlined"
+                        style={{
+                          color: "rgba(255,255,255,0.5)",
+                          fontSize: "20px",
+                        }}
+                      >
+                        delivery_dining
+                      </span>
                       <span
                         style={{
                           fontSize: "13px",
