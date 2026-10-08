@@ -30,6 +30,7 @@ import {
   removeStorageObjectIfUnused,
   supabase,
 } from "../../src/lib/supabaseClient";
+import { compressCanvasToWebP } from "../../src/lib/imageCompression";
 import { useAuth } from "../../src/components/AuthContext";
 import ImageCropEditor from "./ImageCropEditor";
 import SubLoading from "./SubLoading";
@@ -238,7 +239,6 @@ const Productos = ({ section = "productos" }) => {
       alert("No se pudieron consultar los productos de la categoría");
       return;
     }
-
     const productIds = (categoryProducts || []).map((product) => product.id);
     if (productIds.length > 0) {
       const { error: deleteProductsError } = await supabase
@@ -256,19 +256,28 @@ const Productos = ({ section = "productos" }) => {
         return;
       }
 
-      await Promise.all(
-        (categoryProducts || []).map((product) =>
-          removeStorageObjectIfUnused(
-            "business-assets",
-            product.image_url,
-          ).catch((cleanupError) =>
-            console.warn(
-              "No se pudo limpiar imagen de producto:",
-              cleanupError,
-            ),
-          ),
+      const imageUrls = [
+        ...new Set((categoryProducts || []).map((product) => product.image_url)),
+      ].filter(Boolean);
+      const cleanupResults = await Promise.allSettled(
+        imageUrls.map((imageUrl) =>
+          removeStorageObjectIfUnused("business-assets", imageUrl),
         ),
       );
+      const cleanupFailures = cleanupResults.filter(
+        (result) => result.status === "rejected",
+      );
+      cleanupFailures.forEach((result) =>
+        console.error(
+          "No se pudo limpiar imagen de producto de la categoría:",
+          result.reason,
+        ),
+      );
+      if (cleanupFailures.length > 0) {
+        alert(
+          `Los productos se eliminaron, pero no se pudieron borrar ${cleanupFailures.length} imagen(es) de Supabase Storage.`,
+        );
+      }
     }
 
     const { error: categoryError } = await supabase
@@ -1291,10 +1300,10 @@ const Productos = ({ section = "productos" }) => {
     if (!file) return;
 
     if (
-      !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+      !file.type.startsWith("image/") ||
       file.size > 5 * 1024 * 1024
     ) {
-      alert("La imagen debe ser JPG, PNG o WEBP y pesar máximo 5 MB.");
+      alert("Selecciona una imagen de máximo 5 MB.");
       return;
     }
 
@@ -1345,16 +1354,7 @@ const Productos = ({ section = "productos" }) => {
         canvas.height,
       );
 
-      const blob = await new Promise((resolve, reject) => {
-        canvas.toBlob(
-          (result) =>
-            result
-              ? resolve(result)
-              : reject(new Error("No se pudo generar la imagen recortada.")),
-          "image/webp",
-          0.9,
-        );
-      });
+      const blob = await compressCanvasToWebP(canvas);
       const reader = new FileReader();
       const dataUrl = await new Promise((resolve, reject) => {
         reader.onload = () => resolve(reader.result);
@@ -1403,13 +1403,16 @@ const Productos = ({ section = "productos" }) => {
       const imageBlob = await fetch(imageUrl).then((response) =>
         response.blob(),
       );
-      const extension =
-        imageBlob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
-      uploadedImagePath = `${businessId}/productos-imagenes/${crypto.randomUUID()}.${extension}`;
+      if (imageBlob.type !== "image/webp") {
+        alert("La imagen del producto no se convirtió correctamente a WebP.");
+        setSavingProduct(false);
+        return;
+      }
+      uploadedImagePath = `${businessId}/productos-imagenes/${crypto.randomUUID()}.webp`;
       const { error: uploadError } = await supabase.storage
         .from("business-assets")
         .upload(uploadedImagePath, imageBlob, {
-          contentType: imageBlob.type,
+          contentType: "image/webp",
           upsert: false,
         });
 
@@ -1474,12 +1477,26 @@ const Productos = ({ section = "productos" }) => {
 
     if (error) {
       console.error("Error guardando producto:", error);
+      let uploadedImageCleanupFailed = false;
       if (uploadedImagePath) {
-        await supabase.storage
-          .from("business-assets")
-          .remove([uploadedImagePath]);
+        try {
+          await removeStorageObjectIfUnused(
+            "business-assets",
+            uploadedImagePath,
+          );
+        } catch (cleanupError) {
+          uploadedImageCleanupFailed = true;
+          console.error(
+            "No se pudo borrar la imagen que no quedó asociada al producto:",
+            cleanupError,
+          );
+        }
       }
-      alert("No se pudo guardar el producto");
+      alert(
+        uploadedImageCleanupFailed
+          ? "No se pudo guardar el producto ni limpiar su imagen temporal de Supabase."
+          : "No se pudo guardar el producto.",
+      );
     } else {
       if (previousProductImage && previousProductImage !== imageUrl) {
         try {
@@ -1488,7 +1505,10 @@ const Productos = ({ section = "productos" }) => {
             previousProductImage,
           );
         } catch (cleanupError) {
-          console.warn("No se pudo limpiar la imagen anterior:", cleanupError);
+          console.error("No se pudo limpiar la imagen anterior:", cleanupError);
+          alert(
+            "El producto se guardó, pero no se pudo borrar su imagen anterior de Supabase.",
+          );
         }
       }
 
@@ -1522,23 +1542,41 @@ const Productos = ({ section = "productos" }) => {
     setSavingProduct(false);
   };
 
-  // Archivar producto sin romper el historial de pedidos
   const handleDeleteProduct = async (id) => {
+    const product = products.find((item) => item.id === id);
     const { error } = await supabase
       .from("products")
-      .update({ is_active: false })
-      .eq("id", id);
+      .delete()
+      .eq("id", id)
+      .eq("business_id", businessId);
     if (error) {
-      console.error("Error archivando producto:", error);
-      alert("No se pudo archivar el producto");
+      console.error("Error eliminando producto:", error);
+      alert(
+        error.code === "23503"
+          ? "Este producto tiene pedidos asociados y no se puede eliminar. Archívalo para conservar el historial."
+          : "No se pudo eliminar el producto.",
+      );
       return;
     }
-    setProducts((current) =>
-      current.map((product) =>
-        product.id === id ? { ...product, isActive: false } : product,
-      ),
-    );
+
+    setProducts((current) => current.filter((item) => item.id !== id));
+    setSelectedProducts((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
     setDeleteConfirm(null);
+
+    if (product?.image_url) {
+      try {
+        await removeStorageObjectIfUnused("business-assets", product.image_url);
+      } catch (cleanupError) {
+        console.error("No se pudo limpiar la imagen del producto:", cleanupError);
+        alert(
+          "El producto se eliminó, pero no se pudo borrar su imagen de Supabase Storage.",
+        );
+      }
+    }
   };
 
   // Eliminar imagen
@@ -1758,17 +1796,31 @@ const Productos = ({ section = "productos" }) => {
       }
       return;
     }
-    await Promise.all(
-      (productsToDelete || []).map((product) =>
-        removeStorageObjectIfUnused("business-assets", product.image_url).catch(
-          (cleanupError) =>
-            console.warn(
-              "No se pudo limpiar imagen de producto:",
-              cleanupError,
-            ),
+    const cleanupResults = await Promise.allSettled(
+      [
+        ...new Set(
+          (productsToDelete || []).map((product) => product.image_url),
         ),
+      ]
+        .filter(Boolean)
+        .map((imageUrl) =>
+          removeStorageObjectIfUnused("business-assets", imageUrl),
+        ),
+    );
+    const cleanupFailures = cleanupResults.filter(
+      (result) => result.status === "rejected",
+    );
+    cleanupFailures.forEach((result) =>
+      console.error(
+        "No se pudo limpiar imagen de producto eliminado:",
+        result.reason,
       ),
     );
+    if (cleanupFailures.length > 0) {
+      alert(
+        `Los productos se eliminaron, pero no se pudieron borrar ${cleanupFailures.length} imagen(es) de Supabase Storage.`,
+      );
+    }
     setProducts((current) =>
       current.filter((product) => !selectedProducts.has(product.id)),
     );
@@ -2302,7 +2354,8 @@ const Productos = ({ section = "productos" }) => {
                           setDeleteConfirm(item.id);
                         }}
                         className="p-1.5 bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/30 transition-colors"
-                        title="Archivar"
+                        title="Eliminar producto"
+                        aria-label={`Eliminar producto ${item.name}`}
                       >
                         <Trash2 size={16} />
                       </button>
@@ -2593,7 +2646,7 @@ const Productos = ({ section = "productos" }) => {
                               />
                               <input
                                 type="file"
-                                accept="image/jpeg,image/png,image/webp"
+                                accept="image/*"
                                 className="hidden"
                                 onChange={handleProductImageFile}
                               />
@@ -2626,7 +2679,7 @@ const Productos = ({ section = "productos" }) => {
                               Subir Imagen
                             </span>
                             <span className="text-[7px] sm:text-[8px] text-neutral-400 block mb-2 font-bold">
-                              PNG • JPG • WebP
+                              Cualquier imagen · se guarda en WebP
                             </span>
                             <span className="text-[7px] sm:text-[8px] text-neutral-500 block font-semibold">
                               Click para seleccionar
@@ -2634,7 +2687,7 @@ const Productos = ({ section = "productos" }) => {
                           </div>
                           <input
                             type="file"
-                            accept="image/jpeg,image/png,image/webp"
+                            accept="image/*"
                             className="absolute inset-0 z-20 cursor-pointer opacity-0"
                             onChange={handleProductImageFile}
                           />
@@ -3721,20 +3774,21 @@ const Productos = ({ section = "productos" }) => {
           />
         )}
 
-        {/* MODAL CONFIRMACIÓN ARCHIVAR */}
+        {/* MODAL CONFIRMACIÓN ELIMINAR PRODUCTO */}
         {deleteConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl">
             <div className="bg-neutral-900 border border-red-500/30 w-full max-w-md rounded-3xl p-8 shadow-2xl">
               <div className="flex items-center gap-3 mb-6">
                 <AlertTriangle className="text-red-500" size={28} />
                 <h3 className="text-2xl font-black uppercase tracking-tight">
-                  Archivar Producto
+                  Eliminar Producto
                 </h3>
               </div>
 
               <p className="text-sm text-neutral-400 mb-8">
-                ¿Estás seguro de que deseas archivar este producto? Podrás
-                recuperarlo desde el filtro de archivados.
+                Esta acción eliminará permanentemente el producto y su imagen
+                de Supabase si ningún otro registro la utiliza. No se puede
+                deshacer.
               </p>
 
               <div className="flex gap-3">
@@ -3742,7 +3796,7 @@ const Productos = ({ section = "productos" }) => {
                   onClick={() => handleDeleteProduct(deleteConfirm)}
                   className="flex-1 bg-red-500 py-3 rounded-xl font-black uppercase text-[10px] tracking-[0.2em] hover:bg-red-600 transition-all"
                 >
-                  Archivar
+                  Eliminar producto
                 </button>
                 <button
                   onClick={() => setDeleteConfirm(null)}

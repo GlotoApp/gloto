@@ -18,6 +18,7 @@ import {
   removeStorageObjectIfUnused,
   supabase,
 } from "../../src/lib/supabaseClient";
+import { compressCanvasToWebP } from "../../src/lib/imageCompression";
 import ConfiguracionField from "./ConfiguracionField";
 import ImageCropEditor from "./ImageCropEditor";
 import SubLoading from "./SubLoading";
@@ -103,18 +104,6 @@ const loadEditorImage = async (editor) => {
   return image;
 };
 
-const canvasToFile = (canvas, fileName, type, quality) =>
-  new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) =>
-        blob
-          ? resolve(new File([blob], fileName, { type }))
-          : reject(new Error("No se pudo crear la imagen editada.")),
-      type,
-      quality,
-    );
-  });
-
 const setMapEditing = (map, enabled) => {
   [
     "dragging",
@@ -190,9 +179,10 @@ const createCroppedImage = async (editor, crop) => {
     canvas.width,
     canvas.height,
   );
-  return isCover
-    ? canvasToFile(canvas, "portada.webp", "image/webp", 0.9)
-    : canvasToFile(canvas, "logo.png", "image/png");
+  const webpBlob = await compressCanvasToWebP(canvas);
+  return new File([webpBlob], isCover ? "portada.webp" : "logo.webp", {
+    type: webpBlob.type,
+  });
 };
 
 const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
@@ -740,10 +730,10 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   const openImageEditor = (file, type) => {
     if (!file || !businessId) return;
     if (
-      !file.type.match(/^image\/(jpeg|png|webp)$/) ||
+      !file.type.startsWith("image/") ||
       file.size > 5 * 1024 * 1024
     ) {
-      setMessage("Usa JPG, PNG o WEBP de máximo 5 MB.");
+      setMessage("Selecciona una imagen de máximo 5 MB.");
       return;
     }
     if (uploadingImage) return;
@@ -800,18 +790,15 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     setMessage("Subiendo imagen...");
 
     const folder = type === "cover" ? "portadas-negocios" : "logos-negocio";
-    const extensionByType = {
-      "image/jpeg": "jpg",
-      "image/png": "png",
-      "image/webp": "webp",
-    };
-    const extension = extensionByType[file.type] || "webp";
-    const path = `${businessId}/${folder}/${type}-${Date.now()}.${extension}`;
+    const path = `${businessId}/${folder}/${type}-${Date.now()}.webp`;
 
     try {
+      if (file.type !== "image/webp") {
+        throw new Error("La imagen no se convirtió correctamente a WebP.");
+      }
       const { error: uploadError } = await supabase.storage
         .from("business-assets")
-        .upload(path, file, { contentType: file.type, upsert: false });
+        .upload(path, file, { contentType: "image/webp", upsert: false });
       if (uploadError) throw uploadError;
 
       const { data: publicData } = supabase.storage
@@ -832,14 +819,15 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       window.setTimeout(() => URL.revokeObjectURL(previewUrl), 1000);
 
       if (previousUrl && previousUrl !== url) {
-        void removeStorageObjectIfUnused("business-assets", previousUrl).catch(
-          (cleanupError) => {
-            console.warn("No se pudo limpiar la imagen anterior:", cleanupError);
-            setMessage(
-              "Imagen actualizada; no se pudo limpiar el archivo anterior.",
-            );
-          },
-        );
+        try {
+          await removeStorageObjectIfUnused("business-assets", previousUrl);
+        } catch (cleanupError) {
+          console.error("No se pudo limpiar la imagen anterior:", cleanupError);
+          setMessageType("error");
+          setMessage(
+            "Imagen actualizada, pero no se pudo borrar el archivo anterior de Supabase.",
+          );
+        }
       }
     } catch (error) {
       type === "logo" ? setLogoUrl(previousUrl) : setCoverUrl(previousUrl);
@@ -848,9 +836,13 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       try {
         await removeStorageObjectIfUnused("business-assets", path);
       } catch (cleanupError) {
-        console.warn(
+        console.error(
           "No se pudo limpiar la imagen que no se guardó:",
           cleanupError,
+        );
+        setMessageType("error");
+        setMessage(
+          "No se pudo guardar la imagen y tampoco se pudo limpiar el archivo temporal de Supabase.",
         );
       }
     } finally {
@@ -1056,7 +1048,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
               <input
                 ref={logoInput}
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept="image/*"
                 className="hidden"
                 onChange={(event) => selectImage(event, "logo")}
               />
@@ -1166,7 +1158,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
                 <input
                   ref={coverInput}
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/*"
                   className="hidden"
                   onChange={(event) => selectImage(event, "cover")}
                 />

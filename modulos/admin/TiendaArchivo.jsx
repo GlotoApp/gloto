@@ -27,6 +27,7 @@ import {
   removeStorageObjectIfUnused,
   supabase,
 } from "../../src/lib/supabaseClient";
+import { compressCanvasToWebP } from "../../src/lib/imageCompression";
 import TiendaDetalle from "./TiendaDetalle";
 
 const WEEKDAYS = [
@@ -51,6 +52,26 @@ const formatCurrency = (amount) =>
     currency: "COP",
     maximumFractionDigits: 0,
   }).format(Number(amount) || 0);
+
+const convertImageToWebP = async (file) => {
+  const imageUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = imageUrl;
+    await image.decode();
+
+    const scale = Math.min(1, 1400 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(image.naturalWidth * scale);
+    canvas.height = Math.round(image.naturalHeight * scale);
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("No se pudo preparar la imagen.");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return await compressCanvasToWebP(canvas);
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+};
 
 const normalizeBusinessHours = (rows = []) =>
   WEEKDAYS.map(({ value, label }) => {
@@ -195,30 +216,31 @@ const TiendaArchivo = () => {
 
     if (!file || !id) return;
 
-    if (
-      !file.type.match(/^image\/(jpeg|png|webp)$/) ||
-      file.size > 5 * 1024 * 1024
-    ) {
-      alert("Usa JPG, PNG o WEBP de máximo 5 MB.");
+    if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+      alert("Selecciona una imagen de máximo 5 MB.");
       return;
     }
 
+    let uploadedPath = null;
     try {
       setSaving(true);
 
+      const webpBlob = await convertImageToWebP(file);
       const folder = type === "cover" ? "portadas-negocios" : "logos-negocio";
-      const extension = file.type.split("/")[1] || "jpg";
-      const path = `${id}/${folder}/${type}-${Date.now()}.${extension}`;
+      uploadedPath = `${id}/${folder}/${type}-${Date.now()}.webp`;
 
       const { error: uploadError } = await supabase.storage
         .from("business-assets")
-        .upload(path, file, { contentType: file.type, upsert: false });
+        .upload(uploadedPath, webpBlob, {
+          contentType: "image/webp",
+          upsert: false,
+        });
 
       if (uploadError) throw uploadError;
 
       const { data: publicData } = supabase.storage
         .from("business-assets")
-        .getPublicUrl(path);
+        .getPublicUrl(uploadedPath);
 
       const previousUrl = type === "logo" ? logoUrl : coverUrl;
       const url = publicData?.publicUrl;
@@ -250,12 +272,31 @@ const TiendaArchivo = () => {
         try {
           await removeStorageObjectIfUnused("business-assets", previousUrl);
         } catch (cleanupError) {
-          console.warn("No se pudo limpiar la imagen anterior:", cleanupError);
+          console.error("No se pudo limpiar la imagen anterior:", cleanupError);
+          alert(
+            "La imagen se actualizó, pero no se pudo borrar la imagen anterior de Supabase.",
+          );
         }
       }
     } catch (error) {
       console.error("Error subiendo la imagen:", error);
-      alert("No se pudo subir la imagen de la tienda.");
+      let cleanupFailed = false;
+      if (uploadedPath) {
+        try {
+          await removeStorageObjectIfUnused("business-assets", uploadedPath);
+        } catch (cleanupError) {
+          cleanupFailed = true;
+          console.error(
+            "No se pudo limpiar la imagen de tienda que no quedó guardada:",
+            cleanupError,
+          );
+        }
+      }
+      alert(
+        cleanupFailed
+          ? "No se pudo guardar la imagen ni limpiar el archivo temporal de Supabase."
+          : error.message || "No se pudo subir la imagen de la tienda.",
+      );
     } finally {
       setSaving(false);
     }
@@ -1416,7 +1457,7 @@ const TiendaArchivo = () => {
                   <input
                     ref={logoInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp"
+                    accept="image/*"
                     className="hidden"
                     onChange={(event) => uploadImage(event, "logo")}
                   />
@@ -1447,7 +1488,7 @@ const TiendaArchivo = () => {
                   <input
                     ref={coverInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp"
+                    accept="image/*"
                     className="hidden"
                     onChange={(event) => uploadImage(event, "cover")}
                   />
