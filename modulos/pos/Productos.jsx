@@ -824,7 +824,7 @@ const Productos = ({ section = "productos" }) => {
 
   // Filtrar y buscar
   const filteredProducts = useMemo(() => {
-    let result = products;
+    let result = [...products];
 
     // Búsqueda
     if (searchQuery) {
@@ -860,11 +860,20 @@ const Productos = ({ section = "productos" }) => {
     }
 
     // Ordenar
+    const categoryOrder = new Map(
+      categoryRecords.map((category) => [
+        category.id,
+        Number(category.order_index ?? 0),
+      ]),
+    );
     result.sort((a, b) => {
       if (sortBy === "order") {
+        const categoryOrderDifference =
+          (categoryOrder.get(a.categoryId) ?? Number.MAX_SAFE_INTEGER) -
+          (categoryOrder.get(b.categoryId) ?? Number.MAX_SAFE_INTEGER);
         return (
+          categoryOrderDifference ||
           a.orderIndex - b.orderIndex ||
-          a.category.localeCompare(b.category) ||
           a.name.localeCompare(b.name)
         );
       }
@@ -875,7 +884,15 @@ const Productos = ({ section = "productos" }) => {
     });
 
     return result;
-  }, [products, searchQuery, filterCategory, filterStatus, sortBy, inventoryEnabled]);
+  }, [
+    products,
+    categoryRecords,
+    searchQuery,
+    filterCategory,
+    filterStatus,
+    sortBy,
+    inventoryEnabled,
+  ]);
 
   const selectedProductRecords = products.filter((product) =>
     selectedProducts.has(product.id),
