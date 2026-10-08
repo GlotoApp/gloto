@@ -1,6 +1,7 @@
 import React, { useEffect, useState, memo } from "react";
 import { motion } from "framer-motion";
 import {
+  CheckCircle2,
   XCircle,
   Lock,
   Calculator,
@@ -10,6 +11,7 @@ import {
   PlusCircle,
   MinusCircle,
   AlertCircle,
+  X,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
@@ -158,6 +160,7 @@ export default function Caja() {
 
   const [transacciones, setTransacciones] = useState([]);
   const [historial, setHistorial] = useState(leerHistorialCierres);
+  const [cierreConfirmado, setCierreConfirmado] = useState(null);
   const [novedades, setNovedades] = useState([]);
   const [mostrarRegistroNovedad, setMostrarRegistroNovedad] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -567,6 +570,40 @@ export default function Caja() {
       diferencia,
       transacciones: transaccionesValidas.length,
     };
+    setCierreConfirmado({
+      ...nuevoCierre,
+      ingresosManuales: totalIngresosManuales,
+      egresosManuales: totalEgresosManuales,
+      metodos: [
+        {
+          nombre: "Efectivo",
+          ventas: totalEfectivoVentas,
+          esperado: enCajaEsperado,
+          contado: parseAmountInput(metodosPagoReales.efectivo),
+        },
+        {
+          nombre: "Tarjeta",
+          ventas: totalTarjeta,
+          esperado: totalTarjeta,
+          contado: parseAmountInput(metodosPagoReales.tarjeta),
+        },
+        {
+          nombre: "Transferencia",
+          ventas: totalTransferencia,
+          esperado: totalTransferencia,
+          contado: parseAmountInput(metodosPagoReales.transferencia),
+        },
+      ].map((method) => ({
+        ...method,
+        diferencia: method.contado - method.esperado,
+      })),
+      movimientos: novedades.map((movement) => ({
+        tipo: movement.tipo,
+        concepto: movement.concepto,
+        metodo: movement.metodo,
+        monto: movement.monto,
+      })),
+    });
     setHistorial([nuevoCierre, ...historial]);
     setTurnoIniciado(false);
     setShiftId(null);
@@ -1226,6 +1263,187 @@ export default function Caja() {
             }
           </div>
         </main>
+      )}
+      {cierreConfirmado && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          role="presentation"
+        >
+          <motion.section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cash-close-title"
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-7"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-400" size={24} />
+                <div>
+                  <h2
+                    id="cash-close-title"
+                    className="text-lg font-black uppercase tracking-tight text-white"
+                  >
+                    Caja cerrada correctamente
+                  </h2>
+                  <p className="mt-1 text-xs text-neutral-400">
+                    Cierre realizado por {cierreConfirmado.cajero} ·{" "}
+                    {cierreConfirmado.fechaCierre} a las{" "}
+                    {cierreConfirmado.horaCierre}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCierreConfirmado(null)}
+                className="rounded-lg p-2 text-neutral-400 transition hover:bg-white/10 hover:text-white"
+                aria-label="Cerrar resumen del cierre"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-violet-400/15 bg-violet-400/[0.06] p-3">
+                <p className="text-[8px] font-black uppercase tracking-widest text-violet-300/70">
+                  Total de ventas
+                </p>
+                <p className="mt-1 font-mono text-lg font-black text-white">
+                  {fmt(cierreConfirmado.totalVentas)}
+                </p>
+                <p className="mt-1 text-[9px] text-neutral-500">
+                  {cierreConfirmado.transacciones}{" "}
+                  {cierreConfirmado.transacciones === 1
+                    ? "venta"
+                    : "ventas"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                <p className="text-[8px] font-black uppercase tracking-widest text-neutral-500">
+                  Total contado
+                </p>
+                <p className="mt-1 font-mono text-lg font-black text-white">
+                  {fmt(cierreConfirmado.totalContado)}
+                </p>
+                <p
+                  className={`mt-1 text-[9px] font-bold ${
+                    cierreConfirmado.diferencia === 0
+                      ? "text-emerald-400"
+                      : cierreConfirmado.diferencia > 0
+                        ? "text-amber-300"
+                        : "text-red-400"
+                  }`}
+                >
+                  {cierreConfirmado.diferencia === 0
+                    ? "Sin diferencia"
+                    : `${cierreConfirmado.diferencia > 0 ? "Sobra" : "Falta"} ${fmt(Math.abs(cierreConfirmado.diferencia))}`}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 overflow-hidden rounded-xl border border-white/[0.08]">
+              <div className="grid grid-cols-[1fr_repeat(3,minmax(0,1fr))] gap-2 bg-white/[0.04] px-3 py-2 text-[7px] font-black uppercase tracking-wider text-neutral-500 sm:text-[8px]">
+                <span>Método</span>
+                <span className="text-right">Ventas</span>
+                <span className="text-right">Esperado</span>
+                <span className="text-right">Contado</span>
+              </div>
+              {cierreConfirmado.metodos.map((method) => (
+                <div
+                  key={method.nombre}
+                  className="grid grid-cols-[1fr_repeat(3,minmax(0,1fr))] gap-2 border-t border-white/[0.06] px-3 py-3 text-[9px]"
+                >
+                  <span className="font-bold text-neutral-300">
+                    {method.nombre}
+                  </span>
+                  <span className="text-right font-mono text-neutral-400">
+                    {fmt(method.ventas)}
+                  </span>
+                  <span className="text-right font-mono text-neutral-400">
+                    {fmt(method.esperado)}
+                  </span>
+                  <span
+                    className={`text-right font-mono font-bold ${
+                      method.diferencia === 0
+                        ? "text-emerald-400"
+                        : method.diferencia > 0
+                          ? "text-amber-300"
+                          : "text-red-400"
+                    }`}
+                  >
+                    {fmt(method.contado)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-emerald-500/10 bg-emerald-500/[0.04] p-3">
+                <p className="text-[8px] font-black uppercase tracking-widest text-emerald-300/70">
+                  Ingresos manuales
+                </p>
+                <p className="mt-1 font-mono text-sm font-bold text-emerald-300">
+                  {fmt(cierreConfirmado.ingresosManuales)}
+                </p>
+              </div>
+              <div className="rounded-xl border border-red-500/10 bg-red-500/[0.04] p-3">
+                <p className="text-[8px] font-black uppercase tracking-widest text-red-300/70">
+                  Egresos manuales
+                </p>
+                <p className="mt-1 font-mono text-sm font-bold text-red-300">
+                  {fmt(cierreConfirmado.egresosManuales)}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-between rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2.5">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-neutral-400">
+                Efectivo esperado en caja
+              </span>
+              <span className="font-mono text-sm font-black text-white">
+                {fmt(cierreConfirmado.enCaja)}
+              </span>
+            </div>
+
+            {cierreConfirmado.movimientos.length > 0 && (
+              <details className="mt-4 rounded-xl border border-white/[0.08]">
+                <summary className="cursor-pointer px-3 py-3 text-[9px] font-black uppercase tracking-wider text-neutral-300">
+                  Ver movimientos ({cierreConfirmado.movimientos.length})
+                </summary>
+                <div className="space-y-2 border-t border-white/[0.06] p-3">
+                  {cierreConfirmado.movimientos.map((movement, index) => (
+                    <div
+                      key={`${movement.tipo}-${movement.concepto}-${index}`}
+                      className="flex items-center justify-between gap-3 text-[9px]"
+                    >
+                      <span className="min-w-0 truncate text-neutral-400">
+                        {movement.tipo === "ingreso" ? "Ingreso" : "Egreso"} ·{" "}
+                        {movement.concepto} · {movement.metodo}
+                      </span>
+                      <span
+                        className={`shrink-0 font-mono font-bold ${
+                          movement.tipo === "ingreso"
+                            ? "text-emerald-300"
+                            : "text-red-300"
+                        }`}
+                      >
+                        {fmt(movement.monto)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setCierreConfirmado(null)}
+              className="mt-5 w-full rounded-xl bg-violet-600 px-4 py-3 text-[9px] font-black uppercase tracking-widest text-white transition hover:bg-violet-500"
+            >
+              Entendido
+            </button>
+          </motion.section>
+        </div>
       )}
     </div>
   );

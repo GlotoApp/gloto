@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Camera,
   Check,
+  Crop,
   Image,
   LoaderCircle,
   LocateFixed,
@@ -11,6 +11,7 @@ import {
   Pencil,
   Save,
   Store,
+  Trash2,
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 import {
@@ -205,6 +206,9 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(null);
+  const [deletingImage, setDeletingImage] = useState(null);
+  const [editingImage, setEditingImage] = useState(null);
+  const [draggingImage, setDraggingImage] = useState(null);
   const [imageEditor, setImageEditor] = useState(null);
   const [imageEditorError, setImageEditorError] = useState("");
   const [locating, setLocating] = useState(false);
@@ -733,9 +737,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     setSaving(false);
   };
 
-  const selectImage = (event, type) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
+  const openImageEditor = (file, type) => {
     if (!file || !businessId) return;
     if (
       !file.type.match(/^image\/(jpeg|png|webp)$/) ||
@@ -752,6 +754,43 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     });
     setImageEditorError("");
     setMessage("");
+  };
+
+  const selectImage = (event, type) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    openImageEditor(file, type);
+  };
+
+  const handleImageDrop = (event, type) => {
+    event.preventDefault();
+    setDraggingImage(null);
+    openImageEditor(event.dataTransfer.files?.[0], type);
+  };
+
+  const recropImage = async (type) => {
+    const imageUrl = type === "logo" ? logoUrl : coverUrl;
+    if (!imageUrl || editingImage || uploadingImage || deletingImage) return;
+
+    setEditingImage(type);
+    setMessage("");
+    try {
+      const response = await fetch(imageUrl);
+      if (!response.ok) {
+        throw new Error("No se pudo cargar la imagen para editarla.");
+      }
+      const blob = await response.blob();
+      const file = new File([blob], type === "logo" ? "logo.png" : "portada.webp", {
+        type: blob.type || (type === "logo" ? "image/png" : "image/webp"),
+      });
+      openImageEditor(file, type);
+    } catch (error) {
+      console.error("No se pudo preparar la imagen para recortarla:", error);
+      setMessageType("error");
+      setMessage(error.message || "No se pudo cargar la imagen para editarla.");
+    } finally {
+      setEditingImage(null);
+    }
   };
 
   const uploadImage = async (file, type, previewUrl) => {
@@ -788,6 +827,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       if (error) throw error;
 
       type === "logo" ? setLogoUrl(url) : setCoverUrl(url);
+      setInitialMediaUrls((current) => ({ ...current, [type]: url }));
       setMessage("Imagen actualizada");
       window.setTimeout(() => URL.revokeObjectURL(previewUrl), 1000);
 
@@ -815,6 +855,52 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       }
     } finally {
       setUploadingImage(null);
+    }
+  };
+
+  const deleteImage = async (type) => {
+    const imageUrl = type === "logo" ? logoUrl : coverUrl;
+    if (!businessId || !imageUrl || uploadingImage || deletingImage) return;
+    if (
+      !window.confirm(
+        `¿Eliminar ${type === "logo" ? "el logo" : "la portada"} de la tienda?`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingImage(type);
+    setMessage("");
+    try {
+      const { error } = await supabase
+        .from("businesses")
+        .update({ [type === "logo" ? "logo_url" : "cover_url"]: null })
+        .eq("id", businessId);
+      if (error) throw error;
+
+      if (type === "logo") setLogoUrl("");
+      else setCoverUrl("");
+      setInitialMediaUrls((current) => ({ ...current, [type]: "" }));
+      setMessageType("success");
+      setMessage(`${type === "logo" ? "Logo" : "Portada"} eliminada.`);
+
+      try {
+        await removeStorageObjectIfUnused("business-assets", imageUrl);
+      } catch (cleanupError) {
+        console.warn(
+          "No se pudo limpiar el archivo de imagen eliminado:",
+          cleanupError,
+        );
+        setMessage(
+          `${type === "logo" ? "Logo" : "Portada"} eliminada, pero no se pudo limpiar el archivo anterior.`,
+        );
+      }
+    } catch (error) {
+      console.error("No se pudo eliminar la imagen de la tienda:", error);
+      setMessageType("error");
+      setMessage(error.message || "No se pudo eliminar la imagen.");
+    } finally {
+      setDeletingImage(null);
     }
   };
 
@@ -866,45 +952,134 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
-            <div className="flex flex-col items-center justify-center rounded-2xl bg-neutral-900/45 p-4">
-              <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-neutral-500">
-                Logo
-              </p>
-              <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl bg-neutral-950">
-                {logoUrl ? (
-                  <img
-                    src={logoUrl}
-                    alt="Logo de la tienda"
-                    className="h-full w-full object-contain p-2"
-                  />
-                ) : (
+            <div
+              className={`relative h-48 overflow-hidden rounded-2xl bg-neutral-900/45 transition ${
+                draggingImage === "logo"
+                  ? "border-2 border-dashed border-violet-400 bg-violet-500/10"
+                  : "border border-transparent"
+              }`}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                setDraggingImage("logo");
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  setDraggingImage(null);
+                }
+              }}
+              onDrop={(event) => handleImageDrop(event, "logo")}
+            >
+              {logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt="Logo de la tienda"
+                  className="h-full w-full object-contain"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center">
                   <Store className="text-neutral-700" size={36} />
-                )}
+                </div>
+              )}
+              {draggingImage === "logo" && (
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/70 text-xs font-bold text-violet-200">
+                  Suelta la imagen del logo aquí
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => logoInput.current?.click()}
+                disabled={
+                  saving ||
+                  Boolean(uploadingImage) ||
+                  Boolean(deletingImage) ||
+                  Boolean(editingImage)
+                }
+                className="absolute bottom-3 right-3 rounded-lg bg-violet-600 p-2 disabled:opacity-50"
+                aria-label="Cambiar imagen del logo"
+                title="Cambiar imagen"
+              >
+                <Image size={14} />
+              </button>
+              {logoUrl && (
                 <button
                   type="button"
-                  onClick={() => logoInput.current?.click()}
-                  disabled={saving || Boolean(uploadingImage)}
-                  className="absolute bottom-1 right-1 rounded-lg bg-violet-600 p-2 disabled:opacity-50"
+                  onClick={() => recropImage("logo")}
+                  disabled={
+                    saving ||
+                    Boolean(uploadingImage) ||
+                    Boolean(deletingImage) ||
+                    Boolean(editingImage)
+                  }
+                  className="absolute bottom-3 right-12 rounded-lg bg-neutral-700 p-2 disabled:opacity-50"
+                  aria-label="Volver a recortar el logo"
+                  title="Volver a recortar"
                 >
-                  <Camera size={14} />
+                  <Crop size={14} />
                 </button>
-                {uploadingImage === "logo" && (
-                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-neutral-950/80 text-xs font-bold text-white">
-                    <LoaderCircle size={22} className="animate-spin text-violet-400" />
-                    Subiendo logo...
-                  </div>
-                )}
-                <input
-                  ref={logoInput}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                  onChange={(event) => selectImage(event, "logo")}
-                />
-              </div>
+              )}
+              {logoUrl && (
+                <button
+                  type="button"
+                  onClick={() => deleteImage("logo")}
+                  disabled={
+                    saving ||
+                    Boolean(uploadingImage) ||
+                    Boolean(deletingImage) ||
+                    Boolean(editingImage)
+                  }
+                  className="absolute bottom-3 right-[5.25rem] rounded-lg bg-red-600 p-2 disabled:opacity-50"
+                  aria-label="Eliminar imagen del logo"
+                  title="Eliminar imagen"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+              {uploadingImage === "logo" && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-neutral-950/80 text-xs font-bold text-white">
+                  <LoaderCircle size={22} className="animate-spin text-violet-400" />
+                  Subiendo logo...
+                </div>
+              )}
+              {deletingImage === "logo" && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-neutral-950/80 text-xs font-bold text-white">
+                  <LoaderCircle size={22} className="animate-spin text-violet-400" />
+                  Eliminando logo...
+                </div>
+              )}
+              {editingImage === "logo" && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-neutral-950/80 text-xs font-bold text-white">
+                  <LoaderCircle size={22} className="animate-spin text-violet-400" />
+                  Preparando editor...
+                </div>
+              )}
+              <input
+                ref={logoInput}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(event) => selectImage(event, "logo")}
+              />
             </div>
             <div className="overflow-hidden rounded-2xl bg-neutral-900/45">
-              <div className="relative h-48">
+              <div
+                className={`relative h-48 transition ${
+                  draggingImage === "cover"
+                    ? "border-2 border-dashed border-violet-400 bg-violet-500/10"
+                    : "border border-transparent"
+                }`}
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  setDraggingImage("cover");
+                }}
+                onDragOver={(event) => event.preventDefault()}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setDraggingImage(null);
+                  }
+                }}
+                onDrop={(event) => handleImageDrop(event, "cover")}
+              >
                 {coverUrl ? (
                   <img
                     src={coverUrl}
@@ -916,18 +1091,76 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
                     Sin portada
                   </div>
                 )}
+                {draggingImage === "cover" && (
+                  <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/70 text-xs font-bold text-violet-200">
+                    Suelta la imagen de portada aquí
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => coverInput.current?.click()}
-                  disabled={saving || Boolean(uploadingImage)}
-                  className="absolute bottom-3 right-3 flex items-center gap-2 rounded-xl bg-black/75 px-3 py-2 text-[10px] font-black uppercase disabled:opacity-50"
+                  disabled={
+                    saving ||
+                    Boolean(uploadingImage) ||
+                    Boolean(deletingImage) ||
+                    Boolean(editingImage)
+                  }
+                  className="absolute bottom-3 right-3 rounded-lg bg-violet-600 p-2 disabled:opacity-50"
+                  aria-label="Cambiar imagen de portada"
+                  title="Cambiar imagen"
                 >
-                  <Image size={14} /> Cambiar portada
+                  <Image size={14} />
                 </button>
+                {coverUrl && (
+                  <button
+                    type="button"
+                    onClick={() => recropImage("cover")}
+                    disabled={
+                      saving ||
+                      Boolean(uploadingImage) ||
+                      Boolean(deletingImage) ||
+                      Boolean(editingImage)
+                    }
+                    className="absolute bottom-3 right-12 rounded-lg bg-neutral-700 p-2 disabled:opacity-50"
+                    aria-label="Volver a recortar la portada"
+                    title="Volver a recortar"
+                  >
+                    <Crop size={14} />
+                  </button>
+                )}
+                {coverUrl && (
+                  <button
+                    type="button"
+                    onClick={() => deleteImage("cover")}
+                    disabled={
+                      saving ||
+                      Boolean(uploadingImage) ||
+                      Boolean(deletingImage) ||
+                      Boolean(editingImage)
+                    }
+                    className="absolute bottom-3 right-[5.25rem] rounded-lg bg-red-600 p-2 disabled:opacity-50"
+                    aria-label="Eliminar imagen de portada"
+                    title="Eliminar imagen"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
                 {uploadingImage === "cover" && (
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-neutral-950/75 text-xs font-bold text-white">
                     <LoaderCircle size={24} className="animate-spin text-violet-400" />
                     Subiendo portada...
+                  </div>
+                )}
+                {deletingImage === "cover" && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-neutral-950/75 text-xs font-bold text-white">
+                    <LoaderCircle size={24} className="animate-spin text-violet-400" />
+                    Eliminando portada...
+                  </div>
+                )}
+                {editingImage === "cover" && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-neutral-950/75 text-xs font-bold text-white">
+                    <LoaderCircle size={24} className="animate-spin text-violet-400" />
+                    Preparando editor...
                   </div>
                 )}
                 <input

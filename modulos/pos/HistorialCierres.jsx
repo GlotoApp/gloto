@@ -1,4 +1,11 @@
-import { CalendarDays, ChevronDown, History, Search } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronDown,
+  History,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useMemo, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import SubLoading from "./SubLoading";
@@ -20,6 +27,17 @@ const fmtFecha = (value) => {
   });
 };
 
+const fmtHora = (value) => {
+  if (!value) return "--";
+  const [horas, minutos] = value.split(":").map(Number);
+  const fecha = new Date();
+  fecha.setHours(horas, minutos, 0, 0);
+  return fecha.toLocaleTimeString("es-CO", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 const leerCierres = () => {
   try {
     const stored = localStorage.getItem("caja_historial_cierres");
@@ -30,9 +48,11 @@ const leerCierres = () => {
 };
 
 export default function HistorialCierres() {
-  const [cierres] = useState(leerCierres);
+  const [cierres, setCierres] = useState(leerCierres);
   const [fechaBusqueda, setFechaBusqueda] = useState("");
   const [expandido, setExpandido] = useState(null);
+  const [cierrePendienteEliminar, setCierrePendienteEliminar] = useState(null);
+  const [errorEliminar, setErrorEliminar] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -48,6 +68,47 @@ export default function HistorialCierres() {
       }),
     [cierres, fechaBusqueda],
   );
+
+  const confirmarEliminacion = () => {
+    if (!cierrePendienteEliminar) return;
+    try {
+      const ahora = new Date();
+      const registrosEliminados = JSON.parse(
+        localStorage.getItem("caja_historial_cierres_eliminados") || "[]",
+      );
+      const registroEliminacion = {
+        id: `${cierrePendienteEliminar.id}-${Date.now()}`,
+        datosCierre: cierrePendienteEliminar,
+        fechaHoraEliminacion: ahora.toISOString(),
+        fechaEliminacion: [
+          ahora.getFullYear(),
+          String(ahora.getMonth() + 1).padStart(2, "0"),
+          String(ahora.getDate()).padStart(2, "0"),
+        ].join("-"),
+        motivo: "Eliminado desde el historial de cierres.",
+      };
+      const cierresActualizados = cierres.filter(
+        (cierre) => cierre.id !== cierrePendienteEliminar.id,
+      );
+      localStorage.setItem(
+        "caja_historial_cierres_eliminados",
+        JSON.stringify([registroEliminacion, ...registrosEliminados]),
+      );
+      localStorage.setItem(
+        "caja_historial_cierres",
+        JSON.stringify(cierresActualizados),
+      );
+      setCierres(cierresActualizados);
+      setExpandido(null);
+      setCierrePendienteEliminar(null);
+      setErrorEliminar("");
+    } catch (error) {
+      console.error("No se pudo eliminar el cierre del historial:", error);
+      setErrorEliminar(
+        "No se pudo eliminar el cierre. Intenta nuevamente.",
+      );
+    }
+  };
 
   if (isLoading) {
     return (
@@ -131,10 +192,10 @@ export default function HistorialCierres() {
                         <History size={16} />
                       </div>
                       <div>
-                        <p className="text-sm font-black font-mono text-white">
-                          {cierre.id}
+                        <p className="text-sm font-black text-white">
+                          Cierre de caja
                         </p>
-                        <p className="text-[9px] text-neutral-500 font-mono uppercase">
+                        <p className="text-[9px] text-neutral-500 uppercase">
                           {cierre.cajero} ·{" "}
                           {fmtFecha(cierre.fechaCierre || cierre.fecha)}
                         </p>
@@ -181,8 +242,9 @@ export default function HistorialCierres() {
                               Turno
                             </p>
                             <p className="mt-1 text-[10px] text-neutral-300 font-mono">
-                              {cierre.fechaApertura} {cierre.horaApertura} -{" "}
-                              {cierre.horaCierre}
+                              {fmtFecha(cierre.fechaApertura)} ·{" "}
+                              {fmtHora(cierre.horaApertura)} –{" "}
+                              {fmtHora(cierre.horaCierre)}
                             </p>
                           </div>
                           <div>
@@ -210,6 +272,19 @@ export default function HistorialCierres() {
                             </p>
                           </div>
                         </div>
+                        <div className="flex justify-end border-t border-white/[0.06] px-5 py-4">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setErrorEliminar("");
+                              setCierrePendienteEliminar(cierre);
+                            }}
+                            className="inline-flex items-center gap-2 rounded-lg border border-red-400/20 bg-red-500/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-red-300 transition hover:border-red-400/40 hover:bg-red-500/20"
+                          >
+                            <Trash2 size={14} />
+                            Eliminar cierre
+                          </button>
+                        </div>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -219,6 +294,70 @@ export default function HistorialCierres() {
           </div>
         )}
       </main>
+      {cierrePendienteEliminar && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-close-title"
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2
+                  id="delete-close-title"
+                  className="text-base font-black text-white"
+                >
+                  ¿Eliminar este cierre?
+                </h2>
+                <p className="mt-2 text-xs leading-5 text-neutral-400">
+                  El cierre de {cierrePendienteEliminar.cajero} del{" "}
+                  {fmtFecha(
+                    cierrePendienteEliminar.fechaCierre ||
+                      cierrePendienteEliminar.fecha,
+                  )}{" "}
+                  se quitará del historial y quedará en “Cierres eliminados”.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCierrePendienteEliminar(null);
+                  setErrorEliminar("");
+                }}
+                className="rounded-lg p-2 text-neutral-400 transition hover:bg-white/10 hover:text-white"
+                aria-label="Cancelar eliminación"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {errorEliminar && (
+              <p role="alert" className="mt-3 text-xs text-red-300">
+                {errorEliminar}
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCierrePendienteEliminar(null);
+                  setErrorEliminar("");
+                }}
+                className="rounded-lg border border-white/10 px-4 py-2.5 text-[9px] font-black uppercase tracking-wider text-neutral-300 transition hover:bg-white/5"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarEliminacion}
+                className="rounded-lg bg-red-600 px-4 py-2.5 text-[9px] font-black uppercase tracking-wider text-white transition hover:bg-red-500"
+              >
+                Sí, eliminar
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

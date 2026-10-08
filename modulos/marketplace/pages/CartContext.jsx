@@ -324,6 +324,10 @@ export const CartProvider = ({ children }) => {
           nombre: baseNombre,
           cantidad: carrito[p.id],
           precio: p.precio,
+          precioBase: Number(
+            p.precioBase ??
+              (Number(p.precio) || 0) - (Number(p.precioExtraTotal) || 0),
+          ),
           notas: p.notas || "",
           unit_name: p.unit?.name || "UNIDAD",
           varianteNombre: p.varianteNombre || null,
@@ -577,7 +581,7 @@ export const CartProvider = ({ children }) => {
 
       pedido.items.forEach((it) => {
         lines.push(
-          `*x${it.cantidad} - ${it.nombre} - ${fmt(it.precio)} = ${fmt(
+          `*x${it.cantidad} - ${it.nombre} - ${fmt(it.precioBase)} = ${fmt(
             it.precio * it.cantidad,
           )}*`,
         );
@@ -585,7 +589,22 @@ export const CartProvider = ({ children }) => {
         // Incluir opciones seleccionadas por el usuario (lista vertical)
         if (it.opciones && it.opciones.length > 0) {
           it.opciones.forEach((opt) => {
-            lines.push(`• ${opt}`);
+            const nombreOpcion =
+              typeof opt === "string"
+                ? opt
+                : opt?.nombre || opt?.name || "Opción";
+            const precioExtra = Number(
+              opt?.precioExtra ??
+                opt?.precio_extra ??
+                opt?.price_extra ??
+                opt?.extra_price ??
+                opt?.price ??
+                opt?.monto ??
+                0,
+            );
+            lines.push(
+              `• ${nombreOpcion}${precioExtra > 0 ? ` +${fmt(precioExtra)}` : ""}`,
+            );
           });
         }
 
@@ -597,9 +616,6 @@ export const CartProvider = ({ children }) => {
         lines.push("__");
       });
 
-      lines.push("");
-      lines.push(`*TOTAL PRODUCTOS:* ${fmt(pedido.total)}`);
-
       // Si hay costo de delivery en datosCliente (opcional), lo mostramos
       if (pedido.datosCliente.deliveryFee) {
         lines.push(
@@ -608,6 +624,8 @@ export const CartProvider = ({ children }) => {
       }
 
       lines.push("");
+      const totalAPagar = pedido.total + pedido.deliveryFee;
+      lines.push(`*TOTAL A PAGAR:* ${fmt(totalAPagar)}`);
 
       // Método(s) de pago
       if (metodoPago && metodoPago.length > 1) {
@@ -620,18 +638,20 @@ export const CartProvider = ({ children }) => {
         const single =
           metodoPago && metodoPago.length === 1 ? metodoPago[0] : null;
         const singleMetodo = single ? single.metodo || "-" : "-";
-        const singleMonto = single
-          ? fmt(Number(single.monto) || pedido.total)
-          : "-";
-        lines.push(`*MÉTODO DE PAGO:* ${singleMetodo}: ${singleMonto}`);
+        lines.push(`*MÉTODO DE PAGO:* ${singleMetodo}`);
       }
       lines.push("");
 
       // Propina opcional si existe
-      if (pedido.datosCliente.propina) {
-        const prop = Number(pedido.datosCliente.propina) || 0;
-        lines.push(`*PROPINA VOLUNTARIA:* ${fmt(prop)}`);
-        lines.push(`*TOTAL CON PROPINA:* ${fmt(pedido.total + prop)}`);
+      if (pedido.tipAmount > 0) {
+        const prop = Number(pedido.tipAmount) || 0;
+        const porcentajePropina = Number(pedido.tipPercent) || 0;
+        lines.push(
+          `*PROPINA VOLUNTARIA (${porcentajePropina}%):* ${fmt(prop)}`,
+        );
+        lines.push(
+          `*TOTAL CON PROPINA:* ${fmt(totalAPagar + prop)}`,
+        );
         lines.push("");
       }
 

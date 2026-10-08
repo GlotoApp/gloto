@@ -327,6 +327,7 @@ const Productos = ({ section = "productos" }) => {
     useState(null);
   const [imageEditor, setImageEditor] = useState(null);
   const [imageEditorError, setImageEditorError] = useState("");
+  const [isProductImageDragging, setIsProductImageDragging] = useState(false);
   const [optionGroups, setOptionGroups] = useState([]);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [expandedOptionGroups, setExpandedOptionGroups] = useState(new Set());
@@ -1269,9 +1270,7 @@ const Productos = ({ section = "productos" }) => {
     }
   };
 
-  const handleProductImageFile = (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
+  const openProductImageEditor = (file) => {
     if (!file) return;
 
     if (
@@ -1288,6 +1287,19 @@ const Productos = ({ section = "productos" }) => {
       type: "product",
       url: URL.createObjectURL(file),
     });
+  };
+
+  const handleProductImageFile = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    openProductImageEditor(file);
+  };
+
+  const handleProductImageDrop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsProductImageDragging(false);
+    openProductImageEditor(event.dataTransfer.files?.[0]);
   };
 
   const applyProductImageCrop = async (crop) => {
@@ -2521,7 +2533,31 @@ const Productos = ({ section = "productos" }) => {
                         Imagen
                       </label>
                     </div>
-                    <div className="group relative flex aspect-[4/3] cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border border-white/10 bg-neutral-800 text-neutral-400 transition-colors hover:border-white/20 hover:text-white sm:aspect-square">
+                    <div
+                      className={`group relative flex aspect-[4/3] cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border bg-neutral-800 text-neutral-400 transition-colors hover:border-white/20 hover:text-white sm:aspect-square ${
+                        isProductImageDragging
+                          ? "border-2 border-dashed border-violet-400"
+                          : "border-white/10"
+                      }`}
+                      onDragEnter={(event) => {
+                        if (!event.dataTransfer.types.includes("Files")) return;
+                        event.preventDefault();
+                        setIsProductImageDragging(true);
+                      }}
+                      onDragOver={(event) => {
+                        if (event.dataTransfer.types.includes("Files")) {
+                          event.preventDefault();
+                        }
+                      }}
+                      onDragLeave={(event) => {
+                        if (
+                          !event.currentTarget.contains(event.relatedTarget)
+                        ) {
+                          setIsProductImageDragging(false);
+                        }
+                      }}
+                      onDrop={handleProductImageDrop}
+                    >
                       {formData.image ? (
                         <>
                           <img
@@ -2586,6 +2622,11 @@ const Productos = ({ section = "productos" }) => {
                             onChange={handleProductImageFile}
                           />
                         </>
+                      )}
+                      {isProductImageDragging && (
+                        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-violet-950/75 text-xs font-bold text-violet-100">
+                          Suelta la imagen del producto aquí
+                        </div>
                       )}
                     </div>
                   </div>

@@ -1,7 +1,18 @@
-import { Trash2, ChevronDown } from "lucide-react";
+import { Trash2, ChevronDown, History } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import SubLoading from "./SubLoading";
+
+const leerEliminaciones = () => {
+  try {
+    const stored = localStorage.getItem("caja_historial_cierres_eliminados");
+    const parsed = stored ? JSON.parse(stored) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error("No se pudo cargar el historial de cierres eliminados:", error);
+    return [];
+  }
+};
 
 const fmt = (n) =>
   new Intl.NumberFormat("es-CO", {
@@ -9,6 +20,19 @@ const fmt = (n) =>
     currency: "COP",
     maximumFractionDigits: 0,
   }).format(n);
+
+const fmtFechaHora = (value) => {
+  if (!value) return "—";
+  const fecha = new Date(value);
+  if (Number.isNaN(fecha.getTime())) return "—";
+  return fecha.toLocaleString("es-CO", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
 const fmtFecha = (fechaStr) => {
   if (!fechaStr) return "—";
@@ -21,40 +45,8 @@ const fmtFecha = (fechaStr) => {
   });
 };
 
-export default function CierresEliminados({
-  registroEliminaciones = [
-    {
-      id: "REG-001",
-      datosCierre: {
-        id: "CIERRE-2024-05-28",
-        cajero: "Juan Pérez",
-        fecha: "2024-05-28",
-        diferencia: -50000,
-        totalEfectivo: 1200000,
-        totalTransferencia: 800000,
-        totalTarjeta: 450000,
-      },
-      fechaHoraEliminacion: "2024-05-29 14:30:45",
-      motivo:
-        "Error en registro de transacción. Se encontró discrepancia en efectivo que fue corregida posteriormente.",
-    },
-    {
-      id: "REG-002",
-      datosCierre: {
-        id: "CIERRE-2024-05-27",
-        cajero: "María García",
-        fecha: "2024-05-27",
-        diferencia: 25000,
-        totalEfectivo: 950000,
-        totalTransferencia: 1100000,
-        totalTarjeta: 520000,
-      },
-      fechaHoraEliminacion: "2024-05-28 09:15:20",
-      motivo:
-        "Corrección solicitada por auditoría interna. Los montos fueron registrados incorrectamente.",
-    },
-  ],
-}) {
+export default function CierresEliminados() {
+  const [registroEliminaciones] = useState(leerEliminaciones);
   const [expandidoId, setExpandidoId] = useState(null);
   const [fechaBusqueda, setFechaBusqueda] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -67,7 +59,9 @@ export default function CierresEliminados({
   const registrosFiltrados = useMemo(() => {
     return registroEliminaciones.filter((registro) => {
       if (!fechaBusqueda) return true;
-      const fechaRegistro = registro.fechaHoraEliminacion.split(" ")[0];
+      const fechaRegistro =
+        registro.fechaEliminacion ||
+        String(registro.fechaHoraEliminacion).slice(0, 10);
       return fechaRegistro === fechaBusqueda;
     });
   }, [registroEliminaciones, fechaBusqueda]);
@@ -143,8 +137,8 @@ export default function CierresEliminados({
           <div className="space-y-3">
             {/* Resumen */}
             <div className="bg-neutral-900/20 border border-white/5 p-4 rounded-xl">
-              <p className="text-xs font-black font-mono tracking-widest uppercase text-neutral-400">
-                📋 Resumen
+                <p className="text-xs font-black tracking-widest uppercase text-neutral-400">
+                  Historial de eliminaciones
               </p>
               <p className="text-sm text-neutral-300 mt-2">
                 Total de cierres eliminados:{" "}
@@ -179,33 +173,32 @@ export default function CierresEliminados({
                     }
                     className="w-full p-4 text-left grid grid-cols-2 md:grid-cols-12 items-center gap-4"
                   >
-                    {/* ID del registro */}
                     <div className="col-span-2 md:col-span-3">
-                      <p className="text-xs text-neutral-500 uppercase tracking-wider mb-0.5">
-                        REGISTRO
+                      <div className="flex items-center gap-3">
+                        <span className="rounded-xl bg-red-500/10 p-2.5 text-red-300">
+                          <Trash2 size={16} />
+                        </span>
+                        <p className="text-base font-semibold text-red-300">
+                          Cierre de caja
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="col-span-2 md:col-span-3">
+                      <p className="text-sm font-semibold text-neutral-200">
+                        {cierre.cajero}
                       </p>
-                      <p className="text-base font-semibold text-red-400 font-mono">
-                        {registro.id}
+                      <p className="mt-0.5 text-xs text-neutral-500">
+                        {fmtFecha(cierre.fechaCierre || cierre.fecha)}
                       </p>
                     </div>
 
-                    {/* Cierre eliminado */}
                     <div className="col-span-2 md:col-span-3">
-                      <p className="text-xs text-neutral-500 uppercase tracking-wider mb-0.5">
-                        CIERRE
+                      <p className="text-[9px] text-neutral-500 uppercase tracking-wider mb-0.5">
+                        Eliminado el
                       </p>
-                      <p className="text-sm font-mono text-neutral-300">
-                        {cierre.id} • {cierre.cajero}
-                      </p>
-                    </div>
-
-                    {/* Fecha eliminación */}
-                    <div className="col-span-2 md:col-span-3">
-                      <p className="text-xs text-neutral-500 uppercase tracking-wider mb-0.5">
-                        ELIMINADO EL
-                      </p>
-                      <p className="text-xs font-mono text-neutral-400">
-                        {registro.fechaHoraEliminacion}
+                      <p className="text-xs text-neutral-400">
+                        {fmtFechaHora(registro.fechaHoraEliminacion)}
                       </p>
                     </div>
 
@@ -237,10 +230,10 @@ export default function CierresEliminados({
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                               <div className="bg-neutral-900/40 rounded-lg p-3">
                                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-black">
-                                  ID Cierre
+                                  Ventas
                                 </p>
-                                <p className="text-sm font-mono text-neutral-300 mt-1">
-                                  {cierre.id}
+                                <p className="text-sm font-semibold text-violet-300 mt-1">
+                                  {fmt(cierre.totalVentas)}
                                 </p>
                               </div>
                               <div className="bg-neutral-900/40 rounded-lg p-3">
@@ -321,20 +314,10 @@ export default function CierresEliminados({
                             </p>
                           </div>
 
-                          {/* Metadata */}
-                          <div className="text-[10px] text-neutral-600 font-mono uppercase tracking-widest">
-                            <p>
-                              Registro ID:{" "}
-                              <span className="text-neutral-400">
-                                {registro.id}
-                              </span>
-                            </p>
-                            <p>
-                              Eliminado:{" "}
-                              <span className="text-neutral-400">
-                                {registro.fechaHoraEliminacion}
-                              </span>
-                            </p>
+                          <div className="flex items-center gap-2 text-xs text-neutral-500">
+                            <History size={14} />
+                            Eliminado el{" "}
+                            {fmtFechaHora(registro.fechaHoraEliminacion)}
                           </div>
                         </div>
                       </motion.div>

@@ -461,13 +461,22 @@ const ProductoDetalle = ({
           </h2>
           <p
             style={{
-              fontSize: "15px",
+              fontSize: "18px",
               fontWeight: 800,
-              color: "#a78bfa",
+              color: "#fff",
               margin: "0 0 10px",
             }}
           >
-            {fmt(producto.precio)} / {unidadVenta.name}
+            {fmt(producto.precio)}{" "}
+            <span
+              style={{
+                fontSize: "11px",
+                fontWeight: 600,
+                color: "rgba(255,255,255,0.58)",
+              }}
+            >
+              {unidadVenta.name}
+            </span>
           </p>
           <p
             style={{

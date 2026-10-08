@@ -70,6 +70,50 @@ const createGoogleMapsLink = ({ latitude, longitude }) =>
 const getProductUnitLabel = (product) =>
   String(product?.unit?.name || product?.unit_name || "UNIDAD").trim();
 
+const getProductUnitAbbreviation = (product) => {
+  const unitName = getProductUnitLabel(product);
+  const normalizedName = unitName
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+  const abbreviations = {
+    UNIDAD: "und",
+    UNIDADES: "und",
+    KILOGRAMO: "kg",
+    KILOGRAMOS: "kg",
+    KILO: "kg",
+    KILOS: "kg",
+    GRAMO: "g",
+    GRAMOS: "g",
+    LIBRA: "lb",
+    LIBRAS: "lb",
+    LITRO: "L",
+    LITROS: "L",
+    MILILITRO: "ml",
+    MILILITROS: "ml",
+    METRO: "m",
+    METROS: "m",
+    CENTIMETRO: "cm",
+    CENTIMETROS: "cm",
+    PAQUETE: "paq",
+    PAQUETES: "paq",
+    CAJA: "cja",
+    CAJAS: "cja",
+    DOCENA: "doc",
+    DOCENAS: "doc",
+    PORCION: "porc",
+    PORCIONES: "porc",
+    PAR: "par",
+    PARES: "par",
+  };
+  return abbreviations[normalizedName] || unitName;
+};
+
+const formatStockQuantity = (stock) =>
+  new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 }).format(
+    Number(stock) || 0,
+  );
+
 const DELIVERY_PLACE_SEARCH_URL = "https://photon.komoot.io/api/";
 const DELIVERY_PLACE_REVERSE_URL = "https://photon.komoot.io/reverse";
 const DELIVERY_PLACE_MAX_DISTANCE_KM = 15;
@@ -3954,9 +3998,7 @@ const POS = () => {
                         {product.soldOut
                           ? "Agotado"
                           : inventoryEnabled
-                            ? Number(product.stock) > 99
-                              ? "Stock: 99+"
-                              : `Stock: ${Number(product.stock)}`
+                            ? `Stock: ${formatStockQuantity(product.stock)} ${getProductUnitAbbreviation(product)}`
                             : "Disponible"}
                       </div>
                     )}

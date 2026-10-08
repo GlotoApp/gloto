@@ -61,6 +61,25 @@ const formatHourLabel = (value) => {
   return `${normalizedHours}:${String(minutes).padStart(2, "0")} ${suffix}`;
 };
 
+const formatNextOpenText = (openTime, minutesUntilOpen, now) => {
+  const daysUntilOpen = Math.floor(
+    (now.getHours() * 60 + now.getMinutes() + minutesUntilOpen) / 1440,
+  );
+  const openingDay = new Date(now);
+  openingDay.setDate(openingDay.getDate() + daysUntilOpen);
+
+  const dayLabel =
+    daysUntilOpen === 0
+      ? "hoy"
+      : daysUntilOpen === 1
+        ? "mañana"
+        : `el ${new Intl.DateTimeFormat("es-CO", {
+            weekday: "long",
+          }).format(openingDay)}`;
+
+  return `${dayLabel} a las ${formatHourLabel(openTime)}`;
+};
+
 const getBusinessHoursStatus = (rows = []) => {
   if (!Array.isArray(rows) || rows.length === 0) {
     return {
@@ -147,7 +166,11 @@ const getBusinessHoursStatus = (rows = []) => {
     openText: nextInterval ? formatHourLabel(nextInterval.row.open_time) : "",
     closeText: "",
     nextOpenText: nextInterval
-      ? formatHourLabel(nextInterval.row.open_time)
+      ? formatNextOpenText(
+          nextInterval.row.open_time,
+          nextInterval.distance,
+          now,
+        )
       : "",
   };
 };
@@ -1651,7 +1674,7 @@ const Shop = () => {
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
+                    alignItems: "flex-start",
                     justifyContent: "center",
                     gap: "6px",
                     flexWrap: "wrap",
@@ -1660,16 +1683,20 @@ const Shop = () => {
                 >
                   <MapPin
                     size={11}
-                    style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}
+                    style={{
+                      color: "rgba(255,255,255,0.35)",
+                      flexShrink: 0,
+                      marginTop: "3px",
+                    }}
                   />
                   <span
                     style={{
                       fontSize: "12px",
                       color: "rgba(255,255,255,0.4)",
-                      maxWidth: "190px",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
+                      maxWidth: "min(100%, 500px)",
+                      whiteSpace: "normal",
+                      overflowWrap: "anywhere",
+                      textAlign: "center",
                     }}
                   >
                     {tiendaData.direccion}

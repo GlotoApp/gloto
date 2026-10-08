@@ -351,7 +351,140 @@ const SeguimientoPedido = ({ onCerrar }) => {
     };
 
     fetchPedido();
-  }, [pedidoActivo, orderNumber]);
+  }, [pedidoActivo, orderNumber, tokenParam]);
+
+  useEffect(() => {
+    if (!isRemoteTracking || !orderNumber || !tokenParam) return undefined;
+
+    let activo = true;
+    let consultando = false;
+
+    const actualizarEstado = async () => {
+      if (!activo || consultando || document.visibilityState !== "visible") {
+        return;
+      }
+
+      consultando = true;
+      try {
+        const { data, error } = await supabase.rpc("get_order_by_token", {
+          p_order_number: orderNumber,
+          p_token: tokenParam,
+        });
+
+        if (error) {
+          console.error("No se pudo actualizar el estado del pedido:", error);
+          return;
+        }
+        if (!data) {
+          console.error("No se encontró el pedido al actualizar su estado.");
+          return;
+        }
+
+        const metodoEntrega = normalizeMetodoEntrega(
+          data.order_type,
+          data.metadata?.metodoEntrega,
+        );
+        const trackingStatus = mapOrderStatusToTrackingStatus(
+          data.status,
+          metodoEntrega,
+        );
+        const paymentMethods = Array.isArray(data.metadata?.payment_methods)
+          ? data.metadata.payment_methods.map((item, index) => ({
+              id: `p${index}`,
+              metodo: item.metodo || item.method || "Desconocido",
+              monto: Number(item.monto) || 0,
+            }))
+          : [];
+        const items = (data.order_items || []).map((item) => ({
+          id: item.id,
+          nombre: item.product_name,
+          cantidad: item.quantity,
+          precio: item.unit_price,
+          notas: item.notes || "",
+          opciones: (item.options || []).map((option) => ({
+            ...(typeof option === "string" ? {} : option),
+            nombre:
+              typeof option === "string"
+                ? option
+                : option?.nombre ||
+                  option?.name ||
+                  option?.label ||
+                  "Opción",
+            precioExtra:
+              typeof option === "string"
+                ? 0
+                : Number(
+                    option?.precioExtra ??
+                      option?.precio_extra ??
+                      option?.price_extra ??
+                      option?.extra_price ??
+                      option?.price ??
+                      option?.monto ??
+                      0,
+                  ),
+          })),
+        }));
+
+        if (activo) {
+          setFetchedPedido((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  rawStatus: data.status,
+                  status: trackingStatus,
+                  metodoEntrega,
+                  total: Number(data.total) || 0,
+                  delivery_fee: Number(data.delivery_fee) || 0,
+                  tip_amount: Number(data.tip_amount) || 0,
+                  notes: data.notes || "",
+                  items,
+                  metodoPago:
+                    paymentMethods.length > 0
+                      ? paymentMethods
+                      : prev.metodoPago,
+                  datosCliente: {
+                    ...prev.datosCliente,
+                    nombre: data.customer_name || "",
+                    telefono: data.customer_phone || "",
+                    mesa:
+                      data.mesa ?? data.metadata?.cliente?.mesa ?? "",
+                    direccion:
+                      data.delivery_address ||
+                      data.metadata?.cliente?.direccion ||
+                      "",
+                    referencia:
+                      data.delivery_instructions ||
+                      data.metadata?.cliente?.referencia ||
+                      "",
+                    puntoRetiro:
+                      data.punto ||
+                      data.metadata?.punto ||
+                      data.metadata?.cliente?.puntoRetiro ||
+                      "",
+                    deliveryFee: Number(data.delivery_fee) || 0,
+                    propina: Number(data.tip_amount) || 0,
+                  },
+                  observaciones: data.notes || "",
+                }
+              : prev,
+          );
+        }
+      } catch (error) {
+        console.error("Error actualizando el estado del pedido:", error);
+      } finally {
+        consultando = false;
+      }
+    };
+
+    const intervalId = window.setInterval(actualizarEstado, 3000);
+    document.addEventListener("visibilitychange", actualizarEstado);
+
+    return () => {
+      activo = false;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", actualizarEstado);
+    };
+  }, [isRemoteTracking, orderNumber, tokenParam]);
 
   const estadoPedidoActual = isRemoteTracking
     ? pedido?.status || "recibido"
@@ -1219,34 +1352,6 @@ const SeguimientoPedido = ({ onCerrar }) => {
             </div>
           )}
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "12px",
-              marginTop: "14px",
-              padding: tipAmount > 0 ? "10px 4px" : "16px 14px",
-              borderTop: "1px solid rgba(255,255,255,0.08)",
-              fontSize: "14px",
-              fontWeight: 800,
-              color: tipAmount > 0 ? "rgba(255,255,255,0.62)" : "inherit",
-            }}
-          >
-            <span>
-              {tipAmount > 0 ? "Total a pagar (sin propina)" : "Total a pagar"}
-            </span>
-            <span
-              style={{
-                flexShrink: 0,
-                fontSize: tipAmount > 0 ? "15px" : "13px",
-                color: tipAmount > 0 ? "rgba(255,255,255,0.75)" : "inherit",
-              }}
-            >
-              {fmt(totalDue)}
-            </span>
-          </div>
-
           {tipAmount > 0 && (
             <div
               style={{
@@ -1254,28 +1359,45 @@ const SeguimientoPedido = ({ onCerrar }) => {
                 justifyContent: "space-between",
                 alignItems: "center",
                 gap: "12px",
-                marginTop: "10px",
-                padding: "16px 14px",
-                borderRadius: "14px",
-                background: "rgba(124,58,237,0.12)",
-                color: "#fff",
-                fontSize: "14px",
-                fontWeight: 800,
+                marginTop: "14px",
+                padding: "10px 4px",
+                borderTop: "1px solid rgba(255,255,255,0.08)",
+                fontSize: "13px",
+                color: "rgba(255,255,255,0.62)",
               }}
             >
-              <span>TOTAL A PAGAR</span>
-              <span
-                style={{
-                  flexShrink: 0,
-                  fontSize: "24px",
-                  lineHeight: 1.1,
-                  color: "#c4b5fd",
-                }}
-              >
-                {fmt(totalDue + tipAmount)}
-              </span>
+              <span>Total antes de propina</span>
+              <span>{fmt(totalDue)}</span>
             </div>
           )}
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "12px",
+              marginTop: "10px",
+              padding: "16px 14px",
+              borderRadius: "14px",
+              background: "rgba(124,58,237,0.12)",
+              color: "#fff",
+              fontSize: "14px",
+              fontWeight: 800,
+            }}
+          >
+            <span>TOTAL A PAGAR</span>
+            <span
+              style={{
+                flexShrink: 0,
+                fontSize: "24px",
+                lineHeight: 1.1,
+                color: "#c4b5fd",
+              }}
+            >
+              {fmt(totalDue + tipAmount)}
+            </span>
+          </div>
         </div>
 
         {/* Información de pago */}

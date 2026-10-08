@@ -876,10 +876,13 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                 style={inputStyle}
                 placeholder="Nombre completo"
                 value={datosCliente.nombre}
+                autoComplete="name"
                 onChange={(e) =>
                   actualizarDatoCliente(
                     "nombre",
-                    capitalizarNombre(e.target.value),
+                    capitalizarNombre(
+                      e.target.value.replace(/[^\p{L}\s]/gu, ""),
+                    ),
                   )
                 }
               />

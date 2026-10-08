@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   FileText,
   QrCode,
@@ -17,21 +17,32 @@ import {
   LayoutTemplate,
   EyeOff,
   Loader,
+  ShoppingBag,
 } from "lucide-react";
 
 import { QRCodeCanvas } from "qrcode.react";
-import logo from "../../public/logogloto.png"; // <-- AJUSTA ESTA RUTA A DONDE ESTÉ TU LOGO
 import { supabase } from "../../src/lib/supabaseClient";
 import SubLoading from "./SubLoading";
 
 const Utilidades = () => {
+  const logo = "/logo.png";
   const [activeTab, setActiveTab] = useState("qr");
   const [qrMenu, setQrMenu] = useState("menu");
   const [copiedMenu, setCopiedMenu] = useState(false);
   const [copiedEmployees, setCopiedEmployees] = useState(false);
+  const [qrLogoBlack, setQrLogoBlack] = useState("");
+  const [qrLogoError, setQrLogoError] = useState("");
   const [qrLoading, setQrLoading] = useState(true);
   const [employeesQrLoading, setEmployeesQrLoading] = useState(true);
   const [storeSlug, setStoreSlug] = useState("");
+  const [businessName, setBusinessName] = useState("");
+  const [businessLogo, setBusinessLogo] = useState("");
+  const [menuLoading, setMenuLoading] = useState(true);
+  const [menuError, setMenuError] = useState("");
+  const [printMenuItems, setPrintMenuItems] = useState([]);
+  const [printMenuCategories, setPrintMenuCategories] = useState([]);
+  const [menuFormat, setMenuFormat] = useState("letter");
+  const menuPreviewRef = useRef(null);
   const [storeLoading, setStoreLoading] = useState(true);
   const [storeError, setStoreError] = useState("");
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
@@ -40,6 +51,50 @@ const Utilidades = () => {
     withBackground: true,
     backgroundColor: "#ffffff",
   });
+
+  useEffect(() => {
+    let cancelled = false;
+    const image = new Image();
+
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) {
+        const error = new Error("No se pudo preparar el logo negro del QR.");
+        console.error(error);
+        if (!cancelled) setQrLogoError(error.message);
+        return;
+      }
+
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      context.drawImage(image, 0, 0);
+      context.globalCompositeOperation = "source-in";
+      context.fillStyle = "#000000";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
+      try {
+        const blackLogo = canvas.toDataURL("image/png");
+        if (!cancelled) setQrLogoBlack(blackLogo);
+      } catch (error) {
+        console.error("No se pudo generar el logo negro del QR:", error);
+        if (!cancelled) {
+          setQrLogoError("No se pudo preparar el logo negro del QR.");
+        }
+      }
+    };
+
+    image.onerror = () => {
+      const error = new Error(`No se pudo cargar el logo ${logo}.`);
+      console.error(error);
+      if (!cancelled) setQrLogoError(error.message);
+    };
+    image.src = logo;
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Productos que vienen desde API/Inventario (no editable)
   const [menuItems, setMenuItems] = useState([
@@ -184,6 +239,8 @@ const Utilidades = () => {
       if (userError || !userData?.user?.id) {
         if (!cancelled) {
           setStoreError("No hay una sesión activa para identificar la tienda.");
+          setMenuError("No se pudo identificar la tienda para cargar el menú.");
+          setMenuLoading(false);
           setStoreLoading(false);
         }
         return;
@@ -198,28 +255,81 @@ const Utilidades = () => {
       if (profileError || !profile?.business_id) {
         if (!cancelled) {
           setStoreError("No se encontró el negocio de este usuario.");
+          setMenuError("No se encontró el negocio para cargar el menú.");
+          setMenuLoading(false);
           setStoreLoading(false);
         }
         return;
       }
 
-      const { data: business, error: businessError } = await supabase
-        .from("businesses")
-        .select("slug, name")
-        .eq("id", profile.business_id)
-        .maybeSingle();
+      const [
+        { data: business, error: businessError },
+        { data: products, error: productsError },
+        { data: categories, error: categoriesError },
+      ] = await Promise.all([
+        supabase
+          .from("businesses")
+          .select("slug, name, logo_url")
+          .eq("id", profile.business_id)
+          .maybeSingle(),
+        supabase
+          .from("products")
+          .select(
+            "id,name,description,price,image_url,is_active,is_sold_out,category_id,order_index,created_at,unit:units(name)",
+          )
+          .eq("business_id", profile.business_id)
+          .eq("is_active", true)
+          .order("order_index", { ascending: true })
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("categories_shop")
+          .select("id,name,order_index,created_at")
+          .eq("business_id", profile.business_id),
+      ]);
 
       if (cancelled) return;
+      if (business?.name) setBusinessName(business.name);
+      if (business?.logo_url) setBusinessLogo(business.logo_url);
       if (businessError || !business?.slug) {
         setStoreError("La tienda no tiene un slug público configurado.");
       } else {
         setStoreSlug(business.slug);
+        setBusinessName(business.name || "");
         setTableConfig((current) => ({
           ...current,
           restaurantName: business.name || current.restaurantName,
           qrUrl: `${window.location.origin}/marketplace/tienda/${business.slug}`,
         }));
       }
+      if (productsError || categoriesError) {
+        console.error(
+          "No se pudo cargar el menú para impresión:",
+          productsError || categoriesError,
+        );
+        setMenuError("No se pudieron cargar los productos del menú.");
+      } else {
+        const orderedCategories = [...(categories || [])].sort(
+          (first, second) =>
+            Number(first.order_index || 0) - Number(second.order_index || 0) ||
+            String(first.created_at || "").localeCompare(
+              String(second.created_at || ""),
+            ),
+        );
+        const categoryNames = new Map(
+          orderedCategories.map((category) => [category.id, category.name]),
+        );
+        setPrintMenuCategories(orderedCategories);
+        setPrintMenuItems(
+          (products || [])
+          .filter((product) => !product.is_sold_out)
+          .map((product) => ({
+              ...product,
+              category: categoryNames.get(product.category_id) || "Otros",
+              unitName: product.unit?.name || "",
+            })),
+        );
+      }
+      setMenuLoading(false);
       setStoreLoading(false);
     };
 
@@ -354,6 +464,168 @@ const Utilidades = () => {
   const formatPrice = (price) =>
     price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 
+  const escapeHTML = (value) =>
+    String(value ?? "").replace(
+      /[&<>"']/g,
+      (character) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[character],
+    );
+
+  const menuPageSizes = {
+    letter: "letter portrait",
+    a4: "A4 portrait",
+    half: "5.5in 8.5in",
+  };
+  const menuPreviewHtml = (() => {
+    const categories = printMenuCategories
+      .filter((category) =>
+        printMenuItems.some((item) => item.category_id === category.id),
+      )
+      .map((category) => ({ id: category.id, name: category.name }));
+    const uncategorizedItems = printMenuItems.filter(
+      (item) =>
+        !printMenuCategories.some(
+          (category) => category.id === item.category_id,
+        ),
+    );
+    if (uncategorizedItems.length) {
+      categories.push({ id: null, name: "Otros" });
+    }
+    const menuHTML = categories
+      .map(({ id, name }) => {
+        const productCards = printMenuItems
+          .filter((item) =>
+            id === null
+              ? !printMenuCategories.some(
+                  (category) => category.id === item.category_id,
+                )
+              : item.category_id === id,
+          )
+          .map(
+            (item) => `
+              <article class="product ${item.image_url ? "has-image" : ""}">
+                ${item.image_url ? `<img class="product-image" src="${escapeHTML(item.image_url)}" alt="">` : ""}
+                <div class="product-copy">
+                  <div class="product-heading">
+                    <h3>${escapeHTML(item.name)}</h3>
+                    <span class="price">$ ${formatPrice(Number(item.price) || 0)}${item.unitName ? `<small class="unit">${escapeHTML(item.unitName)}</small>` : ""}</span>
+                  </div>
+                  ${item.description ? `<p>${escapeHTML(item.description)}</p>` : ""}
+                </div>
+              </article>
+            `,
+          );
+        return `<section class="category"><h2><img class="category-mark" src="${escapeHTML(logo)}" alt=""><span>${escapeHTML(name)}</span></h2><div class="products">${productCards.join("")}</div></section>`;
+      })
+      .join("");
+
+    const logoHTML = businessLogo
+      ? `<img class="brand-logo" src="${escapeHTML(businessLogo)}" alt="">`
+      : `<div class="brand-mark">${escapeHTML((businessName || "M").slice(0, 1).toUpperCase())}</div>`;
+    const pageSize = menuPageSizes[menuFormat] || menuPageSizes.letter;
+    const pageDimensions =
+      menuFormat === "a4"
+        ? "794px"
+        : menuFormat === "half"
+          ? "528px"
+          : "816px";
+    const minimumHeight =
+      menuFormat === "a4"
+        ? "1123px"
+        : menuFormat === "half"
+          ? "816px"
+          : "1056px";
+
+    return `<!doctype html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Menú - ${escapeHTML(businessName || "Mi tienda")}</title>
+          <style>
+            @page { size: ${pageSize}; margin: 12mm; }
+            * { box-sizing: border-box; font-family: Arial, Helvetica, sans-serif !important; }
+            html { background: #e7e8ec; }
+            body { width: ${pageDimensions}; min-height: ${minimumHeight}; margin: 24px auto; padding: 46px 48px; color: #f4f0f8; background: #111015; font: 13px/1.45 Arial, Helvetica, sans-serif; box-shadow: 0 12px 40px #10101866; }
+            .masthead { display: flex; align-items: center; gap: 15px; }
+            .brand-logo, .brand-mark { width: 58px; height: 58px; flex: 0 0 58px; border-radius: 16px; object-fit: contain; }
+            .brand-mark { display: grid; place-items: center; color: white; background: #6d28d9; font: 800 28px Arial, Helvetica, sans-serif; }
+            .brand-copy { flex: 1; }
+            .eyebrow { margin: 0 0 4px; color: #b995f5; font-size: 9px; font-weight: 800; letter-spacing: .22em; text-transform: uppercase; }
+            h1 { margin: 0; color: #fff; font: 800 29px/1.05 Arial, Helvetica, sans-serif; letter-spacing: .025em; text-transform: uppercase; }
+            .subtitle { margin: 6px 0 0; color: #76717d; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+            .brand-stamp { align-self: flex-start; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: auto; }
+            .brand-stamp img { display: block; width: 100%; height: 100%; object-fit: contain; }
+            .menu-intro { margin: 18px 0 22px; padding: 11px 14px; border-left: 3px solid #8b5cf6; color: #5e5865; background: #f6f3fa; font: italic 12px Arial, Helvetica, sans-serif; }
+            .category { margin: 18px 0 23px; break-inside: avoid; page-break-inside: avoid; }
+            .category h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 11px; color: #c8a8ff; font: 800 15px Arial, Helvetica, sans-serif; letter-spacing: .06em; text-transform: uppercase; break-after: avoid; page-break-after: avoid; }
+            .category-mark { width: 16px; height: 16px; flex: 0 0 16px; object-fit: contain; }
+            .category h2:after { height: 1px; flex: 1; content: ''; background: #43364f; }
+            .products { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+            .product { display: flex; min-width: 0; gap: 10px; padding: 12px; border: 0; border-radius: 8px; background: #19171d; break-inside: avoid; }
+            .product-image { width: 54px; height: 54px; flex: 0 0 54px; border-radius: 7px; object-fit: cover; background: #292431; }
+            .product-copy { min-width: 0; flex: 1; }
+            .product-heading { display: flex; justify-content: space-between; gap: 7px; align-items: baseline; }
+            h3 { margin: 0; color: #f7f3fb; font-size: 11px; font-weight: 800; }
+            .price { flex-shrink: 0; color: #c8a8ff; font-size: 10px; font-weight: 800; white-space: nowrap; }
+            .unit { margin-left: 3px; font-size: 7px; font-weight: 600; opacity: .72; }
+            .product p { margin: 5px 0 0; color: #b7b0c0; font-size: 9px; line-height: 1.35; }
+            footer { display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 25px; padding-top: 12px; border-top: 1px solid #332b3b; color: #a39bab; font-size: 8px; letter-spacing: .1em; text-align: center; text-transform: uppercase; }
+            footer strong { color: #c8a8ff; }
+            @media screen and (max-width: 850px) {
+              body { width: calc(100% - 24px); min-height: auto; margin: 12px auto; padding: 24px 18px; box-shadow: none; }
+            }
+            @media screen and (max-width: 620px) {
+              .products { grid-template-columns: 1fr; }
+            }
+            @media print {
+              html, body { width: auto; min-height: 0; margin: 0; box-shadow: none; background: #111015 !important; }
+              body { padding: 7mm 8mm 10mm; }
+              .masthead { margin-bottom: 8mm; }
+              .category { margin: 0 0 23px; padding-top: 7mm; break-inside: avoid; page-break-inside: avoid; -webkit-column-break-inside: avoid; }
+              .category:first-of-type { padding-top: 0; }
+              .category h2 { break-after: avoid; page-break-after: avoid; }
+              .products { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+              .product { display: flex; width: auto; margin: 0; break-inside: avoid; page-break-inside: avoid; -webkit-column-break-inside: avoid; }
+              * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            }
+          </style>
+        </head>
+        <body>
+          <header class="masthead">
+            ${logoHTML}
+            <div class="brand-copy">
+              <p class="eyebrow">MENU - CATALOGO</p>
+              <h1>${escapeHTML(businessName || "Menú")}</h1>
+            </div>
+            <div class="brand-stamp">
+              <img src="${escapeHTML(logo)}" alt="Gloto">
+            </div>
+          </header>
+          ${menuHTML}
+          <footer>
+            <span>${escapeHTML(businessName || "Menú")} · <strong>Hecho con Gloto</strong></span>
+          </footer>
+        </body>
+      </html>`;
+  })();
+
+  const printMenu = () => {
+    const printWindow = menuPreviewRef.current?.contentWindow;
+    if (!printWindow) {
+      alert("No se pudo preparar la vista previa del menú.");
+      return;
+    }
+    printWindow.focus();
+    printWindow.print();
+  };
+
   const totalMesas = Math.max(
     0,
     parseInt(tableConfig.endNumber) - parseInt(tableConfig.startNumber) + 1,
@@ -475,11 +747,13 @@ const Utilidades = () => {
                 style="width:100%;height:100%;display:block;"
                 alt="QR Mesa ${tableNum}"
               />
-              <img
-                src="${window.location.origin}/logogloto.png"
-                alt="Gloto"
-                style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:18%;height:18%;object-fit:contain;background:white;border-radius:3px;padding:2px;"
-              />
+              <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:22%;height:22%;display:grid;place-items:center;background:white;border-radius:3px;padding:2px;">
+                <img
+                  src="${window.location.origin}${logo}"
+                  alt="Gloto"
+                  style="width:100%;height:100%;object-fit:contain;filter:invert(1);"
+                />
+              </div>
             </div>
             <span class="qr-instruction" style="color:${pal.backText};">${tableConfig.scanText}</span>
             `
@@ -729,11 +1003,13 @@ const Utilidades = () => {
                 alt={`QR Mesa ${num}`}
                 className="w-full h-full object-contain"
               />
-              <img
-                src={logo}
-                alt="Gloto logo"
-                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 object-contain bg-white rounded-sm"
-              />
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-5 w-5 rounded-sm bg-white p-0.5">
+                <img
+                  src={logo}
+                  alt="Gloto logo"
+                  className="h-full w-full object-contain invert"
+                />
+              </div>
             </div>
             <span
               className="text-[6px] font-black uppercase tracking-widest"
@@ -778,6 +1054,7 @@ const Utilidades = () => {
           {[
             { id: "qr", label: "Códigos QR", icon: QrCode },
             { id: "tables", label: "Habladores", icon: Square },
+            { id: "menu", label: "Imprimir menú", icon: Printer },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -827,12 +1104,16 @@ const Utilidades = () => {
                         value={qrUrls.menu}
                         size={200}
                         level="H"
-                        imageSettings={{
-                          src: logo,
-                          height: 50,
-                          width: 50,
-                          excavate: true,
-                        }}
+                        imageSettings={
+                          qrLogoBlack
+                            ? {
+                                src: qrLogoBlack,
+                                height: 50,
+                                width: 50,
+                                excavate: true,
+                              }
+                            : undefined
+                        }
                       />
                     </div>
                   ) : (
@@ -841,6 +1122,11 @@ const Utilidades = () => {
                     </p>
                   )}
                 </div>
+                {qrLogoError && (
+                  <p role="alert" className="text-xs text-red-400">
+                    {qrLogoError}
+                  </p>
+                )}
 
                 <div className="space-y-3">
                   <p className="text-[8px] md:text-[9px] font-bold text-neutral-500 uppercase tracking-widest">
@@ -893,15 +1179,24 @@ const Utilidades = () => {
                       value={qrUrls.employees}
                       size={200} // Ajustamos un poco para dejar espacio al padding
                       level={"H"}
-                      imageSettings={{
-                        src: logo,
-                        height: 50, // Logo ligeramente más pequeño para mejor lectura
-                        width: 50,
-                        excavate: true,
-                      }}
+                      imageSettings={
+                        qrLogoBlack
+                          ? {
+                              src: qrLogoBlack,
+                              height: 50,
+                              width: 50,
+                              excavate: true,
+                            }
+                          : undefined
+                      }
                     />
                   </div>
                 </div>
+                {qrLogoError && (
+                  <p role="alert" className="text-xs text-red-400">
+                    {qrLogoError}
+                  </p>
+                )}
 
                 <div className="space-y-3">
                   <p className="text-[8px] md:text-[9px] font-bold text-neutral-500 uppercase tracking-widest">
@@ -935,6 +1230,138 @@ const Utilidades = () => {
               </div>
             </div>
           </div>
+        )}
+
+        {!storeLoading && activeTab === "menu" && (
+          <section className="space-y-5">
+            <div className="flex flex-col justify-between gap-4 rounded-2xl border border-white/5 bg-neutral-900/40 p-5 sm:flex-row sm:items-center sm:p-7">
+              <div className="flex items-start gap-4">
+                <div className="rounded-xl bg-violet-500/10 p-3 text-violet-300">
+                  <ShoppingBag size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black uppercase text-white">
+                    Diseña e imprime tu menú
+                  </h2>
+                  <p className="mt-1 max-w-xl text-xs leading-5 text-neutral-400">
+                    Vista previa en vivo con tus productos disponibles, precios,
+                    descripciones e imágenes.
+                  </p>
+                </div>
+              </div>
+              <div className="shrink-0 rounded-xl border border-white/5 bg-black/20 px-4 py-3">
+                <span className="text-[9px] font-bold uppercase tracking-wider text-neutral-400">
+                  Productos incluidos
+                </span>
+                <span className="ml-3 text-sm font-black text-violet-300">
+                  {printMenuItems.length}
+                </span>
+              </div>
+            </div>
+            {menuLoading ? (
+              <p className="rounded-xl border border-white/5 bg-neutral-900/40 p-5 text-xs text-neutral-400">
+                Cargando productos del menú...
+              </p>
+            ) : menuError ? (
+              <p
+                role="alert"
+                className="rounded-xl border border-red-500/20 bg-red-500/5 p-5 text-xs text-red-300"
+              >
+                {menuError}
+              </p>
+            ) : printMenuItems.length === 0 ? (
+              <p className="rounded-xl border border-white/5 bg-neutral-900/40 p-5 text-xs text-neutral-400">
+                No hay productos activos y disponibles para imprimir.
+              </p>
+            ) : (
+              <>
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+                  <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900/60">
+                    <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-neutral-300">
+                          Vista previa
+                        </p>
+                        <p className="mt-1 text-[9px] text-neutral-500">
+                          Así se verá al imprimir
+                        </p>
+                      </div>
+                      <Eye size={16} className="text-violet-300" />
+                    </div>
+                    <iframe
+                      ref={menuPreviewRef}
+                      title="Vista previa del menú impreso"
+                      srcDoc={menuPreviewHtml}
+                      className="h-[680px] w-full border-0 bg-neutral-200 sm:h-[820px]"
+                    />
+                  </div>
+
+                  <aside className="h-fit rounded-2xl border border-white/5 bg-neutral-900/60 p-5">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-lg bg-violet-500/10 p-2 text-violet-300">
+                        <LayoutTemplate size={16} />
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-black uppercase text-white">
+                          Formato de impresión
+                        </h3>
+                        <p className="mt-1 text-[9px] text-neutral-500">
+                          Elige el tamaño de papel
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      {[
+                        { id: "letter", label: "Carta", detail: "8.5 × 11 pulgadas" },
+                        { id: "a4", label: "A4", detail: "210 × 297 mm" },
+                        { id: "half", label: "Media carta", detail: "5.5 × 8.5 pulgadas" },
+                      ].map((format) => (
+                        <button
+                          key={format.id}
+                          type="button"
+                          onClick={() => setMenuFormat(format.id)}
+                          aria-pressed={menuFormat === format.id}
+                          className={`flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left transition ${
+                            menuFormat === format.id
+                              ? "border-violet-400/50 bg-violet-500/10"
+                              : "border-white/5 bg-black/20 hover:border-white/15"
+                          }`}
+                        >
+                          <span>
+                            <span className="block text-[10px] font-black text-white">
+                              {format.label}
+                            </span>
+                            <span className="mt-1 block text-[9px] text-neutral-500">
+                              {format.detail}
+                            </span>
+                          </span>
+                          <span
+                            className={`h-3 w-3 rounded-full border ${
+                              menuFormat === format.id
+                                ? "border-violet-300 bg-violet-400"
+                                : "border-neutral-600"
+                            }`}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-4 rounded-lg bg-black/20 p-3 text-[9px] leading-4 text-neutral-500">
+                      Confirma el tamaño seleccionado en las opciones de la
+                      impresora para conservar la escala de la vista previa.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={printMenu}
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-white transition hover:bg-violet-500"
+                    >
+                      <Printer size={15} />
+                      Imprimir menú
+                    </button>
+                  </aside>
+                </div>
+              </>
+            )}
+          </section>
         )}
 
         {/* ─── HABLADORES DE MESA Tab ─── */}
@@ -1272,11 +1699,13 @@ const Utilidades = () => {
                   alt="QR Preview"
                   className="w-full h-full object-contain drop-shadow-lg"
                 />
-                <img
-                  src={logo}
-                  alt="Gloto logo"
-                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 object-contain bg-white rounded-sm p-0.5"
-                />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-sm bg-white p-0.5">
+                  <img
+                    src={logo}
+                    alt="Gloto logo"
+                    className="h-full w-full object-contain invert"
+                  />
+                </div>
               </div>
             </div>
 
