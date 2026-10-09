@@ -5,7 +5,6 @@ import {
   Image,
   LoaderCircle,
   LocateFixed,
-  MapPin,
   Maximize2,
   Minimize2,
   Pencil,
@@ -19,6 +18,10 @@ import {
   supabase,
 } from "../../src/lib/supabaseClient";
 import { compressCanvasToWebP } from "../../src/lib/imageCompression";
+import {
+  DELIVERY_METHODS,
+  getEnabledDeliveryMethods,
+} from "../../src/lib/deliveryMethods";
 import ConfiguracionField from "./ConfiguracionField";
 import ImageCropEditor from "./ImageCropEditor";
 import SubLoading from "./SubLoading";
@@ -33,6 +36,7 @@ const EMPTY_DATA = {
   delivery_fee_per_km: "",
   min_delivery_fee: "",
   max_delivery_fee: "",
+  delivery_methods: getEnabledDeliveryMethods(),
   night_delivery_surcharge_enabled: false,
   night_delivery_surcharge_start: "21:00",
   night_delivery_surcharge_end: "06:00",
@@ -40,6 +44,37 @@ const EMPTY_DATA = {
   tip_percent: "",
   latitude: "",
   longitude: "",
+};
+
+const DELIVERY_METHOD_PRESENTATION = {
+  pickup: {
+    icon: "flag",
+    description: "El cliente recoge el pedido",
+    selectedClass: "border-amber-400/35 bg-amber-400/[0.08]",
+    iconClass: "bg-amber-400/10 text-amber-300",
+    checkboxClass: "accent-amber-400",
+  },
+  table: {
+    icon: "table_bar",
+    description: "Atención en el local",
+    selectedClass: "border-emerald-400/35 bg-emerald-400/[0.08]",
+    iconClass: "bg-emerald-400/10 text-emerald-300",
+    checkboxClass: "accent-emerald-400",
+  },
+  point: {
+    icon: "location_on",
+    description: "Recogida en un punto",
+    selectedClass: "border-sky-400/35 bg-sky-400/[0.08]",
+    iconClass: "bg-sky-400/10 text-sky-300",
+    checkboxClass: "accent-sky-400",
+  },
+  delivery: {
+    icon: "delivery_dining",
+    description: "Entrega a domicilio",
+    selectedClass: "border-fuchsia-400/35 bg-fuchsia-400/[0.08]",
+    iconClass: "bg-fuchsia-400/10 text-fuchsia-300",
+    checkboxClass: "accent-fuchsia-400",
+  },
 };
 
 const formatThousands = (value) => {
@@ -185,7 +220,12 @@ const createCroppedImage = async (editor, crop) => {
   });
 };
 
-const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
+const ConfiguracionTienda = ({
+  onboardingMode = false,
+  onCompleted,
+  saveActionRef,
+  onSaveStateChange,
+}) => {
   const [businessId, setBusinessId] = useState(null);
   const [categories, setCategories] = useState([]);
   const [data, setData] = useState(EMPTY_DATA);
@@ -213,7 +253,9 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   const coverInput = useRef(null);
   const mapElement = useRef(null);
   const mapInstance = useRef(null);
+  const mapMarker = useRef(null);
   const isMapEditingRef = useRef(false);
+  const wasMapNativeFullscreen = useRef(false);
 
   useEffect(
     () => () => {
@@ -246,7 +288,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
         supabase
           .from("business_info")
           .select(
-            "address,whatsapp_phone,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent,category_id,categoria,latitude,longitude",
+            "address,whatsapp_phone,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,delivery_methods,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent,category_id,categoria,latitude,longitude",
           )
           .eq("business_id", profile.business_id)
           .maybeSingle(),
@@ -276,6 +318,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
         delivery_fee_per_km: info?.delivery_fee_per_km ?? "",
         min_delivery_fee: info?.min_delivery_fee ?? "",
         max_delivery_fee: info?.max_delivery_fee ?? "",
+        delivery_methods: getEnabledDeliveryMethods(info?.delivery_methods),
         night_delivery_surcharge_enabled:
           info?.night_delivery_surcharge_enabled ?? false,
         night_delivery_surcharge_start:
@@ -365,7 +408,6 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       const initialCenter = coordinatesRef.current || [10.373842, -75.473796];
       const map = L.default
         .map(mapElement.current, {
-          zoomControl: true,
           dragging: false,
           touchZoom: false,
           doubleClickZoom: false,
@@ -382,6 +424,35 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
           maxZoom: 19,
         })
         .addTo(map);
+      mapMarker.current = L.default
+        .marker(initialCenter, {
+          icon: L.default.divIcon({
+            className: "border-0 bg-transparent",
+            html: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="48" viewBox="0 0 24 24" fill="#7c3aed" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 3px 4px rgba(0,0,0,.65))"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="3" fill="#fff"/></svg>',
+            iconSize: [40, 48],
+            iconAnchor: [20, 48],
+          }),
+          draggable: isMapEditingRef.current,
+        })
+        .addTo(map);
+      mapMarker.current.on("dragend", () => {
+        const position = mapMarker.current?.getLatLng();
+        if (position) {
+          syncCoordinatesToForm(position.lat, position.lng);
+        }
+      });
+      map.on("click", (event) => {
+        if (!isMapEditingRef.current) return;
+        const target = event.originalEvent.target;
+        if (
+          target instanceof Element &&
+          target.closest("[data-map-controls]")
+        ) {
+          return;
+        }
+        mapMarker.current?.setLatLng(event.latlng);
+        syncCoordinatesToForm(event.latlng.lat, event.latlng.lng);
+      });
       if (window.ResizeObserver) {
         mapResizeObserver = new ResizeObserver(() => {
           map.invalidateSize({ pan: false });
@@ -389,11 +460,6 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
         mapResizeObserver.observe(mapElement.current);
       }
 
-      map.on("moveend", () => {
-        if (!isMapEditingRef.current) return;
-        const center = map.getCenter();
-        syncCoordinatesToForm(center.lat, center.lng);
-      });
       mapInstance.current = map;
     });
 
@@ -404,24 +470,20 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
         mapInstance.current.remove();
         mapInstance.current = null;
       }
+      mapMarker.current = null;
     };
   }, [loading, syncCoordinatesToForm]);
-
-  const syncMapCenterToForm = () => {
-    if (!mapInstance.current) return;
-    const center = mapInstance.current.getCenter();
-    syncCoordinatesToForm(center.lat, center.lng);
-  };
 
   const toggleMapEditing = () => {
     const nextEditingState = !isMapEditingRef.current;
     isMapEditingRef.current = nextEditingState;
     setIsMapEditing(nextEditingState);
-    if (mapInstance.current) {
-      setMapEditing(mapInstance.current, nextEditingState);
-      if (!nextEditingState) {
-        syncMapCenterToForm();
-      }
+    if (!mapInstance.current) return;
+
+    setMapEditing(mapInstance.current, nextEditingState);
+    if (mapMarker.current?.dragging) {
+      if (nextEditingState) mapMarker.current.dragging.enable();
+      else mapMarker.current.dragging.disable();
     }
   };
 
@@ -430,6 +492,14 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     if (!map || !coordinates) return;
 
     const [latitude, longitude] = coordinates;
+    const markerPosition = mapMarker.current?.getLatLng();
+    const markerAlreadyAtCoordinates =
+      markerPosition &&
+      Math.abs(markerPosition.lat - latitude) <= 0.000001 &&
+      Math.abs(markerPosition.lng - longitude) <= 0.000001;
+    mapMarker.current?.setLatLng([latitude, longitude]);
+    if (markerAlreadyAtCoordinates) return;
+
     const currentCenter = map.getCenter();
     if (
       Math.abs(currentCenter.lat - latitude) > 0.000001 ||
@@ -442,16 +512,48 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   }, [coordinates]);
 
   useEffect(() => {
+    let resizeFrame = 0;
+    const resizeTimeouts = [];
+    const invalidateMapSize = () =>
+      mapInstance.current?.invalidateSize({
+        pan: false,
+        debounceMoveend: true,
+      });
+    const scheduleFullscreenResize = (centerOnMarker = false) => {
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        invalidateMapSize();
+        resizeFrame = window.requestAnimationFrame(() => {
+          invalidateMapSize();
+          if (centerOnMarker && mapMarker.current) {
+            mapInstance.current?.setView(
+              mapMarker.current.getLatLng(),
+              mapInstance.current.getZoom(),
+              { animate: false },
+            );
+          }
+          resizeFrame = 0;
+        });
+      });
+      [100, 300, 700].forEach((delay) => {
+        resizeTimeouts.push(window.setTimeout(invalidateMapSize, delay));
+      });
+    };
     const handleFullscreenChange = () => {
       const nativeFullscreen =
         document.fullscreenElement === mapElement.current;
+      const exitedMapFullscreen =
+        wasMapNativeFullscreen.current && !nativeFullscreen;
+      wasMapNativeFullscreen.current = nativeFullscreen;
       setIsMapFullscreen(nativeFullscreen || isCssMapFullscreen);
-      setTimeout(() => mapInstance.current?.invalidateSize(), 100);
+      scheduleFullscreenResize(exitedMapFullscreen);
     };
     const handleMapResize = () => {
-      requestAnimationFrame(() =>
-        mapInstance.current?.invalidateSize({ pan: false }),
-      );
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        invalidateMapSize();
+        resizeFrame = 0;
+      });
     };
     const handleVisibilityChange = () => {
       if (!document.hidden) handleMapResize();
@@ -460,13 +562,17 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     window.addEventListener("resize", handleMapResize);
     window.addEventListener("orientationchange", handleMapResize);
+    window.visualViewport?.addEventListener("resize", handleMapResize);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       window.removeEventListener("resize", handleMapResize);
       window.removeEventListener("orientationchange", handleMapResize);
+      window.visualViewport?.removeEventListener("resize", handleMapResize);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+      resizeTimeouts.forEach(window.clearTimeout);
     };
   }, [isCssMapFullscreen]);
 
@@ -483,25 +589,45 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       }
     };
     document.addEventListener("keydown", handleKeyDown);
-    const resizeFrame = window.requestAnimationFrame(() =>
-      window.requestAnimationFrame(() =>
-        mapInstance.current?.invalidateSize({ pan: false }),
+    let resizeFrame = window.requestAnimationFrame(() => {
+      resizeFrame = window.requestAnimationFrame(() => {
+        mapInstance.current?.invalidateSize({
+          pan: false,
+          debounceMoveend: true,
+        });
+        resizeFrame = 0;
+      });
+    });
+    const resizeTimeouts = [100, 300, 700].map((delay) =>
+      window.setTimeout(
+        () =>
+          mapInstance.current?.invalidateSize({
+            pan: false,
+            debounceMoveend: true,
+          }),
+        delay,
       ),
-    );
-    const resizeTimeout = window.setTimeout(
-      () => mapInstance.current?.invalidateSize({ pan: false }),
-      250,
     );
 
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", handleKeyDown);
       window.cancelAnimationFrame(resizeFrame);
-      window.clearTimeout(resizeTimeout);
+      resizeTimeouts.forEach(window.clearTimeout);
       restoreAncestors();
-      window.requestAnimationFrame(() =>
-        mapInstance.current?.invalidateSize({ pan: false }),
-      );
+      window.requestAnimationFrame(() => {
+        mapInstance.current?.invalidateSize({
+          pan: false,
+          debounceMoveend: true,
+        });
+        window.requestAnimationFrame(() => {
+          const map = mapInstance.current;
+          const marker = mapMarker.current;
+          if (!map || !marker) return;
+          map.invalidateSize({ pan: false, debounceMoveend: true });
+          map.setView(marker.getLatLng(), map.getZoom(), { animate: false });
+        });
+      });
     };
   }, [isCssMapFullscreen]);
 
@@ -581,6 +707,11 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     if (emptyField) {
       setMessageType("error");
       setMessage("Completa todos los campos obligatorios antes de guardar.");
+      return;
+    }
+    if (!data.delivery_methods.length) {
+      setMessageType("error");
+      setMessage("Activa al menos un método de entrega.");
       return;
     }
 
@@ -669,6 +800,7 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
           delivery_fee_per_km: parseThousands(data.delivery_fee_per_km),
           min_delivery_fee: parseThousands(data.min_delivery_fee),
           max_delivery_fee: parseThousands(data.max_delivery_fee),
+          delivery_methods: getEnabledDeliveryMethods(data.delivery_methods),
           night_delivery_surcharge_enabled:
             data.night_delivery_surcharge_enabled,
           night_delivery_surcharge_start: data.night_delivery_surcharge_enabled
@@ -697,6 +829,13 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
       setSaving(false);
       return;
     }
+    const savedData = {
+      ...data,
+      delivery_methods: getEnabledDeliveryMethods(data.delivery_methods),
+    };
+    setData(savedData);
+    setInitialData(savedData);
+    setInitialMediaUrls({ logo: logoUrl, cover: coverUrl });
 
     if (onboardingMode) {
       const { error: onboardingError } = await supabase.rpc(
@@ -726,6 +865,29 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
     }
     setSaving(false);
   };
+
+  useEffect(() => {
+    if (!saveActionRef || onboardingMode) return undefined;
+    saveActionRef.current = save;
+    return () => {
+      saveActionRef.current = null;
+    };
+  });
+
+  useEffect(() => {
+    if (onboardingMode || !onSaveStateChange) return;
+    onSaveStateChange({
+      disabled: saving || loading || Boolean(uploadingImage) || !canSave,
+      saving,
+    });
+  }, [
+    canSave,
+    loading,
+    onSaveStateChange,
+    onboardingMode,
+    saving,
+    uploadingImage,
+  ]);
 
   const openImageEditor = (file, type) => {
     if (!file || !businessId) return;
@@ -918,22 +1080,23 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
   return (
     <section className="space-y-6" data-save-attempted={saveAttempted}>
       <style>{`section[data-save-attempted="true"] input:placeholder-shown { border-color: rgb(239 68 68 / 0.9); }`}</style>
-      <header className="flex items-start gap-3 pb-5">
-        <Store className="mt-0.5 text-violet-400" size={20} />
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-400">
-            Información pública
-          </p>
-          <h2 className="mt-1 text-xl font-black text-white">
-            {onboardingMode ? "Configura tu tienda" : "Tienda"}
-          </h2>
-          <p className="mt-1 text-xs text-neutral-500">
-            {onboardingMode
-              ? "Completa los datos del negocio, contacto, entrega y ubicación para poder empezar a vender."
-              : "Aquí está todo lo que tus clientes ven y necesitan para encontrarte."}
-          </p>
-        </div>
-      </header>
+      {onboardingMode && (
+        <header className="flex items-start gap-3 pb-5">
+          <Store className="mt-0.5 text-violet-400" size={20} />
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-400">
+              Información pública
+            </p>
+            <h2 className="mt-1 text-xl font-black text-white">
+              Configura tu tienda
+            </h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              Completa los datos del negocio, contacto, entrega y ubicación para
+              poder empezar a vender.
+            </p>
+          </div>
+        </header>
+      )}
       {loading ? (
         <SubLoading
           label="Cargando información de la tienda"
@@ -1228,36 +1391,43 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
                 </h3>
                 <p className="mt-1 text-xs text-neutral-500">
                   {isMapEditing
-                    ? "Mueve el mapa debajo del puntero fijo y confirma al terminar."
-                    : "El mapa está bloqueado para evitar movimientos accidentales."}
+                    ? "Haz clic o arrastra el marcador para cambiar la ubicación."
+                    : "El mapa está bloqueado para que puedas desplazarte sin moverlo por accidente."}
                 </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={toggleMapEditing}
-                  className={`flex items-center gap-2 rounded-xl px-3 py-2 text-[10px] font-black uppercase transition ${
-                    isMapEditing
-                      ? "bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
-                      : "bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
-                  }`}
-                  aria-pressed={isMapEditing}
-                >
-                  {isMapEditing ? <Check size={14} /> : <Pencil size={14} />}
-                  {isMapEditing ? "Listo" : "Editar mapa"}
-                </button>
               </div>
             </div>
             <div
               ref={mapElement}
               className={`isolate overflow-hidden bg-neutral-950 [&:fullscreen]:mb-0 [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0 ${
                 isCssMapFullscreen
-                  ? "fixed inset-0 z-[1000] m-0 h-[100dvh] w-screen rounded-none border-0"
+                  ? "fixed inset-0 z-[1000] m-0 h-screen h-[100dvh] w-screen rounded-none border-0"
                   : "relative mb-5 h-72 rounded-2xl"
               }`}
+              style={
+                isCssMapFullscreen ? { height: "100dvh" } : undefined
+              }
               aria-label="Mapa interactivo de ubicación de la tienda"
             >
-              <div className="absolute right-4 top-4 z-[600] flex items-center gap-2">
+              <div
+                data-map-controls
+                className="absolute right-3 top-3 z-[600] flex max-w-[calc(100%-1.5rem)] flex-wrap items-center justify-end gap-2"
+              >
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleMapEditing();
+                  }}
+                  className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-[10px] font-black uppercase shadow-lg backdrop-blur-md transition ${
+                    isMapEditing
+                      ? "border-emerald-500/30 bg-neutral-950/90 text-emerald-300 hover:bg-emerald-500/15"
+                      : "border-violet-500/30 bg-neutral-950/90 text-violet-300 hover:bg-violet-500/15"
+                  }`}
+                  aria-pressed={isMapEditing}
+                >
+                  {isMapEditing ? <Check size={14} /> : <Pencil size={14} />}
+                  {isMapEditing ? "Listo" : "Editar mapa"}
+                </button>
                 <button
                   type="button"
                   onClick={(event) => {
@@ -1293,14 +1463,6 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
                   )}
                 </button>
               </div>
-              <div className="pointer-events-none absolute left-1/2 top-1/2 z-[500] -translate-x-1/2 -translate-y-full text-violet-600 drop-shadow-[0_3px_4px_rgba(0,0,0,0.65)]">
-                <MapPin
-                  size={42}
-                  fill="currentColor"
-                  stroke="white"
-                  strokeWidth={1.5}
-                />
-              </div>
             </div>
             <div className="grid gap-5">
               <label className="flex flex-col gap-2">
@@ -1323,119 +1485,302 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
             <h3 className="mb-5 text-sm font-black uppercase tracking-wider text-neutral-300">
               Entrega y domicilio
             </h3>
-            <div className="grid gap-5 md:grid-cols-2">
-              <ConfiguracionField
-                label="Tiempo mínimo (minutos)"
-                type="number"
-                value={data.delivery_time_min}
-                onChange={(e) => update("delivery_time_min", e.target.value)}
-              />
-              <ConfiguracionField
-                label="Tiempo máximo (minutos)"
-                type="number"
-                value={data.delivery_time_max}
-                onChange={(e) => update("delivery_time_max", e.target.value)}
-              />
-              <ConfiguracionField
-                label="Tarifa por kilómetro"
-                inputMode="numeric"
-                value={formatThousands(data.delivery_fee_per_km)}
-                onChange={(e) =>
-                  updateMoney("delivery_fee_per_km", e.target.value)
-                }
-              />
-              <ConfiguracionField
-                label="Costo mínimo de domicilio"
-                inputMode="numeric"
-                value={formatThousands(data.min_delivery_fee)}
-                onChange={(e) =>
-                  updateMoney("min_delivery_fee", e.target.value)
-                }
-              />
-              <ConfiguracionField
-                label="Costo máximo de domicilio"
-                inputMode="numeric"
-                value={formatThousands(data.max_delivery_fee)}
-                onChange={(e) =>
-                  updateMoney("max_delivery_fee", e.target.value)
-                }
-              />
+            <div className="mb-5 rounded-2xl bg-neutral-950/45 p-4 sm:p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-bold text-neutral-100">
+                  Métodos de entrega
+                </p>
+                <span className="text-[11px] text-neutral-500">
+                  {data.delivery_methods.length} activos
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                {DELIVERY_METHODS.map(({ id, label }) => {
+                  const checked = data.delivery_methods.includes(id);
+                  const {
+                    icon,
+                    description,
+                    selectedClass,
+                    iconClass,
+                    checkboxClass,
+                  } = DELIVERY_METHOD_PRESENTATION[id];
+                  return (
+                    <label
+                      key={id}
+                      className={`flex min-h-[72px] cursor-pointer items-center justify-between gap-2 rounded-xl border p-3 transition-colors focus-within:ring-2 focus-within:ring-violet-400/60 ${
+                        checked
+                          ? selectedClass
+                          : "border-white/[0.06] bg-neutral-900/35 hover:bg-neutral-800/55"
+                      } ${
+                        checked && data.delivery_methods.length === 1
+                          ? "cursor-not-allowed"
+                          : ""
+                      }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <span
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                            checked
+                              ? iconClass
+                              : "bg-neutral-800 text-neutral-400"
+                          }`}
+                        >
+                          <span
+                            className="material-symbols-outlined text-lg leading-none"
+                            aria-hidden="true"
+                          >
+                            {icon}
+                          </span>
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-bold text-neutral-100 sm:text-sm">
+                            {label}
+                          </span>
+                          <span className="mt-0.5 block truncate text-[10px] text-neutral-500 sm:text-[11px]">
+                            {description}
+                          </span>
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={checked && data.delivery_methods.length === 1}
+                        onChange={(event) =>
+                          setData((current) => ({
+                            ...current,
+                            delivery_methods: event.target.checked
+                              ? [...current.delivery_methods, id]
+                              : current.delivery_methods.filter(
+                                  (method) => method !== id,
+                                ),
+                          }))
+                        }
+                        className={`h-4 w-4 shrink-0 rounded ${checkboxClass}`}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="mt-3 text-[11px] leading-5 text-neutral-500">
+                Elige qué opciones podrán seleccionar tus clientes y el equipo
+                en el POS. Debe quedar al menos una activa.
+              </p>
             </div>
-            <div className="mt-6 rounded-xl bg-neutral-950/50 p-4">
-              <label className="flex cursor-pointer items-center gap-3 text-sm font-bold text-neutral-200">
+            <div className="grid gap-4 xl:grid-cols-2">
+              <div className="rounded-2xl bg-neutral-950/35 p-4 sm:p-5">
+                <div className="mb-4 flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-400/10 text-sky-300">
+                    <span className="material-symbols-outlined text-xl leading-none">
+                      schedule
+                    </span>
+                  </span>
+                  <div>
+                    <h4 className="text-xs font-bold text-neutral-100">
+                      Tiempo estimado
+                    </h4>
+                    <p className="mt-0.5 text-[11px] text-neutral-500">
+                      Rango para preparar y entregar cada pedido
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <ConfiguracionField
+                    label="Tiempo mínimo (minutos)"
+                    type="number"
+                    value={data.delivery_time_min}
+                    onChange={(e) =>
+                      update("delivery_time_min", e.target.value)
+                    }
+                  />
+                  <ConfiguracionField
+                    label="Tiempo máximo (minutos)"
+                    type="number"
+                    value={data.delivery_time_max}
+                    onChange={(e) =>
+                      update("delivery_time_max", e.target.value)
+                    }
+                  />
+                </div>
+              </div>
+              <div className="rounded-2xl bg-neutral-950/35 p-4 sm:p-5">
+                <div className="mb-4 flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-300">
+                    <span className="material-symbols-outlined text-xl leading-none">
+                      payments
+                    </span>
+                  </span>
+                  <div>
+                    <h4 className="text-xs font-bold text-neutral-100">
+                      Costos de domicilio
+                    </h4>
+                    <p className="mt-0.5 text-[11px] text-neutral-500">
+                      Define la tarifa y los límites de cobro
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <ConfiguracionField
+                    label="Tarifa por kilómetro"
+                    inputMode="numeric"
+                    value={formatThousands(data.delivery_fee_per_km)}
+                    onChange={(e) =>
+                      updateMoney("delivery_fee_per_km", e.target.value)
+                    }
+                  />
+                  <ConfiguracionField
+                    label="Costo mínimo de domicilio"
+                    inputMode="numeric"
+                    value={formatThousands(data.min_delivery_fee)}
+                    onChange={(e) =>
+                      updateMoney("min_delivery_fee", e.target.value)
+                    }
+                  />
+                  <ConfiguracionField
+                    label="Costo máximo de domicilio"
+                    inputMode="numeric"
+                    value={formatThousands(data.max_delivery_fee)}
+                    onChange={(e) =>
+                      updateMoney("max_delivery_fee", e.target.value)
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+            <div
+              className={`mt-5 rounded-2xl border p-4 transition-colors sm:p-5 ${
+                data.night_delivery_surcharge_enabled
+                  ? "border-amber-400/20 bg-amber-400/[0.04]"
+                  : "border-white/[0.06] bg-neutral-950/35"
+              }`}
+            >
+              <label className="flex cursor-pointer items-center justify-between gap-3">
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-400/10 text-amber-300">
+                    <span className="material-symbols-outlined text-xl leading-none">
+                      dark_mode
+                    </span>
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-xs font-bold text-neutral-100 sm:text-sm">
+                      Recargo nocturno
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-neutral-500">
+                      Aplicar un porcentaje adicional a los domicilios en un horario definido
+                    </span>
+                  </span>
+                </span>
                 <input
                   type="checkbox"
                   checked={data.night_delivery_surcharge_enabled}
                   onChange={(e) =>
                     update("night_delivery_surcharge_enabled", e.target.checked)
                   }
-                  className="h-4 w-4 accent-violet-500"
+                  className="h-4 w-4 shrink-0 accent-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
                 />
-                Activar recargo nocturno para domicilios
               </label>
               {data.night_delivery_surcharge_enabled && (
-                <div className="mt-4 grid gap-4 sm:grid-cols-3">
-                  <ConfiguracionField
-                    label="Hora de inicio"
-                    type="time"
-                    value={data.night_delivery_surcharge_start}
-                    onChange={(e) =>
-                      update("night_delivery_surcharge_start", e.target.value)
-                    }
-                  />
-                  <ConfiguracionField
-                    label="Hora de fin"
-                    type="time"
-                    value={data.night_delivery_surcharge_end}
-                    onChange={(e) =>
-                      update("night_delivery_surcharge_end", e.target.value)
-                    }
-                  />
-                  <ConfiguracionField
-                    label="Recargo (%)"
-                    type="number"
-                    value={data.night_delivery_surcharge_percent}
-                    onChange={(e) =>
-                      update(
-                        "night_delivery_surcharge_percent",
-                        e.target.value,
-                      )
-                    }
-                    placeholder="Ej. 15"
-                  />
-                </div>
+                <>
+                  <div className="my-4 border-t border-white/[0.07]" />
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <ConfiguracionField
+                      label="Hora de inicio"
+                      type="time"
+                      value={data.night_delivery_surcharge_start}
+                      onChange={(e) =>
+                        update("night_delivery_surcharge_start", e.target.value)
+                      }
+                    />
+                    <ConfiguracionField
+                      label="Hora de fin"
+                      type="time"
+                      value={data.night_delivery_surcharge_end}
+                      onChange={(e) =>
+                        update("night_delivery_surcharge_end", e.target.value)
+                      }
+                    />
+                    <ConfiguracionField
+                      label="Recargo (%)"
+                      type="number"
+                      value={data.night_delivery_surcharge_percent}
+                      onChange={(e) =>
+                        update(
+                          "night_delivery_surcharge_percent",
+                          e.target.value,
+                        )
+                      }
+                      placeholder="Ej. 15"
+                    />
+                  </div>
+                </>
               )}
-              <p className="mt-3 text-xs text-neutral-500">
+              <p className="mt-3 text-[11px] leading-5 text-neutral-500">
                 El porcentaje se suma al costo de domicilio calculado. El
                 horario puede cruzar la medianoche.
               </p>
             </div>
           </div>
           <div className="rounded-2xl bg-neutral-900/45 p-5 md:p-6">
-            <h3 className="mb-2 text-sm font-black uppercase tracking-wider text-neutral-300">
-              Propina en POS
-            </h3>
-            <p className="mb-5 text-xs text-neutral-500">
-              Define el porcentaje que se agregará automáticamente al subtotal
-              de los productos en cada pedido. Usa 0 para no cobrar propina.
-            </p>
-            <div className="max-w-sm">
-              <ConfiguracionField
-                label="Propina (%)"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={data.tip_percent}
-                onChange={(e) => update("tip_percent", e.target.value)}
-                placeholder="Ej. 10"
-              />
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-400/10 text-violet-300">
+                  <span className="material-symbols-outlined text-xl leading-none">
+                    volunteer_activism
+                  </span>
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-neutral-100">
+                    Propina en POS
+                  </h3>
+                  <p className="mt-1 max-w-xl text-xs leading-5 text-neutral-500">
+                    Define el porcentaje que se agregará automáticamente al subtotal
+                    de los productos en cada pedido. Usa 0 para no cobrar propina.
+                  </p>
+                </div>
+              </div>
+              <div className="w-full max-w-xs rounded-xl bg-neutral-950/45 p-4 sm:w-auto">
+                <ConfiguracionField
+                  label="Propina (%)"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={data.tip_percent}
+                  onChange={(e) => update("tip_percent", e.target.value)}
+                  placeholder="Ej. 10"
+                />
+              </div>
             </div>
           </div>
-          <footer className="sticky bottom-4 z-10 flex items-center justify-between gap-4 rounded-2xl bg-neutral-950/95 p-4 shadow-xl backdrop-blur-md">
-            <span
+          {onboardingMode ? (
+            <footer className="flex items-center justify-between gap-4 rounded-2xl bg-neutral-950/95 p-4">
+              <span
+                aria-live="polite"
+                className={`text-xs ${
+                  messageType === "error"
+                    ? "text-red-300"
+                    : messageType === "info"
+                      ? "text-violet-300"
+                      : "text-emerald-300"
+                }`}
+              >
+                {message}
+              </span>
+              <button
+                type="button"
+                onClick={save}
+                disabled={
+                  saving || loading || Boolean(uploadingImage) || !canSave
+                }
+                className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest transition hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Save size={14} />{" "}
+                {saving ? "Guardando..." : "Guardar y comenzar"}
+              </button>
+            </footer>
+          ) : (
+            <div
               aria-live="polite"
-              className={`text-xs ${
+              className={`min-h-5 text-right text-xs ${
                 messageType === "error"
                   ? "text-red-300"
                   : messageType === "info"
@@ -1444,21 +1789,8 @@ const ConfiguracionTienda = ({ onboardingMode = false, onCompleted }) => {
               }`}
             >
               {message}
-            </span>
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving || loading || Boolean(uploadingImage) || !canSave}
-              className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Save size={14} />{" "}
-              {saving
-                ? "Guardando..."
-                : onboardingMode
-                  ? "Guardar y comenzar"
-                  : "Guardar tienda"}
-            </button>
-          </footer>
+            </div>
+          )}
         </>
       )}
     </section>

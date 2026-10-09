@@ -14,6 +14,7 @@ import {
   shareOrderInvoicePdf,
 } from "./OrderInvoicePdf";
 import { supabase } from "../../src/lib/supabaseClient";
+import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 import { useAuth } from "../../src/components/AuthContext";
 import DeliveryMap from "./DeliveryMap";
 
@@ -548,6 +549,7 @@ const POS = () => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [showOutOfStockWarning, setShowOutOfStockWarning] = useState(false);
+  const [productStockToEdit, setProductStockToEdit] = useState(null);
   const [outOfStockProduct, setOutOfStockProduct] = useState(null);
   const [outOfStockMessage, setOutOfStockMessage] = useState("");
   const [outOfStockCartId, setOutOfStockCartId] = useState(null);
@@ -598,6 +600,7 @@ const POS = () => {
   const cartScrollRefMobile = useRef(null);
   const tableInputRef = useRef(null);
   const optionQuantityInputRef = useRef(null);
+  const optionNoteInputRef = useRef(null);
   const modalOverlayRef = useRef(null);
   const prevActiveElRef = useRef(null);
 
@@ -626,8 +629,7 @@ const POS = () => {
 
   useEffect(() => {
     if (!optionModalOpen) return;
-    optionQuantityInputRef.current?.focus();
-    optionQuantityInputRef.current?.select();
+    optionNoteInputRef.current?.focus();
   }, [optionModalOpen, activeProduct]);
 
   const fetchCategoriesForBusiness = async (businessId) => {
@@ -986,7 +988,7 @@ const POS = () => {
         const { data, error } = await supabase
           .from("business_info")
           .select(
-            "latitude,longitude,address,whatsapp_phone,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent",
+            "latitude,longitude,address,whatsapp_phone,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,delivery_methods,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent",
           )
           .eq("business_id", businessId)
           .maybeSingle();
@@ -1597,6 +1599,10 @@ const POS = () => {
     delivery: { label: "Domicilio", icon: "delivery_dining" },
     point: { label: "En Punto", icon: "location_on" },
   };
+  const enabledDeliveryMethods = useMemo(
+    () => getEnabledDeliveryMethods(deliverySettings?.delivery_methods),
+    [deliverySettings?.delivery_methods],
+  );
 
   const paymentLabels = {
     efectivo: { label: "Efectivo", icon: "payments" },
@@ -1605,14 +1611,29 @@ const POS = () => {
     dividir: { label: "Dividir", icon: "call_split" }, // El nuevo método
   };
 
-  const filteredProducts = products.filter((p) => {
-    const matchesSearch =
-      searchTerm === "" ||
-      p.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory =
-      selectedCategory === "all" || p.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  const categoryOrder = useMemo(
+    () => new Map(categories.map((category, index) => [category.id, index])),
+    [categories],
+  );
+  const filteredProducts = products
+    .filter((p) => {
+      const matchesSearch =
+        searchTerm === "" ||
+        p.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCategory =
+        selectedCategory === "all" || p.category === selectedCategory;
+      return matchesSearch && matchesCategory;
+    })
+    .sort((first, second) => {
+      const firstCategoryOrder =
+        categoryOrder.get(first.category) ?? Number.MAX_SAFE_INTEGER;
+      const secondCategoryOrder =
+        categoryOrder.get(second.category) ?? Number.MAX_SAFE_INTEGER;
+      return (
+        firstCategoryOrder - secondCategoryOrder ||
+        (first.orderIndex || 0) - (second.orderIndex || 0)
+      );
+    });
   const addToast = (name, type = "success") => {
     const id = Date.now() + Math.random(); // ID único para cada burbuja
 
@@ -2637,6 +2658,8 @@ const POS = () => {
     }
     if (!deliveryMethod) {
       errors.push("Seleccionar método de entrega");
+    } else if (!enabledDeliveryMethods.includes(deliveryMethod)) {
+      errors.push("Seleccionar un método de entrega habilitado para la tienda");
     }
     if (!customerName.trim()) {
       errors.push("Ingresar nombre del cliente");
@@ -4005,20 +4028,27 @@ const POS = () => {
                     }`}
                   >
                     {(inventoryEnabled || product.soldOut) && (
-                      <div
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setProductStockToEdit(product);
+                        }}
+                        title="Editar stock del producto"
+                        aria-label={`Confirmar edición de stock de ${product.name}`}
                         className={`absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-full text-white text-[10px] font-bold uppercase tracking-wider ${
                           product.soldOut ||
                           (inventoryEnabled && Number(product.stock) <= 0)
                             ? "bg-red-600"
                             : "bg-green-600"
-                        }`}
+                        } cursor-pointer`}
                       >
                         {product.soldOut
                           ? "Agotado"
                           : inventoryEnabled
                             ? `Stock: ${formatStockQuantity(product.stock)} ${getProductUnitAbbreviation(product)}`
                             : "Disponible"}
-                      </div>
+                      </button>
                     )}
                     {/* Botón Info - Elevado con Glassmorphism */}
                     <button
@@ -4066,8 +4096,10 @@ const POS = () => {
 
                       <div className="flex items-center justify-between gap-1 pb-2">
                         <p className="text-primary font-black text-sm tracking-tight">
-                          $ {formatPrice(product.price)} /{" "}
-                          {product.unit?.name || "UNIDAD"}
+                          $ {formatPrice(product.price)}{" "}
+                          <span className="text-[10px] font-bold text-on-surface-variant">
+                            {product.unit?.name || "UNIDAD"}
+                          </span>
                         </p>
                         <button
                           onClick={(e) => openNoteModal(e, product)}
@@ -4137,38 +4169,47 @@ const POS = () => {
           </h2>
 
           {/* Botones en Grid Indestructible */}
-          <div className="grid grid-cols-4 gap-1 w-full sm:gap-1.5">
-            {Object.entries(deliveryLabels).map(([key, { label, icon }]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => handleDeliveryChange(key)}
-                className={`group relative min-h-10 w-full overflow-hidden rounded-lg p-1 text-[8px] font-bold uppercase tracking-wide transition-all duration-300 flex flex-col items-center justify-center gap-0.5 sm:min-h-11 sm:p-1.5 sm:text-[10px] sm:tracking-wider ${
-        deliveryMethod === key
-          ? "bg-primary-container text-on-surface border-primary shadow-lg shadow-primary-container/20"
-          : "bg-surface/100 border-outline text-on-surface-variant hover:border-outline hover:text-on-surface"
-      }`}
-              >
-                {/* Brillo táctico */}
-                {deliveryMethod === key && (
-                  <div className="absolute inset-0  to-transparent pointer-events-none" />
-                )}
-
-                {/* Icono */}
-                <span
-                  className={`material-symbols-outlined text-sm transition-transform duration-300 flex-shrink-0 sm:text-base ${
+          <div
+            className="grid gap-1 w-full sm:gap-1.5"
+            style={{
+              gridTemplateColumns: `repeat(${enabledDeliveryMethods.length}, minmax(0, 1fr))`,
+            }}
+          >
+            {Object.entries(deliveryLabels)
+              .filter(([key]) => enabledDeliveryMethods.includes(key))
+              .map(([key, { label, icon }]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => handleDeliveryChange(key)}
+                  className={`group relative min-h-10 w-full overflow-hidden rounded-lg p-1 text-[8px] font-bold uppercase tracking-wide transition-all duration-300 flex flex-col items-center justify-center gap-0.5 sm:min-h-11 sm:p-1.5 sm:text-[10px] sm:tracking-wider ${
                     deliveryMethod === key
-                      ? "scale-110"
-                      : "group-hover:scale-110"
+                      ? "bg-primary-container text-on-surface border-primary shadow-lg shadow-primary-container/20"
+                      : "bg-surface/100 border-outline text-on-surface-variant hover:border-outline hover:text-on-surface"
                   }`}
                 >
-                  {icon}
-                </span>
+                  {/* Brillo táctico */}
+                  {deliveryMethod === key && (
+                    <div className="absolute inset-0  to-transparent pointer-events-none" />
+                  )}
 
-                {/* Texto - Quitamos flex-1 y text-left para que el justify-center del padre mande */}
-                <span className="max-w-full truncate leading-none">{label}</span>
-              </button>
-            ))}
+                  {/* Icono */}
+                  <span
+                    className={`material-symbols-outlined text-sm transition-transform duration-300 flex-shrink-0 sm:text-base ${
+                      deliveryMethod === key
+                        ? "scale-110"
+                        : "group-hover:scale-110"
+                    }`}
+                  >
+                    {icon}
+                  </span>
+
+                  {/* Texto - Quitamos flex-1 y text-left para que el justify-center del padre mande */}
+                  <span className="max-w-full truncate leading-none">
+                    {label}
+                  </span>
+                </button>
+              ))}
           </div>
 
           {/* Inputs adicionales según método de entrega */}
@@ -5323,6 +5364,7 @@ const POS = () => {
                     Nota de producto
                   </label>
                   <textarea
+                    ref={optionNoteInputRef}
                     value={optionNote}
                     onChange={(e) => setOptionNote(e.target.value)}
                     className="w-full min-h-[110px] rounded-[1.5rem] border border-white/10 bg-background/90 p-4 text-base text-on-surface outline-none resize-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
@@ -5521,6 +5563,53 @@ const POS = () => {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {productStockToEdit && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="edit-product-stock-title"
+            className="w-full max-w-md rounded-2xl border border-violet-400/30 bg-surface p-6 shadow-2xl"
+          >
+            <h2
+              id="edit-product-stock-title"
+              className="text-lg font-black uppercase text-on-surface"
+            >
+              ¿Editar el stock?
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">
+              Irás a Productos para editar el stock de{" "}
+              <strong className="text-on-surface">
+                {productStockToEdit.name}
+              </strong>
+              .
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setProductStockToEdit(null)}
+                className="flex-1 rounded-xl border border-outline px-4 py-3 text-xs font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const product = productStockToEdit;
+                  setProductStockToEdit(null);
+                  navigate("/pos/productos", {
+                    state: { productId: product.id, focusStock: true },
+                  });
+                }}
+                className="flex-1 rounded-xl bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-violet-500"
+              >
+                Sí, editar
+              </button>
+            </div>
+          </section>
         </div>
       )}
 

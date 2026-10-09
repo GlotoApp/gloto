@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowDownRight,
@@ -358,6 +358,8 @@ const Productos = ({ section = "productos" }) => {
   });
   const [savingQuickInventory, setSavingQuickInventory] = useState(false);
   const [quickInventoryError, setQuickInventoryError] = useState("");
+  const stockInputRef = useRef(null);
+  const focusStockOnOpen = useRef(false);
 
   // Estado inicial del catálogo
   const [products, setProducts] = useState([]);
@@ -1054,6 +1056,7 @@ const Productos = ({ section = "productos" }) => {
 
   const closeProductModal = () => {
     setIsModalOpen(false);
+    focusStockOnOpen.current = false;
     setEditingId(null);
     setInitialProductFormSnapshot(null);
     setImageEditor(null);
@@ -1071,9 +1074,20 @@ const Productos = ({ section = "productos" }) => {
     if (!productId || loadingProducts) return;
     const product = products.find((item) => item.id === productId);
     if (!product) return;
+    focusStockOnOpen.current = Boolean(location.state?.focusStock);
     handleEditProduct(product);
     navigate(location.pathname, { replace: true, state: null });
   }, [location.state, loadingProducts, products, navigate, location.pathname]);
+
+  useEffect(() => {
+    if (!isModalOpen || !editingId || !focusStockOnOpen.current) return;
+    const stockInput = stockInputRef.current;
+    focusStockOnOpen.current = false;
+    if (!stockInput) return;
+    stockInput.scrollIntoView({ behavior: "smooth", block: "center" });
+    stockInput.focus();
+    stockInput.select();
+  }, [editingId, inventoryEnabled, isModalOpen]);
 
   const createOptionId = () =>
     `option-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -2811,6 +2825,7 @@ const Productos = ({ section = "productos" }) => {
                         <ArrowDownRight size={18} />
                       </button>
                       <input
+                        ref={stockInputRef}
                         type="number"
                         min="0"
                         step={selectedUnit?.allows_fraction ? "0.001" : "1"}

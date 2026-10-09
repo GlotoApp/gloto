@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
+import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 import SubLoading from "./SubLoading";
 import {
   formatKitchenOption as formatOption,
@@ -101,6 +102,9 @@ export default function KitchenPanel() {
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [businessLogoUrl, setBusinessLogoUrl] = useState("");
+  const [enabledDeliveryMethods, setEnabledDeliveryMethods] = useState(
+    getEnabledDeliveryMethods(),
+  );
   const [soundModalOpen, setSoundModalOpen] = useState(false);
   const soundEnabledRef = useRef(false);
   const businessIdRef = useRef(null);
@@ -239,6 +243,16 @@ export default function KitchenPanel() {
         return;
       }
       businessIdRef.current = profile.business_id;
+
+      const { data: businessInfo, error: businessInfoError } = await supabase
+        .from("business_info")
+        .select("delivery_methods")
+        .eq("business_id", profile.business_id)
+        .maybeSingle();
+      if (businessInfoError) throw businessInfoError;
+      setEnabledDeliveryMethods(
+        getEnabledDeliveryMethods(businessInfo?.delivery_methods),
+      );
 
       const { data: business, error: businessError } = await supabase
         .from("businesses")
@@ -635,7 +649,9 @@ export default function KitchenPanel() {
 
           {/* Filtros de Métodos de Entrega */}
           <div className="flex items-center justify-center gap-1.5 w-full md:w-auto overflow-x-auto no-scrollbar py-1 md:py-0">
-            {Object.entries(deliveryLabels).map(([key, data]) => {
+            {Object.entries(deliveryLabels)
+              .filter(([key]) => enabledDeliveryMethods.includes(key))
+              .map(([key, data]) => {
               const c = colorMap[data.color];
               const active = filtros[key];
               return (
@@ -654,7 +670,7 @@ export default function KitchenPanel() {
                   <span className="hidden md:inline">{data.label}</span>
                 </button>
               );
-            })}
+              })}
           </div>
         </div>
       </header>

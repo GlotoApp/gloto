@@ -174,9 +174,11 @@ export const getInvoiceHtml = (
   const totalWithTip = Number(order.total || 0);
   const marketplaceOrder = order.canal === "marketplace";
   const totalWithoutTip = marketplaceOrder
-    ? totalWithTip + deliveryFee
+    ? Math.max(0, totalWithTip - tipAmount + deliveryFee)
     : Math.max(0, totalWithTip - tipAmount);
-  const invoiceTotal = marketplaceOrder ? totalWithoutTip : totalWithTip;
+  const invoiceTotal = marketplaceOrder
+    ? totalWithTip + deliveryFee
+    : totalWithTip;
   const paymentDetails = (Array.isArray(order.paymentMethods)
     ? order.paymentMethods
     : []
@@ -214,35 +216,35 @@ export const getInvoiceHtml = (
     <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Factura ${escapeHtml(order.numeroFactura)}</title>
     <style>
-      *{box-sizing:border-box}body{font:12px Arial,sans-serif;color:#111;margin:0;padding:24px}
-      .invoice{max-width:760px;margin:0 auto}.header{text-align:center;border-bottom:1px dashed #555;padding-bottom:16px}
-      .logo{display:block;max-width:150px;max-height:90px;object-fit:contain;margin:0 auto 10px;filter:grayscale(1) contrast(1.15)}
-      h1{font-size:20px;margin:8px 0 4px}.muted,small{color:#444}.muted{margin:3px 0}
-      .columns{display:flex;flex-direction:column;gap:14px;padding:14px 0;border-bottom:1px dashed #555}
-      h2{font-size:11px;text-transform:uppercase;margin:0 0 7px}p{margin:4px 0;line-height:1.4}
-      table{width:100%;border-collapse:collapse;margin-top:12px;break-inside:auto}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}th,td{padding:8px 5px;border-bottom:1px solid #bbb;text-align:left;vertical-align:top}
-      th{border-top:1px solid #333;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px}
-      td small{display:block;margin-top:3px}.right{text-align:right}.center{text-align:center;white-space:nowrap}
+      *{box-sizing:border-box}body{font:13px Arial,sans-serif;color:#000;margin:0;padding:24px}
+      .invoice{max-width:760px;margin:0 auto}.header{text-align:center;border-bottom:1px dashed #555;padding-bottom:10px;font-weight:bold}
+      .logo{display:block;max-width:150px;max-height:90px;object-fit:contain;margin:0 auto 8px;filter:grayscale(1) contrast(1.15)}
+      h1{font-size:21px;margin:6px 0 3px}.muted,small{color:#222}.muted{margin:2px 0}
+      .columns{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px dashed #555}
+      h2{font-size:12px;text-transform:uppercase;margin:0 0 4px}p{margin:2px 0;line-height:1.3}
+      table{width:100%;border-collapse:collapse;margin-top:8px;break-inside:auto}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}th,td{padding:6px 4px;border-bottom:1px solid #777;text-align:left;vertical-align:top}
+      th{border-top:1px solid #333;border-bottom:1px solid #333;text-transform:uppercase;font-size:11px}
+      td small{display:block;margin-top:2px;font-size:12px}.right{text-align:right}.center{text-align:center;white-space:nowrap}
       .invoice-item-with-note td{border-bottom:0}
-      .invoice-item-note-row td{padding:5px 8px 8px;border-bottom:1px solid #bbb;font-size:11px;line-height:1.4;overflow-wrap:anywhere;word-break:break-word}
-      .totals{width:100%;margin:14px 0 0}.totals p{display:flex;justify-content:space-between}
-      .totals .before-tip{font-size:14px;font-weight:bold}
-      .grand{border-top:1px solid #111;padding-top:8px;font-size:16px;font-weight:bold}
-      .payment-method{margin-top:8px;font-family:Arial,sans-serif;font-size:12px;font-weight:bold;text-transform:uppercase}
-      .payment-methods{margin-top:8px;font-family:Arial,sans-serif;font-size:12px}
-      .payment-method-heading{margin-bottom:5px;font-weight:normal}
-      .payment-method-row{display:flex;justify-content:space-between;gap:12px;margin:3px 0}
+      .invoice-item-note-row td{padding:4px 6px 6px;border-bottom:1px solid #777;font-size:12px;line-height:1.3;overflow-wrap:anywhere;word-break:break-word}
+      .totals{width:100%;margin:10px 0 0}.totals p{display:flex;justify-content:space-between}
+      .totals .before-tip{font-size:15px;font-weight:bold}
+      .grand{border-top:1px solid #111;padding-top:6px;font-size:17px;font-weight:bold}
+      .payment-method{margin-top:6px;font-family:Arial,sans-serif;font-size:13px;font-weight:bold;text-transform:uppercase}
+      .payment-methods{margin-top:6px;font-family:Arial,sans-serif;font-size:13px}
+      .payment-method-heading{margin-bottom:3px;font-weight:normal}
+      .payment-method-row{display:flex;justify-content:space-between;gap:8px;margin:2px 0}
       .payment-method-row strong{text-align:right;white-space:nowrap}
-      .notes{border-top:1px dashed #555;border-bottom:1px dashed #555;margin-top:16px;padding:12px 0}.footer{text-align:center;margin-top:22px;font-size:10px}
-      .map-qr{display:block;width:100%;max-width:100%;text-align:center;margin:20px auto 0;break-inside:avoid;page-break-inside:avoid}
-      .map-qr svg,.map-qr img{display:block;width:40mm!important;height:40mm!important;max-width:100%;margin:8px auto 0}
-      .map-link{display:block;margin:8px auto 0;max-width:100%;font-size:9px;color:#111;overflow-wrap:anywhere;word-break:break-word}
-      .document-footer{text-align:center;margin-top:18px;padding-top:12px;border-top:1px dashed #555;break-inside:avoid}
-      .non-fiscal{margin:0 0 6px;font-size:10px;font-weight:bold;text-transform:uppercase}
-      .printed-by{margin:0;font-size:9px;font-weight:bold;text-transform:uppercase}
+      .notes{border-top:1px dashed #555;border-bottom:1px dashed #555;margin-top:10px;padding:8px 0}.footer{text-align:center;margin-top:14px;font-size:11px}
+      .map-qr{display:block;width:100%;max-width:100%;text-align:center;margin:14px auto 0;break-inside:avoid;page-break-inside:avoid}
+      .map-qr svg,.map-qr img{display:block;width:40mm!important;height:40mm!important;max-width:100%;margin:6px auto 0}
+      .map-link{display:block;margin:6px auto 0;max-width:100%;font-size:11px;color:#000;overflow-wrap:anywhere;word-break:break-word}
+      .document-footer{text-align:center;margin-top:12px;padding-top:8px;border-top:1px dashed #555;break-inside:avoid}
+      .non-fiscal{margin:0 0 4px;font-size:11px;font-weight:bold;text-transform:uppercase}
+      .printed-by{margin:0;font-size:10px;font-weight:bold;text-transform:uppercase}
       .gloto-brand{display:flex;align-items:center;justify-content:center;gap:6px;margin:8px auto 0;color:#111;font-size:14px;font-weight:900;letter-spacing:1px}
       .gloto-logo{display:block!important;flex:0 0 28px;width:28px!important;height:28px!important;max-width:28px;object-fit:contain;margin:0;filter:grayscale(1) invert(1) contrast(1.4);print-color-adjust:exact;-webkit-print-color-adjust:exact}
-      .footer{text-align:center;margin-top:10px;font-size:10px}
+      .footer{text-align:center;margin-top:8px;font-size:11px}
       .back-button{position:fixed;top:16px;left:16px;padding:8px 12px;border:1px solid #777;border-radius:6px;background:#fff;color:#111;font:bold 12px Arial,sans-serif;cursor:pointer}
       ${receipt ? "body{width:auto;min-width:0;padding:3mm;overflow:visible}.invoice{width:100%;max-width:none;margin:0}table{table-layout:fixed}th,td{overflow-wrap:anywhere;word-break:break-word}.center{white-space:normal}.map-link{overflow-wrap:anywhere;word-break:break-all}.document-footer{break-inside:auto}" : ""}
       @media print{html,body{width:auto;min-width:0;overflow:visible}body{padding:0}.back-button{display:none!important}.invoice{width:100%;max-width:none;margin:0 auto}.map-qr,.map-qr svg,.map-qr img{break-inside:avoid;page-break-inside:avoid}.logo{filter:grayscale(1) contrast(1.3);print-color-adjust:exact;-webkit-print-color-adjust:exact}a{color:#111;text-decoration:none}}
@@ -252,67 +254,86 @@ export const getInvoiceHtml = (
       <section class="columns"><div><p><strong>Cliente:</strong> ${escapeHtml(order.cliente || "Consumidor final")}</p><p><strong>Teléfono:</strong> ${escapeHtml(order.telefono || "No registrado")}</p></div>
       <div><p><strong>Entrega:</strong> ${escapeHtml(displayDeliveryMethod(order.metodoEntrega))}</p>${details}</div></section>
       <table><thead><tr><th>Producto</th><th class="center">Cantidad</th><th class="right">Precio</th><th class="right">Total</th></tr></thead><tbody>${items || '<tr><td colspan="4">Sin productos</td></tr>'}</tbody></table>
-      <section class="totals"><p><span>Subtotal</span><strong>${formatMoney(itemsSubtotal)}</strong></p>${deliveryFee > 0 ? `<p><span>Domicilio</span><strong>${formatMoney(deliveryFee)}</strong></p>` : ""}<p class="before-tip"><span>${marketplaceOrder ? "Total a pagar" : "Total sin propina"}</span><strong>${formatMoney(totalWithoutTip)}</strong></p>${tipAmount > 0 ? `<p><span>Propina${tipPercent > 0 ? ` ${formatPercent(tipPercent)}%` : ""} (Opcional)</span><strong>${formatMoney(tipAmount)}</strong></p>` : ""}<p class="grand"><span>${marketplaceOrder ? "TOTAL A PAGAR SIN PROPINA" : "TOTAL A PAGAR"}</span><span>${formatMoney(invoiceTotal)}</span></p>${paymentMethodMarkup}</section>
+      <section class="totals"><p><span>Subtotal</span><strong>${formatMoney(itemsSubtotal)}</strong></p>${deliveryFee > 0 ? `<p><span>Domicilio</span><strong>${formatMoney(deliveryFee)}</strong></p>` : ""}<p class="before-tip"><span>Total sin propina</span><strong>${formatMoney(totalWithoutTip)}</strong></p>${tipAmount > 0 ? `<p><span>Propina${tipPercent > 0 ? ` ${formatPercent(tipPercent)}%` : ""} (Opcional)</span><strong>${formatMoney(tipAmount)}</strong></p>` : ""}<p class="grand"><span>TOTAL A PAGAR</span><span>${formatMoney(invoiceTotal)}</span></p>${paymentMethodMarkup}</section>
       ${order.observaciones ? `<section class="notes"><h2>Observaciones generales</h2><p>${escapeHtml(order.observaciones)}</p></section>` : ""}
       ${mapQr}<section class="document-footer"><p class="non-fiscal">Documento no fiscal — solo para uso interno</p><p class="printed-by">Impreso por el sistema Gloto</p><div class="gloto-brand"><img class="gloto-logo" src="/logogloto.png" alt=""><span>GLOTO</span></div></section><footer class="footer">¡Gracias por tu compra!</footer>
     </main></body></html>`;
 };
 
 export const printOrderInvoice = (order, business) => {
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) {
-    alert("Permite las ventanas emergentes para imprimir la factura.");
-    return;
-  }
+  const printFrame = document.createElement("iframe");
+  printFrame.title = `Factura ${order.numeroFactura || ""}`;
+  printFrame.setAttribute("aria-hidden", "true");
+  Object.assign(printFrame.style, {
+    position: "fixed",
+    inset: "0",
+    width: "100%",
+    height: "100%",
+    opacity: "0",
+    pointerEvents: "none",
+    zIndex: "-1",
+    border: "0",
+  });
+  printFrame.srcdoc = getInvoiceHtml(order, business);
+  document.body.appendChild(printFrame);
 
   let printStarted = false;
+  const cleanup = () => printFrame.remove();
   const startPrint = async () => {
-    if (printStarted || printWindow.closed) return;
+    if (printStarted) return;
     printStarted = true;
 
-    await Promise.all(
-      Array.from(printWindow.document.images).map(
-        (image) =>
-          new Promise((resolve) => {
-            if (image.complete) {
-              if (image.naturalWidth === 0) {
-                console.warn(
-                  "No se pudo cargar una imagen de la factura:",
-                  image.src,
-                );
-              }
-              resolve();
-              return;
-            }
-            image.addEventListener("load", resolve, { once: true });
-            image.addEventListener(
-              "error",
-              () => {
-                console.warn(
-                  "No se pudo cargar una imagen de la factura:",
-                  image.src,
-                );
-                resolve();
-              },
-              { once: true },
-            );
-          }),
-      ),
-    );
+    try {
+      const printWindow = printFrame.contentWindow;
+      const printDocument = printFrame.contentDocument;
+      if (!printWindow || !printDocument) {
+        throw new Error("No se pudo preparar la factura para imprimir.");
+      }
 
-    if (printWindow.closed) return;
-    await new Promise((resolve) => window.setTimeout(resolve, 100));
-    printWindow.focus();
-    printWindow.print();
+      await Promise.all(
+        Array.from(printDocument.images).map(
+          (image) =>
+            new Promise((resolve) => {
+              if (image.complete) {
+                if (image.naturalWidth === 0) {
+                  console.warn(
+                    "No se pudo cargar una imagen de la factura:",
+                    image.src,
+                  );
+                }
+                resolve();
+                return;
+              }
+              image.addEventListener("load", resolve, { once: true });
+              image.addEventListener(
+                "error",
+                () => {
+                  console.warn(
+                    "No se pudo cargar una imagen de la factura:",
+                    image.src,
+                  );
+                  resolve();
+                },
+                { once: true },
+              );
+            }),
+        ),
+      );
+
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      printWindow.focus();
+      printWindow.addEventListener("afterprint", cleanup, { once: true });
+      printWindow.print();
+    } catch (error) {
+      cleanup();
+      console.error("Error al imprimir la factura:", error);
+      alert("No se pudo iniciar la impresión de la factura.");
+    }
   };
 
-  printWindow.addEventListener("load", startPrint, { once: true });
-  printWindow.document.write(
-    getInvoiceHtml(order, business, { showBackButton: true }),
-  );
-  printWindow.document.close();
+  printFrame.addEventListener("load", startPrint, { once: true });
   window.setTimeout(() => {
-    if (printWindow.document.readyState === "complete") startPrint();
+    if (printFrame.contentDocument?.readyState === "complete") startPrint();
   }, 500);
 };
 

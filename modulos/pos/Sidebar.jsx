@@ -20,6 +20,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
+import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 
 const Sidebar = ({
   isExpanded,
@@ -46,6 +47,7 @@ const Sidebar = ({
   const [businessLogo, setBusinessLogo] = useState(logoPng);
   const [planName, setPlanName] = useState("Sin plan");
   const [inventoryEnabled, setInventoryEnabled] = useState(false);
+  const [tablesEnabled, setTablesEnabled] = useState(true);
   const [ticketUsage, setTicketUsage] = useState(null);
   const isOrdersActive = location.pathname.startsWith("/pos/ordenes");
   const accountPlanStyles = planName.toLowerCase().includes("premium")
@@ -212,6 +214,7 @@ const Sidebar = ({
   }, [isFinanzasActive]);
 
   useEffect(() => {
+    let isMounted = true;
     const loadBusinessBrand = async () => {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData?.user?.id) return;
@@ -224,16 +227,19 @@ const Sidebar = ({
 
       if (!profile?.business_id) return;
 
-      const [{ data: business }, { data: planAccess, error: planAccessError }] =
-        await Promise.all([
-          supabase
-            .from("businesses")
-            .select("name, logo_url")
-            .eq("id", profile.business_id)
-            .maybeSingle(),
-          supabase.rpc("get_business_plan_access"),
-        ]);
+      const [
+        { data: business },
+        { data: planAccess, error: planAccessError },
+      ] = await Promise.all([
+        supabase
+          .from("businesses")
+          .select("name, logo_url")
+          .eq("id", profile.business_id)
+          .maybeSingle(),
+        supabase.rpc("get_business_plan_access"),
+      ]);
 
+      if (!isMounted) return;
       if (business?.name) setBusinessName(business.name);
       if (business?.logo_url) setBusinessLogo(business.logo_url);
       if (planAccessError) {
@@ -253,7 +259,58 @@ const Sidebar = ({
     };
 
     loadBusinessBrand();
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadDeliveryMethods = async () => {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error("No se pudo identificar el negocio:", userError);
+        return;
+      }
+      if (!userData?.user?.id) return;
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", userData.user.id)
+        .maybeSingle();
+      if (profileError) {
+        console.error("No se pudo cargar el negocio:", profileError);
+        return;
+      }
+      if (!profile?.business_id) return;
+
+      const { data: businessInfo, error } = await supabase
+        .from("business_info")
+        .select("delivery_methods")
+        .eq("business_id", profile.business_id)
+        .maybeSingle();
+      if (error) {
+        console.error(
+          "No se pudo cargar los métodos de entrega de la tienda:",
+          error,
+        );
+        return;
+      }
+      if (isMounted) {
+        setTablesEnabled(
+          getEnabledDeliveryMethods(businessInfo?.delivery_methods).includes(
+            "table",
+          ),
+        );
+      }
+    };
+
+    loadDeliveryMethods();
+    return () => {
+      isMounted = false;
+    };
+  }, [location.pathname]);
 
   useEffect(() => {
     let isMounted = true;
@@ -505,6 +562,10 @@ const Sidebar = ({
         >
           {menuItems
             .filter((item) => item.name !== "Inventario" || inventoryEnabled)
+            .filter(
+              (item) =>
+                !["Mesas", "Reservas"].includes(item.name) || tablesEnabled,
+            )
             .map((item) => {
             if (item.name === "Caja") {
               return (
@@ -610,7 +671,7 @@ const Sidebar = ({
                       isExpanded ? "gap-3 px-3" : "justify-center gap-0 px-0"
                     } ${
                       isOrdersActive
-                        ? "text-primary"
+                        ? "text-primary-container"
                         : "text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
                     }`}
                   >
@@ -630,7 +691,7 @@ const Sidebar = ({
                       />
                     </div>
                     <span
-                      className={`truncate text-left text-xs font-bold uppercase tracking-tight transition-all ${
+                      className={`font-label-caps truncate text-left text-xs font-bold uppercase tracking-tight transition-all ${
                         isExpanded
                           ? "flex-1 opacity-100"
                           : "pointer-events-none w-0 -translate-x-4 opacity-0"

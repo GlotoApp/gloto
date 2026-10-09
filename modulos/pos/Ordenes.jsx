@@ -60,10 +60,10 @@ const METODOS_ENTREGA = [
 ];
 
 const METODO_ENTREGA_ESTILOS = {
-  mesa: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-  recoger: "bg-amber-500/10 text-amber-400 border-amber-500/25",
-  domicilio: "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/25",
-  punto: "bg-blue-500/10 text-blue-400 border-blue-500/30",
+  mesa: "bg-emerald-500/10 text-emerald-400",
+  recoger: "bg-amber-500/10 text-amber-400",
+  domicilio: "bg-fuchsia-500/10 text-fuchsia-400",
+  punto: "bg-blue-500/10 text-blue-400",
 };
 
 const PERIODOS_FECHA = [
@@ -101,18 +101,18 @@ const TerminalSelect = ({
   onClear,
   icon: Icon,
 }) => (
-  <div className="flex flex-col gap-1.5 flex-1 min-w-[200px]">
-    <label className="text-[8px] font-black text-neutral-600 uppercase tracking-widest ml-1">
+  <div className="flex min-w-[200px] flex-1 flex-col gap-1.5">
+    <label className="ml-1 text-[9px] font-black uppercase tracking-widest text-neutral-400">
       {label}
     </label>
     <div className="relative group">
-      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-500/50 group-hover:text-violet-500 transition-colors">
+      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-400/70 transition-colors group-hover:text-violet-300">
         <Icon size={12} />
       </div>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-neutral-900 border border-white/5 rounded-xl py-2.5 pl-9 pr-10 text-[10px] font-mono text-neutral-300 appearance-none focus:border-violet-500/40 outline-none transition-all cursor-pointer uppercase"
+        className="min-h-10 w-full cursor-pointer appearance-none rounded-xl bg-neutral-900 py-2.5 pl-9 pr-10 text-[11px] font-mono uppercase text-neutral-200 outline-none transition-shadow focus:ring-2 focus:ring-violet-500/40"
       >
         <option value="">TODOS_LOS_REGISTROS</option>
         {options.map((opt) => (
@@ -124,8 +124,10 @@ const TerminalSelect = ({
       <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
         {value && (
           <button
+            type="button"
             onClick={onClear}
-            className="text-neutral-600 hover:text-red-400 transition-colors"
+            aria-label={`Limpiar filtro ${label}`}
+            className="rounded p-1 text-neutral-400 transition-colors hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
           >
             <X size={12} />
           </button>
@@ -186,8 +188,9 @@ const getDateRange = (period) => {
 // --- COMPONENTE DE BOTÓN REUTILIZABLE ---
 const ActionButton = ({ icon: Icon, label, color, onClick }) => (
   <button
+    type="button"
     onClick={onClick}
-    className={`flex-1 lg:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-all text-[9px] font-black uppercase ${color}`}
+    className={`flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-[10px] font-black uppercase transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 lg:flex-none ${color}`}
   >
     <Icon size={14} /> {label}
   </button>
@@ -283,15 +286,15 @@ const OrderCard = memo(
     return (
       <motion.div
         layout
-        className={`border rounded-2xl transition-all duration-300 ${
+        className={`rounded-2xl transition-all duration-300 ${
           isOpen
-            ? "bg-neutral-900/80 border-violet-500/30 shadow-[0_0_30px_rgba(139,92,246,0.05)]"
-            : "bg-neutral-900/40 border-white/5 hover:border-white/10"
+            ? "bg-neutral-900/80 shadow-[0_0_30px_rgba(139,92,246,0.05)]"
+            : "bg-neutral-900/40 hover:bg-neutral-900/70"
         }`}
       >
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="w-full p-4 text-left hover:bg-white/5 rounded-2xl transition-colors"
+          className="w-full rounded-2xl p-4 text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
         >
           {/* 📱 MOBILE */}
           <div className="flex flex-col gap-1 lg:hidden">
@@ -310,14 +313,14 @@ const OrderCard = memo(
             </div>
             <div className="flex justify-between items-center text-xs text-neutral-400 ">
               <span
-                className={`inline-flex max-w-full items-center rounded-full border px-2 py-1 text-[10px] font-black uppercase ${getDeliveryBadgeClass(orden.metodoEntrega)}`}
+                className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${getDeliveryBadgeClass(orden.metodoEntrega)}`}
               >
                 {displayOrderType(orden.metodoEntrega)}
               </span>
               <div className="flex items-center gap-2">
                 <motion.div
                   animate={{ rotate: isOpen ? 180 : 0 }}
-                  className="p-1.5 bg-white/5 rounded-full"
+                  className="rounded-full bg-white/5 p-1.5"
                 >
                   <ChevronDown size={14} />
                 </motion.div>
@@ -338,7 +341,7 @@ const OrderCard = memo(
             <div className="col-span-2">
               <p className="text-xs text-neutral-500">Entrega</p>
               <p
-                className={`inline-flex max-w-full truncate rounded-full border px-2 py-1 text-xs font-bold ${getDeliveryBadgeClass(orden.metodoEntrega)}`}
+                className={`inline-flex max-w-full truncate rounded-full px-2.5 py-1 text-xs font-bold ${getDeliveryBadgeClass(orden.metodoEntrega)}`}
               >
                 {displayOrderType(orden.metodoEntrega)}
               </p>
@@ -371,7 +374,7 @@ const OrderCard = memo(
               </span>
               <motion.div
                 animate={{ rotate: isOpen ? 180 : 0 }}
-                className="p-2 bg-white/5 rounded-full"
+                className="rounded-full bg-white/5 p-2"
               >
                 <ChevronDown size={16} />
               </motion.div>
@@ -386,10 +389,10 @@ const OrderCard = memo(
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden border-t border-white/5 bg-black/20"
+              className="overflow-hidden bg-black/20"
             >
               <div className="p-4 sm:p-6 space-y-5">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                   <DetailBox label="Factura" value={orden.numeroFactura} />
                   <DetailBox label="Hora" value={orden.horaIngreso} />
                   <DetailBox label="Pago" value={orden.metodoPago} />
@@ -409,7 +412,7 @@ const OrderCard = memo(
                   />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <DetailBox label="Cliente" value={orden.cliente} />
                   <DetailBox label="Teléfono" value={orden.telefono} />
                   {orden.deliveryDetails && orden.deliveryDetails.length > 0 ? (
@@ -458,7 +461,7 @@ const OrderCard = memo(
                     <ActionButton
                       icon={Globe}
                       label="Ver en mapa"
-                      color="border-sky-500/20 bg-sky-500/5 text-sky-400 hover:bg-sky-500 hover:text-white"
+                      color="bg-sky-500/10 text-sky-300 hover:bg-sky-500 hover:text-white"
                       onClick={() => onOpenMap(orden)}
                     />
                   </div>
@@ -466,7 +469,7 @@ const OrderCard = memo(
 
                 {orden.items?.length > 0 && (
                   <div className="">
-                    <p className="text-[8px] font-black text-primary uppercase tracking-[0.2em] mb-3">
+                    <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-violet-300">
                       Productos
                     </p>
                     <div className="space-y-3">
@@ -475,7 +478,7 @@ const OrderCard = memo(
                           key={
                             item.id || `${item.product_name}-${item.quantity}`
                           }
-                          className="border border-white/5 rounded-lg p-3 bg-white/3"
+                          className="rounded-xl bg-neutral-900/70 p-3"
                         >
                           <div className="flex justify-between gap-3 mb-1">
                             <div className="flex items-center gap-2 min-w-0">
@@ -495,7 +498,7 @@ const OrderCard = memo(
                               )}
                             </p>
                           </div>
-                          <div className="flex flex-wrap items-center gap-2 text-[10px] text-neutral-400">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
                             <span>
                               {getSpecificUnitName(item.unit_name)
                                 ? `Precio / ${getSpecificUnitName(item.unit_name)}`
@@ -504,13 +507,13 @@ const OrderCard = memo(
                             </span>
                           </div>
                           {item.options?.length > 0 && (
-                            <div className=" text-[10px] text-neutral-400">
+                            <div className="text-xs text-neutral-400">
                               Opciones:{" "}
                               {item.options.map(getOptionLabel).join(", ")}
                             </div>
                           )}
                           {item.notes && (
-                            <div className="text-[10px] text-neutral-400">
+                            <div className="text-xs text-neutral-400">
                               Observaciones: {item.notes}
                             </div>
                           )}
@@ -522,7 +525,7 @@ const OrderCard = memo(
 
                 {orden.observaciones && (
                   <div className="rounded-xl  bg-neutral-950/40 p-3">
-                    <p className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.2em] mb-2">
+                    <p className="mb-2 text-[9px] font-black uppercase tracking-widest text-neutral-400">
                       Observaciones
                     </p>
                     <p className="text-sm text-neutral-300">
@@ -536,14 +539,14 @@ const OrderCard = memo(
                     <ActionButton
                       icon={Trash2}
                       label="Eliminar"
-                      color="border-red-500/20 bg-red-500/5 text-red-500 hover:bg-red-500 hover:text-white"
+                      color="bg-red-500/10 text-red-300 hover:bg-red-500 hover:text-white"
                       onClick={() => onDelete(orden)}
                     />
                   )}
                   <ActionButton
                     icon={FileText}
                     label="Factura"
-                    color="border-white/10 bg-white/5 text-neutral-400 hover:bg-white/10"
+                    color="bg-white/5 text-neutral-300 hover:bg-white/10"
                     onClick={() => onInvoice(orden)}
                   />
 
@@ -552,43 +555,43 @@ const OrderCard = memo(
                       <ActionButton
                         icon={Eye}
                         label="Ver seguimiento"
-                        color="border-violet-500/20 bg-violet-500/5 text-violet-300 hover:bg-violet-500 hover:text-white"
+                        color="bg-violet-500/10 text-violet-300 hover:bg-violet-500 hover:text-white"
                         onClick={() => onOpenTracking(orden)}
                       />
                       <ActionButton
                         icon={Share2}
                         label="Compartir rastreo"
-                        color="border-cyan-500/20 bg-cyan-500/5 text-cyan-300 hover:bg-cyan-500 hover:text-white"
+                        color="bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-white"
                         onClick={() => onShareTracking(orden)}
                       />
                     </>
                   ) : (
-                    <span className="flex items-center rounded-lg border border-white/5 px-3 py-2 text-[9px] font-bold uppercase text-neutral-600">
+                    <span className="flex min-h-10 items-center rounded-lg bg-white/5 px-3 py-2 text-[10px] font-bold uppercase text-neutral-400">
                       Sin enlace de rastreo
                     </span>
                   )}
                   <ActionButton
                     icon={Clipboard}
                     label="Compartir factura PDF"
-                    color="border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:bg-emerald-500 hover:text-white"
+                    color="bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500 hover:text-white"
                     onClick={() => onShare(orden)}
                   />
                   <ActionButton
                     icon={Save}
                     label="Guardar PDF"
-                    color="border-amber-500/20 bg-amber-500/5 text-amber-400 hover:bg-amber-500 hover:text-white"
+                    color="bg-amber-500/10 text-amber-300 hover:bg-amber-500 hover:text-white"
                     onClick={() => onSavePdf(orden)}
                   />
                   <ActionButton
                     icon={Printer}
                     label="Imprimir"
-                    color="border-violet-500/20 bg-violet-600/10 text-violet-400 hover:bg-violet-600 hover:text-white"
+                    color="bg-violet-600/15 text-violet-300 hover:bg-violet-600 hover:text-white"
                     onClick={() => onPrint(orden)}
                   />
                   <ActionButton
                     icon={Edit3}
                     label="Editar"
-                    color="border-sky-500/20 bg-sky-500/5 text-sky-400 hover:bg-sky-500 hover:text-white"
+                    color="bg-sky-500/10 text-sky-300 hover:bg-sky-500 hover:text-white"
                     onClick={() => onEdit(orden)}
                   />
                 </div>
@@ -603,10 +606,10 @@ const OrderCard = memo(
 
 const DetailBox = ({ label, value, color = "text-neutral-300" }) => (
   <div className="space-y-1">
-    <p className="text-[7px] text-neutral-600 font-black uppercase tracking-[0.2em]">
+    <p className="text-[9px] font-black uppercase tracking-widest text-neutral-400">
       {label}
     </p>
-    <p className={`text-[10px] font-bold uppercase ${color}`}>{value}</p>
+    <p className={`break-words text-sm font-semibold ${color}`}>{value}</p>
   </div>
 );
 
@@ -852,7 +855,7 @@ const displayOrderType = (orderType) => {
 
 const getDeliveryBadgeClass = (orderType) =>
   METODO_ENTREGA_ESTILOS[normalizeOrderType(orderType)] ||
-  "bg-neutral-500/10 text-neutral-400 border-neutral-500/20";
+  "bg-neutral-500/10 text-neutral-300";
 
 const getDeliveryDetails = (order = {}) => {
   const method = normalizeOrderType(order.order_type);
@@ -1711,14 +1714,16 @@ const Ordenes = () => {
 
   return (
     <div className="min-h-screen bg-background text-white p-4 font-sans">
-      <header className="max-w-7xl mx-auto mb-10 space-y-10">
+      <header className="mx-auto mb-6 max-w-7xl space-y-5">
         {/* Título y Buscador Dinámico */}
-        <div className="flex flex-col gap-3 justify-between mb-3">
+        <div className="mb-3 flex flex-col justify-between gap-4">
           <div className="flex items-center justify-between gap-3">
-            <h1 className="text-2xl font-black tracking-tighter">Órdenes</h1>
+            <h1 className="font-sans text-2xl font-black tracking-tighter text-white">
+              Órdenes
+            </h1>
             <div className="flex items-center gap-2">
               {lastUpdated && (
-                <span className="text-[10px] text-neutral-500">
+                <span className="text-xs text-neutral-400">
                   Actualizado {lastUpdated.toLocaleTimeString("es-CO")}
                 </span>
               )}
@@ -1730,7 +1735,7 @@ const Ordenes = () => {
                   refreshing ? "Actualizando órdenes" : "Actualizar órdenes"
                 }
                 aria-label="Actualizar órdenes"
-                className="inline-flex items-center justify-center rounded-xl p-2 text-violet-300 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl text-violet-300 transition-colors hover:bg-violet-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCcw
                   size={14}
@@ -1741,8 +1746,8 @@ const Ordenes = () => {
           </div>
           <div className="relative w-full">
             <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-600"
-              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-400/70"
+              size={16}
             />
             <input
               type="text"
@@ -1751,7 +1756,8 @@ const Ordenes = () => {
               onChange={(e) => {
                 setSearchTerm(e.target.value);
               }}
-              className="w-full bg-neutral-900/50 border border-white/5 rounded-xl py-3 pl-10 pr-10 text-[10px] font-mono outline-none focus:border-violet-500/40 transition-all uppercase placeholder:text-neutral-700"
+              aria-label="Buscar por nombre o número de pedido"
+              className="min-h-12 w-full rounded-xl bg-neutral-900 py-3 pl-10 pr-10 text-sm text-neutral-100 outline-none transition-shadow placeholder:text-neutral-500 focus:ring-2 focus:ring-violet-500/40"
             />
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center">
               <AnimatePresence mode="wait">
@@ -1765,7 +1771,9 @@ const Ordenes = () => {
                     onClick={() => {
                       setSearchTerm("");
                     }}
-                    className="text-neutral-500 hover:text-red-400 transition-colors p-1"
+                    type="button"
+                    aria-label="Borrar búsqueda"
+                    className="rounded p-1 text-neutral-400 transition-colors hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
                     title="Borrar búsqueda"
                   >
                     <X size={14} />
@@ -1788,7 +1796,9 @@ const Ordenes = () => {
                         );
                       }
                     }}
-                    className="text-neutral-600 hover:text-violet-400 transition-colors p-1"
+                    type="button"
+                    aria-label="Pegar búsqueda desde el portapapeles"
+                    className="rounded p-1 text-neutral-400 transition-colors hover:text-violet-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                     title="Pegar desde el portapapeles"
                   >
                     <Clipboard size={14} />
@@ -1800,7 +1810,7 @@ const Ordenes = () => {
         </div>
 
         {/* Filtros */}
-        <div className="flex flex-wrap gap-4 bg-neutral-900/30 p-4 rounded-2xl border border-white/5">
+        <div className="flex flex-wrap gap-3 rounded-2xl bg-neutral-900/30 p-4">
           <TerminalSelect
             label="Ordenar Por"
             value={sortBy}
@@ -1841,10 +1851,10 @@ const Ordenes = () => {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="flex flex-col w-100 gap-2"
+              className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2"
             >
               <div className="flex flex-col gap-1.5">
-                <label className="text-[8px] font-black text-neutral-600 uppercase tracking-widest ml-1">
+                <label className="ml-1 text-[9px] font-black uppercase tracking-widest text-neutral-400">
                   Desde
                 </label>
                 <input
@@ -1856,11 +1866,11 @@ const Ordenes = () => {
                       start: e.target.value,
                     })
                   }
-                  className="bg-neutral-900 border border-white/5 rounded-xl p-2.5 text-[10px] font-mono text-neutral-300 outline-none focus:border-violet-500/40"
+                  className="min-h-10 rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-neutral-200 outline-none focus:ring-2 focus:ring-violet-500/40"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-[8px] font-black text-neutral-600 uppercase tracking-widest ml-1">
+                <label className="ml-1 text-[9px] font-black uppercase tracking-widest text-neutral-400">
                   Hasta
                 </label>
                 <input
@@ -1872,7 +1882,7 @@ const Ordenes = () => {
                       end: e.target.value,
                     })
                   }
-                  className="bg-neutral-900 border border-white/5 rounded-xl p-2.5 text-[10px] font-mono text-neutral-300 outline-none focus:border-violet-500/40"
+                  className="min-h-10 rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-neutral-200 outline-none focus:ring-2 focus:ring-violet-500/40"
                 />
               </div>
             </motion.div>
@@ -1881,7 +1891,7 @@ const Ordenes = () => {
       </header>
 
       {/* Listado de Órdenes organizado por año y mes */}
-      <main className="max-w-7xl mx-auto space-y-4 pb-20">
+      <main className="mx-auto max-w-7xl space-y-4 pb-20">
         {loadingOrders ? (
           <SubLoading
             label="Cargando órdenes"
@@ -1889,8 +1899,8 @@ const Ordenes = () => {
             dotClassName="bg-violet-400"
           />
         ) : ordersError ? (
-          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-6 py-12 text-center">
-            <p className="text-sm font-black uppercase tracking-widest text-amber-300">
+          <div className="rounded-2xl bg-amber-500/5 px-6 py-10 text-center">
+            <p className="text-sm font-bold text-amber-200">
               No se pudieron cargar las órdenes
             </p>
             <p className="mx-auto mt-2 max-w-xl text-xs text-neutral-400">
@@ -1900,14 +1910,14 @@ const Ordenes = () => {
               type="button"
               onClick={loadBusinessOrders}
               disabled={refreshing}
-              className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-amber-200 hover:bg-amber-500/20 disabled:cursor-wait disabled:opacity-50"
+              className="mt-5 rounded-xl bg-amber-500/10 px-4 py-2.5 text-xs font-bold text-amber-200 transition-colors hover:bg-amber-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60 disabled:cursor-wait disabled:opacity-50"
             >
               {refreshing ? "Reintentando..." : "Reintentar"}
             </button>
           </div>
         ) : filteredOrdenes.length === 0 ? (
-          <div className="text-center py-20">
-            <p className="text-neutral-500 text-lg font-bold">
+          <div className="rounded-2xl bg-neutral-900/30 px-5 py-14 text-center">
+            <p className="text-base font-semibold text-neutral-300">
               {searchTerm || deliveryFilter
                 ? "No hay órdenes que coincidan"
                 : "Sin órdenes"}
@@ -1933,13 +1943,13 @@ const Ordenes = () => {
                           <button
                             type="button"
                             onClick={() => toggleMonthAccordion(monthKey)}
-                            className="flex w-full items-center justify-between rounded-xl border border-white/5 bg-neutral-900/40 px-4 py-3 text-left transition-all hover:bg-neutral-900/80"
+                            className="flex w-full items-center justify-between rounded-xl bg-neutral-900/40 px-4 py-3 text-left transition-colors hover:bg-neutral-900/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                           >
                             <span className="flex items-center gap-3">
-                              <span className="rounded-md border border-violet-500/20 bg-violet-500/10 px-2.5 py-1 text-[9px] font-black tracking-widest text-violet-400">
+                              <span className="rounded-md bg-violet-500/10 px-2.5 py-1 text-[10px] font-black tracking-widest text-violet-300">
                                 {formatMonthSpan(monthKey)}
                               </span>
-                              <span className="text-[9px] font-mono text-neutral-500">
+                              <span className="text-[10px] font-mono text-neutral-400">
                                 {monthOrders.length}{" "}
                                 {monthOrders.length === 1
                                   ? "REGISTRO"
@@ -1992,13 +2002,13 @@ const Ordenes = () => {
                 );
               })}
 
-            <div className="flex min-h-16 items-center justify-center border-t border-white/5 pt-4">
+            <div className="flex min-h-16 items-center justify-center pt-4">
               {hasMoreOrders ? (
                 <button
                   type="button"
                   onClick={loadMoreOrders}
                   disabled={loadingMoreOrders || refreshing}
-                  className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-neutral-300 transition-colors hover:border-violet-500/40 hover:bg-violet-500/10 hover:text-white disabled:cursor-wait disabled:opacity-50"
+                  className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white/5 px-4 py-2.5 text-xs font-bold text-neutral-200 transition-colors hover:bg-violet-500/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:cursor-wait disabled:opacity-50"
                 >
                   {loadingMoreOrders ? (
                     <LoaderCircle size={14} className="animate-spin" />
@@ -2010,7 +2020,7 @@ const Ordenes = () => {
                     : "Cargar más órdenes"}
                 </button>
               ) : (
-                <span className="text-[9px] font-mono uppercase tracking-widest text-neutral-700">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
                   No hay más órdenes
                 </span>
               )}

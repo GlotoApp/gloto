@@ -61,11 +61,11 @@ const parseTimeInput = (value) => {
 
 const TurnoRow = ({ turno, index, day, onUpdate, onRemove }) => {
   return (
-    <div className="bg-neutral-900/30 p-4 md:p-6 rounded-2xl border border-neutral-700/50 hover:border-violet-500/50 transition-all group">
-      <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+    <div className="rounded-xl bg-neutral-950/40 p-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
         {/* 1. INPUT: HORA APERTURA */}
         <div className="flex flex-col gap-2 flex-1">
-          <label className="text-[7px] md:text-[8px] font-black uppercase text-neutral-500 ml-1 tracking-wider">
+          <label className="ml-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
             Apertura
           </label>
           <div className="relative flex items-center">
@@ -78,18 +78,18 @@ const TurnoRow = ({ turno, index, day, onUpdate, onRemove }) => {
               type="time"
               value={turno.open || ""}
               onChange={(e) => onUpdate(day, index, "open", e.target.value)}
-              className="w-full h-11 md:h-10 bg-neutral-900 border border-white/5 rounded-lg pl-10 pr-3 text-sm md:text-xs font-bold text-white focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/20 transition-all appearance-none leading-none flex items-center [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+              className="h-12 w-full rounded-xl bg-neutral-900 pl-10 pr-3 text-base font-semibold text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/60 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
             />
           </div>
         </div>
 
-        <div className="hidden lg:flex text-neutral-600 font-black text-lg pb-2">
+        <div className="hidden pb-2 text-lg font-medium text-neutral-500 lg:flex">
           →
         </div>
 
         {/* 2. INPUT: HORA CIERRE */}
         <div className="flex flex-col gap-2 flex-1">
-          <label className="text-[7px] md:text-[8px] font-black uppercase text-neutral-500 ml-1 tracking-wider">
+          <label className="ml-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
             Cierre
           </label>
           <div className="relative flex items-center">
@@ -102,25 +102,24 @@ const TurnoRow = ({ turno, index, day, onUpdate, onRemove }) => {
               type="time"
               value={turno.close || ""}
               onChange={(e) => onUpdate(day, index, "close", e.target.value)}
-              className="w-full h-11 md:h-10 bg-neutral-900 border border-white/5 rounded-lg pl-10 pr-3 text-sm md:text-xs font-bold text-white focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/20 transition-all appearance-none leading-none flex items-center [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+              className="h-12 w-full rounded-xl bg-neutral-900 pl-10 pr-3 text-base font-semibold text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/60 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
             />
           </div>
         </div>
 
         {/* 3. SELECTOR DE CICLO OPERATIVO */}
-        <div className="flex flex-col gap-2 w-full lg:w-auto">
-          <label className="text-[7px] md:text-[8px] font-black uppercase text-neutral-500 tracking-widest ml-1 flex items-center gap-2">
-            <div className="w-1 h-1 bg-violet-500 rounded-full animate-pulse" />
+        <div className="flex w-full flex-col gap-2 lg:w-auto">
+          <label className="ml-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
             Dia cierre
           </label>
 
-          <div className="relative flex bg-black border border-white/10 p-1 rounded-3xl overflow-hidden group/selector h-11 md:h-10 items-center">
+          <div className="relative flex h-12 items-center overflow-hidden rounded-xl bg-black/50 p-1">
             <button
               onClick={() => onUpdate(day, index, "closeDay", "same")}
-              className={`relative z-10 flex-1 px-3 md:px-4 h-full rounded-lg text-[7px] md:text-[9px] font-black uppercase tracking-tighter transition-all duration-300 ${
+              className={`relative z-10 h-full flex-1 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/70 ${
                 turno.closeDay === "same"
-                  ? "bg-neutral-100 text-black shadow-[0_0_20px_rgba(255,255,255,0.1)]"
-                  : "text-neutral-500 hover:text-neutral-300"
+                  ? "bg-neutral-800 text-white"
+                  : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
               }`}
             >
               Mismo
@@ -128,10 +127,10 @@ const TurnoRow = ({ turno, index, day, onUpdate, onRemove }) => {
 
             <button
               onClick={() => onUpdate(day, index, "closeDay", "next")}
-              className={`relative z-10 flex-1 px-3 md:px-4 h-full rounded-lg text-[7px] md:text-[9px] font-black uppercase tracking-tighter transition-all duration-300 flex items-center justify-center gap-1 md:gap-2 ${
+              className={`relative z-10 flex h-full flex-1 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/70 ${
                 turno.closeDay === "next"
-                  ? "bg-violet-600 text-white shadow-[0_0_25px_rgba(139,92,246,0.3)]"
-                  : "text-neutral-500 hover:text-neutral-300"
+                  ? "bg-violet-600 text-white"
+                  : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
               }`}
             >
               Siguiente
@@ -141,14 +140,10 @@ const TurnoRow = ({ turno, index, day, onUpdate, onRemove }) => {
 
         <button
           onClick={() => onRemove(day, index)}
-          className="relative flex items-center justify-center h-11 w-full lg:w-11 lg:h-11 text-neutral-600 hover:text-red-500  rounded-xl transition-all duration-300 group/delete shadow-inner"
+          className="flex min-h-11 w-full items-center justify-center rounded-xl text-neutral-400 transition-colors hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 lg:h-12 lg:w-12"
         >
-          <div className="absolute inset-0  opacity-0 group-hover/delete:opacity-100 rounded-xl transition-opacity" />
-          <Trash2
-            size={16}
-            className="relative z-10 transition-transform group-active/delete:scale-90"
-          />
-          <span className="lg:hidden ml-2 text-[8px] font-black uppercase tracking-widest relative z-10">
+          <Trash2 size={16} />
+          <span className="ml-2 text-xs font-semibold lg:hidden">
             Eliminar Turno
           </span>
         </button>
@@ -412,9 +407,9 @@ export default function Horarios() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-neutral-200 p-4 md:p-4 lg:p-4 font-sans">
-      <div className="max-w-7xl mx-auto">
-        <header className="flex flex-row items-center justify-between mb-8 md:mb-12 gap-4">
+    <div className="min-h-screen bg-background p-4 font-sans text-neutral-200 md:p-6">
+      <div className="mx-auto max-w-7xl">
+        <header className="mb-6 flex flex-row items-center justify-between gap-4 md:mb-8">
           {/* BLOQUE DE TITULACIÓN */}
           <div className="flex flex-col">
             <h1 className="text-2xl font-black tracking-tighter text-white">
@@ -427,10 +422,10 @@ export default function Horarios() {
             type="button"
             onClick={saveSchedule}
             disabled={!hasChanges || isLoading || isSaving || !businessId}
-            className={`px-5 md:px-8 py-2.5 md:py-3 rounded-xl font-black uppercase text-[9px] md:text-xs shadow-lg transition-all whitespace-nowrap ${
+            className={`min-h-11 rounded-xl px-5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 ${
               hasChanges && !isLoading && !isSaving && businessId
-                ? "bg-violet-500 hover:bg-violet-600 text-white shadow-violet-500/30 active:scale-95 cursor-pointer"
-                : "bg-neutral-700 text-neutral-500 shadow-neutral-700/30 cursor-not-allowed opacity-50"
+                ? "bg-violet-600 text-white hover:bg-violet-500"
+                : "cursor-not-allowed bg-neutral-800 text-neutral-500 opacity-70"
             }`}
           >
             {isSaving ? "Guardando..." : "Guardar"}
@@ -511,23 +506,23 @@ export default function Horarios() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-1 gap-4 md:gap-6">
+          <div className="grid grid-cols-1 gap-4">
             {DAYS.map((day) => (
               <div
                 key={day}
-                className="p-4 md:p-6 lg:p-8 bg-neutral-900/40 border border-white/5 rounded-xl md:rounded-2xl"
+                className="rounded-2xl bg-neutral-900/40 p-4 md:p-5"
               >
-                <div className="flex items-center justify-between mb-4 md:mb-1 gap-3">
-                  <span className="text-[8px] md:text-xs font-black uppercase tracking-widest text-fff  px-3 md:px-4 py-1.5 md:py-2 rounded-lg">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <span className="rounded-lg bg-white/[0.04] px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">
                     {day}
                   </span>
 
                   {/* CONTENEDOR DEL SWITCH */}
-                  <div className="flex items-center gap-3  px-3 py-1.5  select-none">
+                  <div className="flex select-none items-center gap-3 px-2">
                     {/* Label de Estado Técnico */}
                     <span
-                      className={`text-[8px] md:text-[9px] font-black uppercase tracking-wider transition-colors duration-200 ${
-                        schedule[day].isOpen ? "text-green-400" : "text-red-400"
+                      className={`text-xs font-semibold transition-colors ${
+                        schedule[day].isOpen ? "text-emerald-300" : "text-neutral-400"
                       }`}
                     >
                       {schedule[day].isOpen ? "Abierto" : "Cerrado"}
@@ -542,15 +537,15 @@ export default function Horarios() {
                           [day]: { ...p[day], isOpen: !p[day].isOpen },
                         }))
                       }
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-all duration-300 cursor-pointer outline-none ${
-                        schedule[day].isOpen ? "bg-green-500 " : "bg-red-800 "
+                      className={`relative inline-flex h-7 w-12 cursor-pointer items-center rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900 ${
+                        schedule[day].isOpen ? "bg-emerald-600" : "bg-neutral-700"
                       }`}
                     >
                       {/* Esfera / Diodo deslizante interno */}
                       <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-300 shadow-md ${
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform duration-300 ${
                           schedule[day].isOpen
-                            ? "translate-x-6"
+                            ? "translate-x-5"
                             : "translate-x-1 bg-neutral-400"
                         }`}
                       />
@@ -559,7 +554,7 @@ export default function Horarios() {
                 </div>
 
                 {schedule[day].isOpen && (
-                  <div className="space-y-3 md:space-y-4">
+                  <div className="space-y-3">
                     {schedule[day].turnos.map((turno, idx) => (
                       <TurnoRow
                         key={idx}
@@ -572,7 +567,7 @@ export default function Horarios() {
                     ))}
                     <button
                       onClick={() => addTurno(day)}
-                      className="w-full py-2.5 md:py-3 border-2 border-dashed border-white/5 rounded-lg md:rounded-xl text-[8px] md:text-[10px] font-black uppercase text-neutral-500 hover:border-violet-500/50 hover:text-violet-400 hover:bg-violet-500/5 transition-all"
+                      className="flex min-h-11 w-full items-center justify-center rounded-xl bg-white/[0.03] text-sm font-semibold text-neutral-400 transition-colors hover:bg-violet-500/10 hover:text-violet-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                     >
                       <Plus size={14} className="inline mr-1 md:mr-2" />
                       Añadir Turno

@@ -1,4 +1,11 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  animate,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useTransform,
+} from "framer-motion";
 import {
   Clock,
   DollarSign,
@@ -19,9 +26,30 @@ const formatMoney = (value) =>
     maximumFractionDigits: 0,
   })}`;
 
+const AnimatedNumber = ({ value, format }) => {
+  const prefersReducedMotion = useReducedMotion();
+  const count = useMotionValue(prefersReducedMotion ? value : 0);
+  const formattedCount = useTransform(count, format);
+
+  useEffect(() => {
+    if (prefersReducedMotion) {
+      count.set(value);
+      return undefined;
+    }
+    const controls = animate(count, value, {
+      duration: 1.1,
+      ease: "easeOut",
+    });
+    return controls.stop;
+  }, [count, prefersReducedMotion, value]);
+
+  return <motion.span>{formattedCount}</motion.span>;
+};
+
 const colors = ["#8b5cf6", "#10b981", "#f97316", "#3b82f6", "#eab308"];
 
 const Estadisticas = () => {
+  const prefersReducedMotion = useReducedMotion();
   const [activePeriod, setActivePeriod] = useState("30 Días");
   const [showCustomPicker, setShowCustomPicker] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -114,7 +142,8 @@ const Estadisticas = () => {
   const mainStats = [
     {
       label: "Total Vendido",
-      value: formatMoney(summary.total_sold),
+      value: Number(summary.total_sold || 0),
+      formatValue: formatMoney,
       sub: "Ventas del período",
       icon: DollarSign,
       progress: 100,
@@ -122,7 +151,8 @@ const Estadisticas = () => {
     },
     {
       label: "Pedidos Totales",
-      value: Number(summary.total_orders || 0).toLocaleString("es-CO"),
+      value: Number(summary.total_orders || 0),
+      formatValue: (value) => Math.round(value).toLocaleString("es-CO"),
       sub: "Pedidos no cancelados",
       icon: ShoppingBag,
       progress: 100,
@@ -130,7 +160,8 @@ const Estadisticas = () => {
     },
     {
       label: "Ticket Promedio",
-      value: formatMoney(summary.average_ticket),
+      value: Number(summary.average_ticket || 0),
+      formatValue: formatMoney,
       sub: "Promedio por pedido",
       icon: Layers,
       progress: 100,
@@ -138,7 +169,8 @@ const Estadisticas = () => {
     },
     {
       label: "Venta Domicilios",
-      value: formatMoney(summary.delivery_sales),
+      value: Number(summary.delivery_sales || 0),
+      formatValue: formatMoney,
       sub: "Ventas a domicilio",
       icon: Truck,
       progress: summary.total_sold
@@ -149,13 +181,36 @@ const Estadisticas = () => {
     },
   ];
 
-  const weeklyTrendsData = dailyRows.map((row) => ({
-    day: new Date(`${row.day}T12:00:00`).toLocaleDateString("es-CO", {
-      weekday: "short",
-    }),
-    percentage: (Number(row.total) / maxDaily) * 100,
-    vol: formatMoney(row.total),
-  }));
+  const salesFlowData = dailyRows.map((row, index) => {
+    const total = Number(row.total || 0);
+    const date = new Date(`${row.day}T12:00:00`);
+    const position = dailyRows.length > 1 ? index / (dailyRows.length - 1) : 0.5;
+    return {
+      x: 82 + position * 902,
+      position,
+      y: 148 - (total / maxDaily) * 118,
+      total,
+      date: date.toLocaleDateString("es-CO", {
+        day: "numeric",
+        month: "short",
+      }),
+      fullDate: date.toLocaleDateString("es-CO", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      }),
+    };
+  });
+  const salesFlowPath = salesFlowData
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+  const salesFlowArea = salesFlowData.length
+    ? `${salesFlowPath} L ${salesFlowData[salesFlowData.length - 1].x} 150 L ${salesFlowData[0].x} 150 Z`
+    : "";
+  const salesFlowLabelInterval = Math.max(
+    1,
+    Math.ceil(salesFlowData.length / 6),
+  );
 
   const hourly24hData = Array.from({ length: 24 }, (_, hour) => {
     const row = hourRows.find((item) => Number(item.hour) === hour);
@@ -367,8 +422,19 @@ ${
             {/* METRICAS PRINCIPALES */}
             <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {mainStats.map((kpi, idx) => (
-                <div
-                  key={idx}
+                <motion.div
+                  key={kpi.label}
+                  initial={
+                    prefersReducedMotion
+                      ? { opacity: 0 }
+                      : { opacity: 0, y: 28, scale: 0.94 }
+                  }
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{
+                    duration: prefersReducedMotion ? 0.35 : 0.7,
+                    delay: prefersReducedMotion ? 0 : idx * 0.14,
+                    ease: "easeOut",
+                  }}
                   className="bg-neutral-900/40 border border-white/5 p-5 rounded-3xl flex flex-col justify-between h-32"
                 >
                   <div className="flex justify-between items-start">
@@ -381,13 +447,22 @@ ${
                   </div>
                   <div>
                     <h3 className="text-2xl font-black tracking-tight text-white font-mono">
-                      {kpi.value}
+                      <AnimatedNumber
+                        value={kpi.value}
+                        format={kpi.formatValue}
+                      />
                     </h3>
                     <div className="flex items-center gap-2 mt-1">
                       <div className="flex-1 h-[2px] bg-neutral-800 rounded-full overflow-hidden">
-                        <div
+                        <motion.div
                           className={`h-full ${kpi.color}`}
-                          style={{ width: `${kpi.progress}%` }}
+                          initial={{ width: 0 }}
+                          animate={{ width: `${kpi.progress}%` }}
+                          transition={{
+                            duration: prefersReducedMotion ? 0 : 0.9,
+                            delay: prefersReducedMotion ? 0 : 0.35 + idx * 0.14,
+                            ease: "easeOut",
+                          }}
                         />
                       </div>
                       <span className="text-[8px] font-bold uppercase text-neutral-600 tracking-tight whitespace-nowrap">
@@ -395,70 +470,174 @@ ${
                       </span>
                     </div>
                   </div>
-                </div>
+                </motion.div>
               ))}
             </section>
 
-            {/* 📊 GRÁFICA SEMANAL: EXACTAMENTE RESPONSIVA E IGUAL A LA DE HORAS */}
-            <section className="bg-neutral-900/40 border border-white/5 p-6 md:p-8 rounded-[2rem]">
-              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
+            {/* EVOLUCIÓN DE VENTAS */}
+            <motion.section
+              initial={
+                prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 20 }
+              }
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: prefersReducedMotion ? 0.35 : 0.7,
+                delay: prefersReducedMotion ? 0 : 0.35,
+                ease: "easeOut",
+              }}
+              className="rounded-3xl bg-neutral-900/40 p-5 md:p-7"
+            >
+              <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                 <div>
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 text-neutral-400">
-                    <Activity size={14} className="text-violet-500" />
-                    Flujo Analítico de Ventas por Día
+                  <h3 className="flex items-center gap-2 text-base font-semibold text-white">
+                    <Activity size={18} className="text-violet-400" />
+                    Evolución de ventas
                   </h3>
-                  <p className="text-neutral-600 text-[9px] uppercase font-bold mt-0.5">
-                    Volumen real registrado por día dentro del período
-                    seleccionado
+                  <p className="mt-1 text-sm text-neutral-400">
+                    Ventas registradas por día durante {getPeriodString()}
                   </p>
                 </div>
-                <div className="text-right">
-                  <span className="text-[8px] font-mono font-black uppercase text-neutral-400 bg-neutral-950 px-3 py-1 rounded border border-white/5">
-                    Ciclo Semanal Completo
-                  </span>
+                <div className="flex items-center gap-2 text-xs text-neutral-400">
+                  <span className="h-2 w-2 rounded-full bg-violet-400" />
+                  Total vendido
                 </div>
               </div>
 
-              {/* Cambios aquí: overflow-x-auto, scrollbar-none y pt-8 para evitar cortes del tooltip flotante */}
-              <div className="h-44 flex items-end gap-3 sm:gap-4 border-b border-white/5 pb-2 pt-8 overflow-x-auto scrollbar-none">
-                {weeklyTrendsData.map((bar, i) => (
-                  <div
-                    key={i}
-                    // Cambios aquí: Añadido min-w-[55px] sm:min-w-0 para garantizar tamaño estructurado en móviles
-                    className="flex-1 min-w-[55px] sm:min-w-0 flex flex-col items-center gap-2 group h-full justify-end relative"
-                  >
-                    {/* Tooltip flotante */}
-                    <span className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-5 text-[8px] font-mono font-bold text-white bg-neutral-950 px-1.5 py-0.5 rounded border border-white/10 pointer-events-none z-10 whitespace-nowrap">
-                      {bar.vol} ({bar.percentage}%)
-                    </span>
-
-                    {/* Contenedor de la barra */}
-                    <div className="w-full bg-neutral-950 rounded-t-md overflow-hidden h-full flex items-end border border-white/[0.02]">
-                      <div
-                        style={{ height: `${bar.percentage}%` }}
-                        className={`w-full rounded-t-sm transition-all duration-500 ${
-                          bar.isPeak
-                            ? "bg-primary-container shadow-md shadow-primary-container/30"
-                            : "bg-primary-container/60 group-hover:bg-primary-container"
-                        }`}
-                      />
+              <div className="overflow-hidden rounded-2xl bg-neutral-950/40 px-3 py-4 sm:px-4">
+                {salesFlowData.length === 0 ? (
+                  <p className="py-14 text-center text-sm text-neutral-400">
+                    No hay ventas registradas en este período.
+                  </p>
+                ) : (
+                  <>
+                    <div className="mb-2 flex justify-between pl-1 text-xs text-neutral-500">
+                      <span>$ 0</span>
+                      <span>Máximo diario: {formatMoney(maxDaily)}</span>
                     </div>
-
-                    {/* Eje X (Días) - truncate evita desbordamientos de texto */}
-                    <span
-                      className={`text-[8px] font-mono font-black tracking-tighter uppercase w-full text-center truncate ${
-                        bar.isPeak ? "text-violet-400" : "text-neutral-600"
-                      }`}
+                    <svg
+                      className="h-40 w-full sm:h-48"
+                      viewBox="0 0 1000 160"
+                      preserveAspectRatio="none"
+                      role="img"
+                      aria-label={`Evolución diaria de ventas para ${getPeriodString()}`}
                     >
-                      {bar.day}
-                    </span>
-                  </div>
-                ))}
+                      <defs>
+                        <linearGradient
+                          id="sales-flow-fill"
+                          x1="0"
+                          x2="0"
+                          y1="0"
+                          y2="1"
+                        >
+                          <stop
+                            offset="0%"
+                            stopColor="#8b5cf6"
+                            stopOpacity="0.28"
+                          />
+                          <stop
+                            offset="100%"
+                            stopColor="#8b5cf6"
+                            stopOpacity="0"
+                          />
+                        </linearGradient>
+                      </defs>
+                      {[30, 89, 148].map((y) => (
+                        <line
+                          key={y}
+                          x1="76"
+                          x2="990"
+                          y1={y}
+                          y2={y}
+                          stroke="#ffffff"
+                          strokeOpacity="0.08"
+                          strokeDasharray="3 6"
+                        />
+                      ))}
+                      <motion.path
+                        d={salesFlowArea}
+                        fill="url(#sales-flow-fill)"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{
+                          duration: prefersReducedMotion ? 0.35 : 1.1,
+                          ease: "easeOut",
+                        }}
+                      />
+                      <motion.path
+                        d={salesFlowPath}
+                        fill="none"
+                        stroke="#a78bfa"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke"
+                        initial={prefersReducedMotion ? false : { pathLength: 0 }}
+                        animate={{ pathLength: 1 }}
+                        transition={{
+                          duration: prefersReducedMotion ? 0 : 1.8,
+                          delay: prefersReducedMotion ? 0 : 0.35,
+                          ease: "easeInOut",
+                        }}
+                      />
+                      {salesFlowData.map((point, index) => (
+                        <motion.circle
+                          key={`${point.fullDate}-${index}`}
+                          cx={point.x}
+                          cy={point.y}
+                          r="4"
+                          fill="#0a0a0a"
+                          stroke="#c4b5fd"
+                          strokeWidth="2"
+                          vectorEffect="non-scaling-stroke"
+                          initial={
+                            prefersReducedMotion ? false : { opacity: 0, scale: 0 }
+                          }
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{
+                            duration: 0.25,
+                            delay: prefersReducedMotion
+                              ? 0
+                              : 0.35 + index * 0.025,
+                          }}
+                        >
+                          <title>
+                            {point.fullDate}: {formatMoney(point.total)}
+                          </title>
+                        </motion.circle>
+                      ))}
+                    </svg>
+                    <div className="relative mt-2 h-5 text-[10px] text-neutral-400">
+                      {salesFlowData.map((point, index) =>
+                        index % salesFlowLabelInterval === 0 ||
+                        index === salesFlowData.length - 1 ? (
+                          <span
+                            key={`${point.fullDate}-label`}
+                            className={`absolute whitespace-nowrap ${
+                              index === 0
+                                ? "left-0"
+                                : index === salesFlowData.length - 1
+                                  ? "-translate-x-full"
+                                  : "-translate-x-1/2"
+                            }`}
+                            style={{ left: `${point.x / 10}%` }}
+                          >
+                            {point.date}
+                          </span>
+                        ) : null,
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
-            </section>
+            </motion.section>
 
             {/* INTENSIDAD HORARIA */}
-            <section className="bg-neutral-900/40 border border-white/5 p-6 md:p-8 rounded-[2rem]">
+            <motion.section
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.3, ease: "easeOut" }}
+              className="bg-neutral-900/40 border border-white/5 p-6 md:p-8 rounded-[2rem]"
+            >
               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
                 <div>
                   <h3 className="text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 text-neutral-400">
@@ -487,9 +666,19 @@ ${
                       {bar.vol} ({bar.percentage}%)
                     </span>
                     <div className="w-full bg-neutral-950 rounded-t-md overflow-hidden h-full flex items-end border border-white/[0.02]">
-                      <div
-                        style={{ height: `${bar.percentage}%` }}
+                      <motion.div
                         className={`w-full rounded-t-sm transition-all duration-500 ${bar.isPeak ? "bg-primary-container shadow-md shadow-primary-container/30" : "bg-primary-container/60 group-hover:bg-primary-container"}`}
+                        initial={prefersReducedMotion ? false : { scaleY: 0 }}
+                        animate={{ scaleY: 1 }}
+                        transition={{
+                          duration: 0.55,
+                          delay: prefersReducedMotion ? 0 : i * 0.018,
+                          ease: "easeOut",
+                        }}
+                        style={{
+                          height: `${bar.percentage}%`,
+                          transformOrigin: "bottom",
+                        }}
                       />
                     </div>
                     <span className="text-[8px] font-mono font-bold text-neutral-600 tracking-tighter">
@@ -498,11 +687,21 @@ ${
                   </div>
                 ))}
               </div>
-            </section>
+            </motion.section>
 
             {/* DONAS DE CONTROL */}
-            <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-neutral-900/40 border border-white/5 p-6 md:p-8 rounded-[2rem] flex flex-col md:flex-row items-center gap-8 justify-between">
+            <motion.section
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.36, ease: "easeOut" }}
+              className="grid grid-cols-1 lg:grid-cols-2 gap-6"
+            >
+              <motion.div
+                initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.45, delay: prefersReducedMotion ? 0 : 0.08 }}
+                className="bg-neutral-900/40 border border-white/5 p-6 md:p-8 rounded-[2rem] flex flex-col md:flex-row items-center gap-8 justify-between"
+              >
                 <div className="flex-1 space-y-4 w-full">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 flex items-center gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />{" "}
@@ -510,9 +709,12 @@ ${
                   </h3>
                   <div className="space-y-2">
                     {distributionData.map((item, i) => (
-                      <div
+                      <motion.div
                         key={i}
                         className="flex justify-between items-center text-[10px] bg-neutral-950/60 border border-white/[0.02] p-2.5 rounded-xl"
+                        initial={prefersReducedMotion ? false : { opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.3, delay: prefersReducedMotion ? 0 : i * 0.04 }}
                       >
                         <div className="flex items-center gap-2">
                           <span
@@ -531,7 +733,7 @@ ${
                             {item.percentage}%
                           </span>
                         </div>
-                      </div>
+                      </motion.div>
                     ))}
                   </div>
                 </div>
@@ -549,7 +751,7 @@ ${
                       strokeWidth="24"
                     />
                     {distributionData.map((item, i) => (
-                      <circle
+                      <motion.circle
                         key={i}
                         cx="120"
                         cy="120"
@@ -561,6 +763,10 @@ ${
                         strokeDashoffset={item.strokeOffset}
                         strokeLinecap="round"
                         className="transition-all duration-1000"
+                        initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.85 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.45, delay: prefersReducedMotion ? 0 : 0.12 + i * 0.08 }}
+                        style={{ transformOrigin: "120px 120px" }}
                       />
                     ))}
                   </svg>
@@ -573,9 +779,14 @@ ${
                     </span>
                   </div>
                 </div>
-              </div>
+              </motion.div>
 
-              <div className="bg-neutral-900/40 border border-white/5 p-6 md:p-8 rounded-[2rem] flex flex-col md:flex-row items-center gap-8 justify-between">
+              <motion.div
+                initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.45, delay: prefersReducedMotion ? 0 : 0.16 }}
+                className="bg-neutral-900/40 border border-white/5 p-6 md:p-8 rounded-[2rem] flex flex-col md:flex-row items-center gap-8 justify-between"
+              >
                 <div className="flex-1 space-y-4 w-full">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 flex items-center gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />{" "}
@@ -583,9 +794,12 @@ ${
                   </h3>
                   <div className="space-y-2">
                     {paymentData.map((item, i) => (
-                      <div
+                      <motion.div
                         key={i}
                         className="flex justify-between items-center text-[10px] bg-neutral-950/60 border border-white/[0.02] p-2.5 rounded-xl"
+                        initial={prefersReducedMotion ? false : { opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.3, delay: prefersReducedMotion ? 0 : i * 0.04 }}
                       >
                         <div className="flex items-center gap-2">
                           <span
@@ -604,7 +818,7 @@ ${
                             {item.percentage}%
                           </span>
                         </div>
-                      </div>
+                      </motion.div>
                     ))}
                   </div>
                 </div>
@@ -622,7 +836,7 @@ ${
                       strokeWidth="24"
                     />
                     {paymentData.map((item, i) => (
-                      <circle
+                      <motion.circle
                         key={i}
                         cx="120"
                         cy="120"
@@ -634,6 +848,10 @@ ${
                         strokeDashoffset={item.strokeOffset}
                         strokeLinecap="round"
                         className="transition-all duration-1000"
+                        initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.85 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.45, delay: prefersReducedMotion ? 0 : 0.12 + i * 0.08 }}
+                        style={{ transformOrigin: "120px 120px" }}
                       />
                     ))}
                   </svg>
@@ -646,11 +864,16 @@ ${
                     </span>
                   </div>
                 </div>
-              </div>
-            </section>
+              </motion.div>
+            </motion.section>
 
             {/* LISTAS DE CLIENTES Y CATÁLOGO DE PRODUCTOS */}
-            <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <motion.section
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.44, ease: "easeOut" }}
+              className="grid grid-cols-1 xl:grid-cols-3 gap-6"
+            >
               <div className="xl:col-span-2 bg-neutral-900/40 border border-white/5 p-6 md:p-8 rounded-[2rem] flex flex-col justify-between">
                 <div>
                   <div className="flex items-center gap-2 mb-6">
@@ -671,9 +894,12 @@ ${
                       </div>
                       <div className="divide-y divide-white/[0.03] space-y-1">
                         {customersByOrders.map((client, i) => (
-                          <div
+                          <motion.div
                             key={i}
                             className="py-2.5 flex justify-between items-center group"
+                            initial={prefersReducedMotion ? false : { opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.25, delay: prefersReducedMotion ? 0 : Math.min(i, 5) * 0.04 }}
                           >
                             <div>
                               <h4 className="text-[11px] font-black text-white uppercase group-hover:text-violet-400 transition-colors">
@@ -686,7 +912,7 @@ ${
                             <span className="text-[10px] font-mono font-black text-white bg-neutral-950 px-2 py-0.5 rounded border border-white/5">
                               {client.orders} pedidos
                             </span>
-                          </div>
+                          </motion.div>
                         ))}
                       </div>
                     </div>
@@ -702,9 +928,12 @@ ${
                       </div>
                       <div className="divide-y divide-white/[0.03] space-y-1">
                         {customersByTotal.map((client, i) => (
-                          <div
+                          <motion.div
                             key={i}
                             className="py-2.5 flex justify-between items-center group"
+                            initial={prefersReducedMotion ? false : { opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.25, delay: prefersReducedMotion ? 0 : Math.min(i, 5) * 0.04 }}
                           >
                             <div>
                               <h4 className="text-[11px] font-black text-white uppercase group-hover:text-emerald-400 transition-colors">
@@ -717,7 +946,7 @@ ${
                             <span className="text-[10px] font-mono font-black text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/10">
                               {formatMoney(client.total)}
                             </span>
-                          </div>
+                          </motion.div>
                         ))}
                       </div>
                     </div>
@@ -732,7 +961,13 @@ ${
                 </h3>
                 <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
                   {allProducts.map((product, i) => (
-                    <div key={i} className="space-y-1 group">
+                    <motion.div
+                      key={i}
+                      className="space-y-1 group"
+                      initial={prefersReducedMotion ? false : { opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.3, delay: prefersReducedMotion ? 0 : Math.min(i, 6) * 0.045 }}
+                    >
                       <div className="flex justify-between items-center text-[10px] font-bold uppercase">
                         <span className="text-white font-black group-hover:text-violet-400 transition-colors">
                           {product.name}
@@ -747,19 +982,27 @@ ${
                         </div>
                       </div>
                       <div className="h-[5px] w-full bg-neutral-950 rounded-full overflow-hidden border border-white/[0.02]">
-                        <div
+                        <motion.div
                           className={`h-full ${product.color} rounded-full transition-all duration-1000`}
-                          style={{ width: `${product.share}%` }}
+                          initial={prefersReducedMotion ? false : { scaleX: 0 }}
+                          animate={{ scaleX: 1 }}
+                          transition={{ duration: 0.65, delay: prefersReducedMotion ? 0 : 0.15 + Math.min(i, 6) * 0.045, ease: "easeOut" }}
+                          style={{ width: `${product.share}%`, transformOrigin: "left" }}
                         />
                       </div>
-                    </div>
+                    </motion.div>
                   ))}
                 </div>
               </div>
-            </section>
+            </motion.section>
 
             {/* INFORME OPERATIVO COPIABLE */}
-            <section className="bg-neutral-950 border-2 border-white/5 p-6 md:p-8 rounded-[2rem] space-y-6 relative overflow-hidden">
+            <motion.section
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.52, ease: "easeOut" }}
+              className="bg-neutral-950 border-2 border-white/5 p-6 md:p-8 rounded-[2rem] space-y-6 relative overflow-hidden"
+            >
               <div className="flex items-center justify-between border-b border-white/5 pb-4">
                 <div>
                   <h3 className="text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 text-white">
@@ -790,7 +1033,7 @@ ${
               <div className="bg-neutral-900/20 rounded-2xl p-5 border border-white/[0.02] font-mono text-[10px] text-neutral-400 space-y-4 whitespace-pre-line leading-relaxed">
                 {rawReportText}
               </div>
-            </section>
+            </motion.section>
           </>
         )}
       </div>

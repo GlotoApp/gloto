@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, Clock3, XCircle } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { SubLoading } from "./Loading";
@@ -75,22 +75,19 @@ export default function HistorialPagos() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background px-4 py-8 text-white md:px-8">
+    <div className="min-h-screen bg-background px-4 py-6 text-white sm:px-6 md:py-8 lg:px-8">
       <div className="mx-auto max-w-5xl space-y-6">
-        <header className="border-b border-white/10 pb-5">
-          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
+        <header className="pb-1">
+          <p className="mb-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
             Finanzas
           </p>
-          <h1 className="text-3xl font-black tracking-tight">
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
             Historial de pagos
           </h1>
-          <p className="mt-2 text-sm text-neutral-400">
-            Consulta todos los pagos y soportes enviados por tu negocio.
-          </p>
         </header>
 
         {message && (
-          <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 px-4 py-3 text-sm text-violet-200">
+          <div className="rounded-xl bg-violet-500/10 px-4 py-3 text-sm leading-5 text-violet-200">
             {message}
           </div>
         )}
@@ -102,18 +99,18 @@ export default function HistorialPagos() {
             dotClassName="bg-violet-400"
           />
         ) : payments.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-white/10 py-16 text-center text-sm text-neutral-500">
+          <div className="rounded-2xl bg-neutral-900/60 py-16 text-center text-sm text-neutral-400">
             Aún no hay pagos registrados.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-white/10 bg-neutral-900/50">
-            <div className="hidden grid-cols-[1.2fr_1fr_1fr_1fr] gap-4 border-b border-white/10 px-5 py-4 text-[10px] font-black uppercase tracking-widest text-neutral-500 md:grid">
+          <div className="overflow-hidden rounded-2xl bg-neutral-900/60">
+            <div className="hidden grid-cols-[1.2fr_1fr_1fr_1fr] gap-4 bg-white/[0.025] px-5 py-4 text-[10px] font-black uppercase tracking-widest text-neutral-400 md:grid">
               <span>Plan</span>
               <span>Fecha</span>
               <span>Valor</span>
               <span>Estado</span>
             </div>
-            <div className="divide-y divide-white/10">
+            <div className="divide-y divide-white/[0.05]">
               {payments.map((payment) => {
                 const status =
                   STATUS_CONFIG[payment.status] || STATUS_CONFIG.pending;
@@ -121,38 +118,38 @@ export default function HistorialPagos() {
                 return (
                   <article
                     key={payment.id}
-                    className="grid gap-3 px-5 py-4 md:grid-cols-[1.2fr_1fr_1fr_1fr] md:items-center md:gap-4"
+                    className="grid gap-4 px-4 py-5 transition-colors hover:bg-white/[0.025] sm:px-5 md:grid-cols-[1.2fr_1fr_1fr_1fr] md:items-center md:gap-4"
                   >
                     <div>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-neutral-400 md:hidden">
                         Plan
                       </p>
-                      <p className="font-bold">
+                      <p className="text-sm font-semibold text-white">
                         {payment.subscriptions?.plan_name || "Suscripción"}
                       </p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500 md:hidden">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-neutral-400 md:hidden">
                         Fecha
                       </p>
-                      <p className="text-sm text-neutral-300">
+                      <p className="text-sm text-neutral-200">
                         {formatDate(payment.paid_at || payment.created_at)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500 md:hidden">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-neutral-400 md:hidden">
                         Valor
                       </p>
-                      <p className="font-bold">
+                      <p className="text-sm font-bold tabular-nums text-white">
                         {formatCurrency(payment.amount)}
                       </p>
-                      <p className="text-xs text-neutral-500">
+                      <p className="mt-0.5 text-xs text-neutral-400">
                         {payment.payment_method || "-"}
                       </p>
                     </div>
                     <div className="flex items-center justify-between gap-3 md:justify-start">
                       <span
-                        className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-[10px] font-black uppercase tracking-wider ${status.className}`}
+                        className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-[10px] font-bold uppercase tracking-wide ${status.className}`}
                       >
                         <StatusIcon size={14} /> {status.label}
                       </span>

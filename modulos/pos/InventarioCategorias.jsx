@@ -206,15 +206,10 @@ export default function InventarioCategorias() {
   return (
     <div className="min-h-screen bg-background p-4 font-sans text-white">
       <div className="mx-auto max-w-7xl space-y-6 pb-20">
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-2">
-            <h1 className="text-2xl font-bold tracking-tight">
-              Categorías de insumos
-            </h1>
-            <p className="text-sm text-neutral-500">
-              Organiza los insumos y encuentra cada categoría rápidamente.
-            </p>
-          </div>
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="font-sans text-2xl font-black tracking-tighter text-white">
+            Categorías de insumos
+          </h1>
           <button
             type="button"
             onClick={() => {
@@ -222,7 +217,7 @@ export default function InventarioCategorias() {
               setCategoryError("");
               setCreatingCategory(true);
             }}
-            className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-xs font-semibold text-white transition-colors hover:bg-violet-500"
+            className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-violet-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-violet-200 transition-colors hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
           >
             <Plus size={15} /> Crear categoría
           </button>
@@ -235,11 +230,11 @@ export default function InventarioCategorias() {
           />
         ) : (
           <section className="space-y-4">
-            <div className="flex flex-col gap-3 rounded-2xl border border-white/5 bg-neutral-900/30 p-3 sm:flex-row sm:items-center">
+            <div className="flex flex-col gap-3 rounded-2xl bg-neutral-900/30 p-3 sm:flex-row sm:items-center">
               <label className="relative min-w-0 flex-1">
                 <Search
                   size={16}
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-violet-400/70"
                 />
                 <input
                   type="search"
@@ -247,17 +242,17 @@ export default function InventarioCategorias() {
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Buscar categoría..."
                   aria-label="Buscar categorías"
-                  className="w-full rounded-xl border border-white/5 bg-neutral-950/70 py-2.5 pl-10 pr-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-violet-400/40"
+                  className="w-full rounded-xl bg-neutral-900 py-2.5 pl-10 pr-3 text-[10px] font-mono uppercase text-neutral-200 outline-none transition-colors placeholder:text-neutral-500 focus:ring-2 focus:ring-violet-500/40"
                 />
               </label>
-              <label className="flex items-center gap-2 text-neutral-500">
+              <label className="flex items-center gap-2 text-violet-400/70">
                 <Filter size={15} aria-hidden="true" />
                 <span className="sr-only">Filtrar categorías</span>
                 <select
                   value={itemFilter}
                   onChange={(event) => setItemFilter(event.target.value)}
                   aria-label="Filtrar categorías por insumos"
-                  className="min-w-44 rounded-xl border border-white/5 bg-neutral-950/70 px-3 py-2.5 text-xs text-neutral-200 outline-none focus:border-violet-400/40"
+                  className="min-h-10 min-w-44 cursor-pointer rounded-xl bg-neutral-900 px-3 py-2.5 text-[10px] font-mono uppercase text-neutral-200 outline-none focus:ring-2 focus:ring-violet-500/40"
                 >
                   <option value="all">Todas las categorías</option>
                   <option value="with-items">Con insumos</option>
@@ -265,7 +260,7 @@ export default function InventarioCategorias() {
                 </select>
               </label>
             </div>
-            <div className="flex items-center justify-between text-xs text-neutral-500">
+            <div className="flex items-center justify-between text-xs text-neutral-400">
               <span>
                 {filteredCategories.length} de {categories.length} categorías
               </span>
@@ -276,7 +271,7 @@ export default function InventarioCategorias() {
                     setSearch("");
                     setItemFilter("all");
                   }}
-                  className="font-medium text-violet-300 hover:text-violet-200"
+                  className="rounded-md px-1 py-1 font-semibold text-violet-300 transition-colors hover:text-violet-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                 >
                   Limpiar filtros
                 </button>
@@ -287,7 +282,7 @@ export default function InventarioCategorias() {
                 {filteredCategories.map((category) => (
                   <div
                     key={category.id}
-                    className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-white/5 bg-neutral-900/40 p-4 transition-colors hover:border-white/10 hover:bg-neutral-900/70"
+                    className="flex min-w-0 items-center justify-between gap-3 rounded-2xl bg-neutral-900/40 p-4 transition-colors hover:bg-neutral-900/70"
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300">
@@ -311,7 +306,7 @@ export default function InventarioCategorias() {
                           setEditingName(category.name);
                           setCategoryError("");
                         }}
-                        className="rounded-lg p-2 text-neutral-500 transition-colors hover:bg-violet-500/10 hover:text-violet-300"
+                        className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-violet-500/10 hover:text-violet-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                         aria-label={`Editar ${category.name}`}
                         title="Editar categoría"
                       >
@@ -320,7 +315,7 @@ export default function InventarioCategorias() {
                       <button
                         type="button"
                         onClick={() => prepareCategoryDelete(category)}
-                        className="rounded-lg p-2 text-neutral-500 transition-colors hover:bg-red-500/10 hover:text-red-300"
+                        className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
                         aria-label={`Eliminar ${category.name}`}
                         title="Eliminar categoría"
                       >
@@ -331,7 +326,7 @@ export default function InventarioCategorias() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-white/10 px-5 py-12 text-center">
+              <div className="rounded-2xl bg-neutral-900/30 px-5 py-12 text-center">
                 <p className="text-sm font-medium text-neutral-300">
                   {categories.length === 0
                     ? "Aún no hay categorías de insumos."
@@ -355,7 +350,7 @@ export default function InventarioCategorias() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="create-inventory-category-title"
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6"
+            className="w-full max-w-md rounded-2xl bg-neutral-900 p-5 shadow-2xl sm:p-6"
           >
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
@@ -380,14 +375,14 @@ export default function InventarioCategorias() {
                 }}
                 disabled={savingCategory}
                 aria-label="Cerrar creación"
-                className="rounded-lg p-2 text-neutral-500 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-40"
+                className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:opacity-40"
               >
                 <X size={17} />
               </button>
             </div>
             <label
               htmlFor="new-inventory-category"
-              className="mb-1.5 block text-xs font-medium text-neutral-300"
+              className="mb-1.5 block text-[10px] font-black uppercase tracking-widest text-neutral-300"
             >
               Nombre de la categoría
             </label>
@@ -402,7 +397,7 @@ export default function InventarioCategorias() {
               placeholder="Ej. Frutas y verduras"
               maxLength={80}
               required
-              className="w-full rounded-xl border border-white/10 bg-neutral-950 px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-violet-400/50"
+              className="w-full rounded-xl bg-neutral-950 px-4 py-3 text-sm text-white outline-none transition-shadow placeholder:text-neutral-600 focus:ring-2 focus:ring-violet-500/50"
             />
             {categoryError && (
               <p role="alert" className="mt-2 text-xs text-red-300">
@@ -417,14 +412,14 @@ export default function InventarioCategorias() {
                   setCategoryError("");
                 }}
                 disabled={savingCategory}
-                className="rounded-lg border border-white/10 px-4 py-2.5 text-xs font-medium text-neutral-300 transition-colors hover:bg-white/5 disabled:opacity-40"
+                className="rounded-lg bg-neutral-800 px-4 py-2.5 text-xs font-semibold text-neutral-300 transition-colors hover:bg-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400/60 disabled:opacity-40"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={savingCategory || !name.trim()}
-                className="rounded-lg bg-violet-600 px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg bg-violet-600 px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/70 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {savingCategory ? "Creando..." : "Crear categoría"}
               </button>
@@ -437,7 +432,7 @@ export default function InventarioCategorias() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
           <form
             onSubmit={saveCategoryEdit}
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6"
+            className="w-full max-w-md rounded-2xl bg-neutral-900 p-5 shadow-2xl sm:p-6"
           >
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
@@ -459,14 +454,14 @@ export default function InventarioCategorias() {
                 }}
                 disabled={savingCategory}
                 aria-label="Cerrar edición"
-                className="rounded-lg p-2 text-neutral-500 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-40"
+                className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:opacity-40"
               >
                 <X size={17} />
               </button>
             </div>
             <label
               htmlFor="edit-inventory-category"
-              className="mb-1.5 block text-xs font-medium text-neutral-300"
+              className="mb-1.5 block text-[10px] font-black uppercase tracking-widest text-neutral-300"
             >
               Nombre de la categoría
             </label>
@@ -480,7 +475,7 @@ export default function InventarioCategorias() {
               }}
               maxLength={80}
               required
-              className="w-full rounded-xl border border-white/10 bg-neutral-950 px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-neutral-600 focus:border-violet-400/50"
+              className="w-full rounded-xl bg-neutral-950 px-4 py-3 text-sm text-white outline-none transition-shadow placeholder:text-neutral-600 focus:ring-2 focus:ring-violet-500/50"
             />
             {categoryError && (
               <p role="alert" className="mt-2 text-xs text-red-300">
@@ -495,7 +490,7 @@ export default function InventarioCategorias() {
                   setCategoryError("");
                 }}
                 disabled={savingCategory}
-                className="rounded-lg border border-white/10 px-4 py-2.5 text-xs font-medium text-neutral-300 transition-colors hover:bg-white/5 disabled:opacity-40"
+                className="rounded-lg bg-neutral-800 px-4 py-2.5 text-xs font-semibold text-neutral-300 transition-colors hover:bg-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400/60 disabled:opacity-40"
               >
                 Cancelar
               </button>
@@ -506,7 +501,7 @@ export default function InventarioCategorias() {
                   !editingName.trim() ||
                   upper(editingName) === upper(editing.name)
                 }
-                className="rounded-lg bg-violet-600 px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg bg-violet-600 px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/70 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {savingCategory ? "Guardando..." : "Guardar cambios"}
               </button>
@@ -517,7 +512,7 @@ export default function InventarioCategorias() {
 
       {categoryDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border border-red-500/30 bg-neutral-900 p-6 shadow-2xl">
+          <div className="w-full max-w-lg rounded-2xl bg-neutral-900 p-6 shadow-2xl">
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-black uppercase tracking-tight text-white">
@@ -531,14 +526,14 @@ export default function InventarioCategorias() {
                 type="button"
                 onClick={() => setCategoryDeleteConfirm(null)}
                 disabled={categoryDeleteLoading}
-                className="rounded-lg p-1.5 text-neutral-500 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                className="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 disabled:opacity-40"
                 aria-label="Cerrar confirmación"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="mb-5 space-y-4 rounded-xl border border-white/10 bg-neutral-950/50 p-4">
+            <div className="mb-5 space-y-4 rounded-xl bg-neutral-950/50 p-4">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-red-300">
                   Categoría
@@ -589,7 +584,7 @@ export default function InventarioCategorias() {
               </div>
             </div>
 
-            <p className="mb-5 text-xs leading-5 text-red-300">
+            <p className="mb-5 rounded-lg bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-300">
               Los vínculos de esos insumos con los productos también se
               eliminarán. Esta acción no se puede deshacer.
             </p>
@@ -598,7 +593,7 @@ export default function InventarioCategorias() {
                 type="button"
                 onClick={() => setCategoryDeleteConfirm(null)}
                 disabled={categoryDeleteLoading}
-                className="flex-1 rounded-lg border border-white/10 bg-neutral-800 px-4 py-3 text-[10px] font-black uppercase text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
+                className="flex-1 rounded-lg bg-neutral-800 px-4 py-3 text-[10px] font-black uppercase text-neutral-300 transition-colors hover:bg-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400/60 disabled:opacity-40"
               >
                 Cancelar
               </button>
@@ -606,7 +601,7 @@ export default function InventarioCategorias() {
                 type="button"
                 onClick={deleteCategory}
                 disabled={categoryDeleteLoading}
-                className="flex-1 rounded-lg bg-red-500 px-4 py-3 text-[10px] font-black uppercase text-white hover:bg-red-600 disabled:cursor-wait disabled:opacity-50"
+                className="flex-1 rounded-lg bg-red-500 px-4 py-3 text-[10px] font-black uppercase text-white transition-colors hover:bg-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/70 disabled:cursor-wait disabled:opacity-50"
               >
                 {categoryDeleteLoading ? "Eliminando..." : "Eliminar todo"}
               </button>

@@ -458,7 +458,7 @@ const Shop = () => {
         const businessInfoQuery = supabase
           .from("business_info")
           .select(
-            "rating,rating_count,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent,latitude,longitude,category_id,categoria,category:categories!business_info_category_id_fkey(name),whatsapp_phone,address",
+            "rating,rating_count,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,delivery_methods,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent,latitude,longitude,category_id,categoria,category:categories!business_info_category_id_fkey(name),whatsapp_phone,address",
           )
           .eq("business_id", data.id)
           .single();

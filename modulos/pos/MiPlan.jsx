@@ -406,13 +406,13 @@ export default function MiPlan() {
 
   return (
     <div className="min-h-screen bg-background px-4 py-6 text-white sm:px-6 lg:px-8 lg:py-8">
-      <div className="mx-auto max-w-4xl space-y-4 lg:space-y-5">
-        <header className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-4">
+      <div className="mx-auto max-w-4xl space-y-5 lg:space-y-6">
+        <header className="flex flex-wrap items-end justify-between gap-4 pb-1">
           <div>
-            <p className="mb-1 text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
+            <p className="mb-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
               Finanzas
             </p>
-            <h1 className="text-2xl font-black tracking-tight sm:text-3xl">
+            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
               Mi plan
             </h1>
           </div>
@@ -421,7 +421,7 @@ export default function MiPlan() {
               type="button"
               onClick={handleSignOut}
               disabled={signingOut}
-              className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-neutral-300 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-wait disabled:opacity-50"
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-neutral-900 px-4 py-2.5 text-xs font-bold text-neutral-200 transition hover:bg-neutral-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-wait disabled:opacity-50"
             >
               <LogOut size={14} />
               {signingOut ? "Cerrando..." : "Cerrar sesión"}
@@ -443,7 +443,7 @@ export default function MiPlan() {
         ) : (
           <>
             {message && (
-              <div className="rounded-lg border border-violet-500/20 bg-violet-500/10 px-3 py-2.5 text-xs text-violet-200">
+              <div className="rounded-xl bg-violet-500/10 px-4 py-3 text-sm leading-5 text-violet-200">
                 {message}
               </div>
             )}
@@ -451,7 +451,7 @@ export default function MiPlan() {
             {isPaymentOnlyMode && (
               <div
                 role="alert"
-                className="rounded-xl border border-rose-400/20 bg-rose-400/[0.07] px-4 py-3 text-sm text-rose-100"
+                className="rounded-xl bg-rose-400/[0.08] px-4 py-4 text-sm text-rose-100"
               >
                 <p className="font-black">
                   {isSubscriptionSuspended
@@ -471,7 +471,7 @@ export default function MiPlan() {
             )}
 
             {!isPaymentOnlyMode && planAccess?.plan_code && (
-              <section className="rounded-xl bg-white/[0.02] p-4 sm:p-5">
+              <section className="rounded-2xl bg-neutral-900/70 p-5 sm:p-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="text-xs font-black uppercase tracking-wider text-neutral-200">
@@ -488,7 +488,7 @@ export default function MiPlan() {
                     Number(planAccess.tickets_remaining) === 0 && (
                       <Link
                         to="/pos/planes"
-                        className="rounded-lg bg-violet-600 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-white hover:bg-violet-500"
+                        className="rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-wider text-white transition hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
                       >
                         Ver planes
                       </Link>
@@ -528,7 +528,7 @@ export default function MiPlan() {
 
             {latestPayment && latestPayment.status !== "paid" && (
               <div
-                className={`rounded-lg px-3 py-2.5 text-xs ${
+                className={`rounded-xl px-4 py-3 text-sm leading-5 ${
                   latestPayment.status === "pending"
                     ? "bg-amber-500/10 text-amber-200"
                     : "bg-rose-500/10 text-rose-200"
@@ -539,7 +539,7 @@ export default function MiPlan() {
                     ? "Soporte en revisión"
                     : "Soporte rechazado:"}
                 </strong>
-                <span className="ml-2 uppercase tracking-widest">
+                <span className="ml-2">
                   {latestPayment.status === "pending"
                     ? "Estamos validando tu comprobante. No envíes otro mientras recibes respuesta."
                     : latestPayment.notes ||
@@ -549,20 +549,20 @@ export default function MiPlan() {
             )}
 
             {!subscription ? (
-              <section className="rounded-xl border border-dashed border-white/10 px-5 py-12 text-center text-sm text-neutral-400">
+              <section className="rounded-2xl bg-neutral-900/60 px-5 py-14 text-center text-sm text-neutral-400">
                 No tienes un plan activo o pendiente asociado a este negocio.
               </section>
             ) : (
               <>
                 {!isPaymentOnlyMode && (
-                  <section className="rounded-xl bg-white/[0.02] p-5 sm:p-6">
+                  <section className="rounded-2xl bg-neutral-900/60 p-5 sm:p-7">
                   <div className="mx-auto max-w-sm text-center">
                     <div className="flex items-center justify-between gap-3 text-left">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+                      <p className="text-xs font-bold text-neutral-400">
                         Plan {subscription.plan_name}
                       </p>
                       <span
-                        className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide ${
                           suspensionIsDue || isInSuspensionGracePeriod
                             ? "bg-rose-500/10 text-rose-300"
                             : validity.isActive
@@ -580,7 +580,7 @@ export default function MiPlan() {
                             : getStatusLabel(subscription.status)}
                       </span>
                     </div>
-                    <div className="relative mx-auto mt-3 w-full max-w-[280px]">
+                    <div className="relative mx-auto mt-5 w-full max-w-[300px]">
                       <svg
                         viewBox="0 0 220 140"
                         className="block w-full"
@@ -616,7 +616,7 @@ export default function MiPlan() {
                       </svg>
                       <div className="absolute inset-x-0 top-[27%] flex flex-col items-center justify-center px-8 text-center">
                         <p
-                          className="text-4xl font-black sm:text-5xl"
+                          className="text-5xl font-bold tabular-nums sm:text-6xl"
                           style={{ color: validity.color }}
                         >
                           {isSubscriptionSuspended || suspensionIsDue
@@ -627,7 +627,7 @@ export default function MiPlan() {
                                 ? "-"
                                 : validity.remainingDays}
                         </p>
-                        <p className="mt-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+                        <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-neutral-400">
                           {isSubscriptionSuspended
                             ? "Plan suspendido"
                             : suspensionIsDue
@@ -677,7 +677,7 @@ export default function MiPlan() {
                   isCommissionPlan &&
                   commissionStatement &&
                   !commissionCycleClosed && (
-                    <section className="rounded-2xl border border-violet-300/15 bg-gradient-to-br from-violet-400/[0.07] via-neutral-900/80 to-neutral-900 p-5 sm:p-6">
+                    <section className="rounded-2xl bg-violet-500/[0.07] p-5 sm:p-6">
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-300">
@@ -702,7 +702,7 @@ export default function MiPlan() {
                             {formatCurrency(commissionStatement.minimum_amount)}
                           </p>
                         </div>
-                        <div className="rounded-xl border border-white/[0.07] bg-black/20 px-4 py-3 sm:min-w-44 sm:text-right">
+                        <div className="rounded-xl bg-black/20 px-4 py-3 sm:min-w-44 sm:text-right">
                           <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-neutral-500">
                             Estimado de cobro (comisión o mínimo)
                           </p>
@@ -720,10 +720,10 @@ export default function MiPlan() {
 
                 {(isPaymentOnlyMode || showPaymentPanel) && (
                   <>
-                    <div className="overflow-hidden rounded-2xl border border-rose-300/15 bg-gradient-to-br from-rose-400/[0.08] via-neutral-900/80 to-neutral-900">
+                    <div className="overflow-hidden rounded-2xl bg-rose-500/[0.07]">
                       <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
                         <div className="flex min-w-0 items-start gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-300/15 bg-rose-400/10 text-rose-300">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-400/10 text-rose-300">
                             <CreditCard size={19} />
                           </div>
                           <div className="min-w-0">
@@ -761,7 +761,7 @@ export default function MiPlan() {
                             )}
                           </div>
                         </div>
-                        <div className="shrink-0 rounded-xl border border-white/[0.07] bg-black/20 px-4 py-3 sm:min-w-40 sm:text-right">
+                        <div className="shrink-0 rounded-xl bg-black/20 px-4 py-3 sm:min-w-40 sm:text-right">
                           <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-neutral-500">
                             {isCommissionPlan
                               ? "Total a pagar"
@@ -780,7 +780,7 @@ export default function MiPlan() {
                       </div>
                     </div>
                     <section className="grid gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-                      <div className="flex flex-col justify-center rounded-xl bg-white/[0.035] p-5 text-center">
+                      <div className="flex flex-col justify-center rounded-2xl bg-neutral-900/70 p-5 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <h2 className="text-base font-black">QR de pago</h2>
                           <CreditCard className="text-violet-300" size={18} />
@@ -820,7 +820,7 @@ export default function MiPlan() {
                       </div>
                       <form
                         onSubmit={handleUpload}
-                        className="min-w-0 rounded-xl bg-white/[0.035] p-5"
+                        className="min-w-0 rounded-2xl bg-neutral-900/70 p-5 sm:p-6"
                       >
                         <h2 className="text-lg font-black">Soporte de pago</h2>
                         <p className="mt-1 text-xs text-neutral-500">
@@ -834,7 +834,7 @@ export default function MiPlan() {
                         ) : (
                           <>
                             <div className="relative mt-4 min-w-0">
-                              <label className="flex min-w-0 w-full cursor-pointer items-center gap-3 rounded-xl border border-dashed border-white/15 px-4 py-3 pr-12 text-sm text-neutral-300 hover:border-violet-400">
+                              <label className="flex min-w-0 w-full cursor-pointer items-center gap-3 rounded-xl bg-neutral-950 px-4 py-3 pr-12 text-sm text-neutral-200 transition hover:bg-neutral-800 focus-within:ring-2 focus-within:ring-violet-400">
                                 <FileUp
                                   size={18}
                                   className="shrink-0 text-violet-300"
@@ -865,7 +865,7 @@ export default function MiPlan() {
                               )}
                             </div>
                             {paymentPreviewUrl && paymentFile && (
-                              <div className="mt-3 overflow-hidden rounded-lg bg-black/30 p-3">
+                              <div className="mt-3 overflow-hidden rounded-xl bg-neutral-950 p-3">
                                 <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-neutral-500">
                                   Vista previa
                                 </p>
@@ -891,7 +891,7 @@ export default function MiPlan() {
                               disabled={
                                 saving || !paymentFile || renewalAmount === null
                               }
-                              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-wider transition hover:bg-violet-500 disabled:opacity-50"
+                              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-wider transition hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 disabled:opacity-50"
                             >
                               {saving ? (
                                 <LoaderCircle
@@ -917,7 +917,7 @@ export default function MiPlan() {
 
       {showSuccessModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="relative w-full max-w-md rounded-2xl border border-emerald-400/20 bg-neutral-950 p-7 text-center shadow-2xl">
+          <div className="relative w-full max-w-md rounded-2xl bg-neutral-900 p-7 text-center shadow-2xl">
             <button
               type="button"
               onClick={() => setShowSuccessModal(false)}

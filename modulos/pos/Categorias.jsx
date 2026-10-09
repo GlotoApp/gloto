@@ -17,6 +17,7 @@ import {
   ShoppingBag,
   Info,
   GripVertical,
+  Search,
 } from "lucide-react";
 
 const formatCategoryName = (value) => {
@@ -318,53 +319,64 @@ const CategoriasAdmin = ({
 
   return (
     <div className="min-h-screen bg-background text-neutral-200 p-4 font-sans">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* HEADER */}
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-black tracking-tighter">Categorías</h1>
-
-          <header className="px-2 pt-2 pb-5 border-b border-white/5 flex justify-between">
-            <div className="space-y-2 flex items-center">
-              <div className="flex items-center gap-4 flex-wrap select-none">
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
-                  <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-violet-400">
-                    {categoriesList.length} Total
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={handleNewCategory}
-              className="px-4 py-2.5 rounded-xl border text-[9px] font-black uppercase tracking-wider active:scale-95 transition-all flex items-center gap-2 bg-white/[0.03] border-white/[0.08] text-white hover:bg-white/[0.08] hover:border-white/[0.15] self-start md:self-auto"
-            >
-              <Plus size={12} className="text-violet-400" /> Nueva Categoría
-            </button>
-          </header>
-        </div>
-
-        {/* LISTADO DE CATEGORÍAS */}
-        <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-white/5 bg-neutral-900/30 p-4 sm:flex-row">
-          <input
-            type="search"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Buscar categoría..."
-            className="min-w-0 flex-1 rounded-xl border border-white/5 bg-neutral-950/50 px-3 py-2 text-xs text-white outline-none focus:border-violet-500/50"
-          />
-          <select
-            value={sortBy}
-            onChange={(event) => setSortBy(event.target.value)}
-            className="rounded-xl border border-white/5 bg-neutral-950/50 px-3 py-2 text-xs text-neutral-300 outline-none focus:border-violet-500/50"
+      <div className="mx-auto max-w-7xl space-y-5">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="font-sans text-2xl font-black tracking-tighter text-white">
+              Categorías
+            </h1>
+          </div>
+          <button
+            type="button"
+            onClick={handleNewCategory}
+            className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-violet-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-violet-200 transition-colors hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
           >
-            <option value="order">Orden personalizado</option>
-            <option value="created">Orden de creación</option>
-            <option value="name-asc">Nombre: A-Z</option>
-            <option value="name-desc">Nombre: Z-A</option>
-            <option value="products-desc">Más productos</option>
-            <option value="products-asc">Menos productos</option>
-          </select>
+            <Plus size={14} /> Nueva categoría
+          </button>
+        </header>
+
+        <div className="grid gap-3 rounded-2xl bg-neutral-900/30 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.45fr)]">
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
+              Buscar
+            </span>
+            <span className="group relative block">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-500/50 transition-colors group-hover:text-violet-500"
+              />
+              <input
+                type="search"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Buscar categoría..."
+                className="w-full rounded-xl bg-neutral-900 py-2.5 pl-9 pr-3 text-[10px] font-mono uppercase text-neutral-300 outline-none transition-all placeholder:text-neutral-600 focus:ring-2 focus:ring-violet-500/40"
+              />
+            </span>
+          </label>
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
+              Ordenar por
+            </span>
+            <span className="group relative block">
+              <select
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value)}
+                className="w-full cursor-pointer appearance-none rounded-xl bg-neutral-900 py-2.5 pl-3 pr-9 text-[10px] font-mono uppercase text-neutral-300 outline-none transition-all focus:ring-2 focus:ring-violet-500/40"
+              >
+                <option value="order">Orden personalizado</option>
+                <option value="created">Orden de creación</option>
+                <option value="name-asc">Nombre: A-Z</option>
+                <option value="name-desc">Nombre: Z-A</option>
+                <option value="products-desc">Más productos</option>
+                <option value="products-asc">Menos productos</option>
+              </select>
+              <ChevronDown
+                size={12}
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-neutral-600"
+              />
+            </span>
+          </label>
         </div>
 
         {sortBy === "order" && !searchTerm.trim() && (
@@ -375,10 +387,10 @@ const CategoriasAdmin = ({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -4, scale: 0.98 }}
               transition={{ duration: 0.18 }}
-              className={`flex items-center gap-2 rounded-xl px-3 py-2 text-[10px] font-semibold ${
+              className={`flex items-center gap-2 py-1 text-[10px] font-semibold ${
                 draggedCategoryId
-                  ? "border-violet-400/40 bg-violet-500/15 text-violet-200 shadow-lg shadow-violet-950/30"
-                  : "border-white/5 bg-white/[0.02] text-neutral-500"
+                  ? "text-violet-200"
+                  : "text-neutral-400"
               }`}
               role="status"
               aria-live="polite"
@@ -397,7 +409,7 @@ const CategoriasAdmin = ({
                       (category) => category.id === draggedCategoryId,
                     )?.name || "categoría"
                   } · suelta para guardar`
-                : "Arrastra el asa de una categoría para cambiar su orden"}
+                : "Mantén presionado el asa de puntos y arrastra la categoría hasta la posición que quieras. Suelta para guardar el nuevo orden."}
             </motion.div>
           </AnimatePresence>
         )}
@@ -437,18 +449,18 @@ const CategoriasAdmin = ({
                     opacity: { duration: 0.16 },
                     boxShadow: { duration: 0.16 },
                   }}
-                  className={`relative flex flex-col rounded-2xl border overflow-hidden transition-colors duration-200 ${
+                  className={`relative flex flex-col overflow-hidden rounded-2xl border transition-colors duration-200 ${
                     draggedCategoryId === category.id
                       ? "z-10 border-violet-300/70 bg-neutral-800 ring-2 ring-violet-400/30"
                       : dropTargetCategoryId === String(category.id)
                         ? "border-violet-400/60 bg-violet-500/[0.08] ring-1 ring-violet-400/30"
-                        : "border-white/5 bg-neutral-900/40"
+                        : "border-white/5 bg-neutral-900/40 hover:border-white/10"
                   }`}
                 >
                   <div className="flex flex-col w-full">
                     {/* FILA PRINCIPAL */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-4">
-                      <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="flex w-full flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-4">
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
                         <button
                           type="button"
                           disabled={
@@ -462,10 +474,10 @@ const CategoriasAdmin = ({
                           onPointerMove={handleCategoryDragMove}
                           onPointerUp={handleCategoryDragEnd}
                           onPointerCancel={handleCategoryDragCancel}
-                          className={`touch-none cursor-grab rounded-lg p-2 transition-all active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-30 ${
+                          className={`inline-flex h-9 w-9 shrink-0 touch-none cursor-grab items-center justify-center rounded-xl transition-all active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:cursor-not-allowed disabled:opacity-30 ${
                             draggedCategoryId === category.id
-                              ? "scale-110 bg-violet-500/20 text-violet-200 shadow-md shadow-violet-950/40"
-                              : "text-neutral-400 hover:bg-violet-500/10 hover:text-white"
+                                  ? "scale-105 bg-violet-500/15 text-violet-200 shadow-md shadow-violet-950/30"
+                                  : "bg-neutral-950/60 text-neutral-400 hover:bg-violet-500/10 hover:text-violet-200"
                           }`}
                           title="Mantén y arrastra para ordenar"
                           aria-label={`Arrastrar ${category.name} para cambiar su orden`}
@@ -480,16 +492,21 @@ const CategoriasAdmin = ({
                           />
                         </button>
                         <div
-                          className={`w-3.5 h-3.5 rounded-full border border-white/20 flex-shrink-0 ${
+                          className={`h-3.5 w-3.5 shrink-0 rounded-full ring-4 ring-white/[0.03] ${
                             colorClasses[category.color].split(" ")[0]
                           } ${colorClasses[category.color].split(" ").slice(3).join(" ")}`}
                         />
 
-                        <div className="min-w-0">
-                          <h3 className="font-black text-sm tracking-wide text-neutral-100 truncate">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="truncate font-sans text-sm font-bold tracking-wide text-white">
                             {category.name}
                           </h3>
-                          <span className="text-[9px] font-bold  tracking-widest text-neutral-500 block mt-0.5">
+                          <span className="mt-1 inline-flex items-center gap-1.5 px-0.5 py-0.5 text-[9px] font-medium text-neutral-400">
+                            <ShoppingBag
+                              size={11}
+                              className="text-violet-300"
+                              aria-hidden="true"
+                            />
                             {associatedProducts.length}{" "}
                             {associatedProducts.length === 1
                               ? "Producto"
@@ -498,10 +515,11 @@ const CategoriasAdmin = ({
                         </div>
                       </div>
 
-                      <div className="flex w-full sm:w-auto justify-center sm:justify-end items-center gap-2.5 border-t sm:border-t-0 border-white/5 pt-3 sm:pt-0 flex-shrink-0">
+                      <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
                         <button
+                          type="button"
                           onClick={() => toggleExpand(category.id)}
-                          className="px-3 py-1.5 rounded-lg border border-white/5 bg-neutral-950/40 text-[9px] font-black  tracking-wider text-neutral-400 hover:text-white transition-all flex items-center gap-1.5"
+                          className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-violet-500/10 px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider text-violet-200 transition-colors hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                         >
                           <span>
                             {isExpanded ? "Ocultar" : "Ver productos"}
@@ -514,11 +532,13 @@ const CategoriasAdmin = ({
                         </button>
 
                         <button
+                          type="button"
                           onClick={() =>
                             handleEditCategory(categoriesList.indexOf(category))
                           }
-                          className="p-2 bg-neutral-800 text-neutral-400 rounded-lg hover:bg-neutral-700 hover:text-violet-400 active:scale-95 transition-all border border-white/5"
-                          title="Editar Configuración"
+                          className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-xl bg-neutral-950/60 text-neutral-300 transition-colors hover:bg-violet-500/10 hover:text-violet-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+                          title="Editar categoría"
+                          aria-label={`Editar categoría ${category.name}`}
                         >
                           <Edit3 size={14} />
                         </button>
@@ -527,9 +547,9 @@ const CategoriasAdmin = ({
 
                     {/* SUBPANEL DESPLEGABLE DE PRODUCTOS */}
                     {isExpanded && (
-                      <div className="px-4 pb-4 bg-black/30 border-t border-white/5 space-y-2 animate-fadeIn">
+                      <div className="space-y-2 bg-black/20 px-4 pb-4 animate-fadeIn">
                         {associatedProducts.length === 0 ? (
-                          <p className="text-[10px] text-neutral-600 uppercase font-bold tracking-wider py-2 italic text-center">
+                          <p className="py-3 text-center text-xs text-neutral-400">
                             No hay productos en esta categoría.
                           </p>
                         ) : (
@@ -544,7 +564,7 @@ const CategoriasAdmin = ({
                                   })
                                 }
                                 aria-label={`Editar ${prod.name} en productos`}
-                                className="group flex w-full items-center justify-between gap-4 rounded-xl border border-white/[0.05] bg-neutral-900/50 px-4 py-3 text-left transition-all hover:border-violet-500/30 hover:bg-neutral-800/70"
+                                className="group flex min-h-12 w-full items-center justify-between gap-4 rounded-xl bg-neutral-900/50 px-3 py-2.5 text-left transition-colors hover:bg-neutral-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                               >
                                 <div className="flex min-w-0 flex-1 items-center gap-3">
                                   <div
@@ -554,26 +574,26 @@ const CategoriasAdmin = ({
                                         : "bg-neutral-600"
                                     }`}
                                   />
-                                  <span className="truncate text-[10px] font-black  tracking-wide text-neutral-300 group-hover:text-white">
+                                  <span className="truncate text-xs font-semibold tracking-wide text-neutral-200 group-hover:text-white">
                                     {prod.name}
                                   </span>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-3">
                                   <div className="flex items-center gap-1.5">
                                     <span
-                                      className={`rounded border px-1.5 py-0.5 text-[8px] font-black uppercase ${
+                                      className={`rounded px-1.5 py-0.5 text-[8px] font-black uppercase ${
                                         prod.isActive
-                                          ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
-                                          : "border-slate-500/20 bg-slate-500/10 text-slate-400"
+                                          ? "bg-emerald-500/10 text-emerald-400"
+                                          : "bg-slate-500/10 text-slate-400"
                                       }`}
                                     >
                                       {prod.isActive ? "Activo" : "Archivado"}
                                     </span>
                                     <span
-                                      className={`rounded border px-1.5 py-0.5 text-[8px] font-black uppercase ${
+                                      className={`rounded px-1.5 py-0.5 text-[8px] font-black uppercase ${
                                         prod.isSoldOut
-                                          ? "border-red-500/20 bg-red-500/10 text-red-400"
-                                          : "border-sky-500/20 bg-sky-500/10 text-sky-400"
+                                          ? "bg-red-500/10 text-red-400"
+                                          : "bg-sky-500/10 text-sky-400"
                                       }`}
                                     >
                                       {prod.isSoldOut
@@ -581,7 +601,7 @@ const CategoriasAdmin = ({
                                         : "Disponible"}
                                     </span>
                                   </div>
-                                  <span className="text-[10px] font-mono font-black text-white bg-black/40 px-2.5 py-0.5 rounded border border-white/5">
+                                  <span className="rounded bg-black/30 px-2 py-0.5 text-[10px] font-mono font-bold text-white">
                                     ${prod.price?.toLocaleString("es-CO")}
                                   </span>
                                   <ArrowRight
@@ -605,17 +625,16 @@ const CategoriasAdmin = ({
 
         {/* MODAL AJUSTES GIGANTE */}
         {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/95 backdrop-blur-2xl overflow-y-auto">
-            <div className="bg-gradient-to-b from-neutral-800 to-neutral-900 border border-violet-500/20 w-full max-w-5xl rounded-3xl overflow-hidden flex flex-col shadow-2xl shadow-violet-500/10 max-h-[95vh]">
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/80 p-2 backdrop-blur-sm sm:p-4">
+            <div className="flex max-h-[95vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 shadow-2xl">
               {/* Header Modal */}
-              <div className="relative overflow-hidden flex-shrink-0">
-                <div className="absolute inset-0 bg-gradient-to-r from-violet-600/20 via-purple-600/10 to-transparent"></div>
-                <div className="relative px-6 py-6 flex justify-between items-start gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="p-1 rounded-xl flex-shrink-0">
-                      <Layers className="w-6 h-6 text-violet-400" />
+              <div className="shrink-0 border-b border-white/10">
+                <div className="flex items-start justify-between gap-4 px-4 py-4 sm:px-6">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="shrink-0 rounded-xl bg-violet-500/10 p-2">
+                      <Layers className="h-5 w-5 text-violet-300" />
                     </div>
-                    <h2 className="text-xl sm:text-2xl font-black uppercase tracking-tight text-white leading-tight">
+                    <h2 className="font-sans text-lg font-bold text-white sm:text-xl">
                       {editingIndex !== null
                         ? "Editar Configuración"
                         : "Crear Nueva"}{" "}
@@ -623,51 +642,52 @@ const CategoriasAdmin = ({
                     </h2>
                   </div>
                   <button
+                    type="button"
                     onClick={() => setIsModalOpen(false)}
-                    className="p-2 hover:bg-white/10 rounded-xl transition-all text-neutral-400 hover:text-white"
+                    aria-label="Cerrar"
+                    className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                   >
                     <X size={20} />
                   </button>
                 </div>
-                <div className="h-px bg-gradient-to-r from-transparent via-violet-500/30 to-transparent"></div>
               </div>
 
               {/* Contenido Modular */}
               <div
-                className="flex flex-col md:flex-row gap-6 md:gap-8 p-6 md:p-8 overflow-y-auto"
+                className="flex flex-col gap-6 overflow-y-auto p-4 md:flex-row md:gap-8 md:p-6"
                 style={{ maxHeight: "calc(95vh - 160px)" }}
               >
                 {/* Panel Izquierdo PREVISUALIZACIÓN */}
-                <div className="w-full md:w-2/5 flex flex-col gap-6 flex-shrink-0">
+                <div className="flex w-full shrink-0 flex-col gap-6 md:w-2/5">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <div className="w-1 h-1 rounded-full bg-violet-400" />
-                      <label className="text-[9px] sm:text-[10px] font-black uppercase text-violet-400 tracking-widest">
-                        Previsualización Led
+                      <label className="text-[8px] font-black uppercase tracking-widest text-neutral-400 sm:text-[9px]">
+                        Previsualización
                       </label>
                     </div>
-                    <div className="relative rounded-2xl border border-white/5 bg-gradient-to-br from-neutral-900 to-neutral-850 aspect-video md:aspect-square flex flex-col items-center justify-center p-4 text-center shadow-2xl">
+                    <div className="relative flex aspect-video flex-col items-center justify-center rounded-2xl border border-white/5 bg-neutral-950 p-4 text-center md:aspect-square">
                       <div
                         className={`w-16 h-16 rounded-full border-2 border-white/30 mb-4 transition-all duration-300 ${
                           colorClasses[formData.color].split(" ")[0]
                         } ${colorClasses[formData.color].split(" ").slice(3).join(" ")}`}
                       />
-                      <span className="text-xs font-black uppercase tracking-widest text-white truncate max-w-full px-2">
+                      <span className="max-w-full truncate px-2 text-xs font-bold uppercase tracking-widest text-white">
                         {formData.name || "Nombre de categoría"}
                       </span>
-                      <span className="text-[8px] font-bold uppercase tracking-widest text-neutral-500 mt-1">
-                        Color Técnico: {formData.color}
+                      <span className="mt-1 text-[9px] font-semibold uppercase tracking-widest text-neutral-400">
+                        Color: {formData.color}
                       </span>
                     </div>
                   </div>
                 </div>
 
                 {/* Panel Derecho REJILLA DE COLORES SELECCIONABLES */}
-                <div className="flex-1 flex flex-col gap-5 min-w-0">
+                <div className="flex min-w-0 flex-1 flex-col gap-5">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <div className="w-1 h-1 rounded-full bg-violet-400" />
-                      <label className="text-[9px] sm:text-[10px] font-black uppercase text-violet-400 tracking-widest">
+                      <label className="text-[8px] font-black uppercase tracking-widest text-neutral-400 sm:text-[9px]">
                         Nombre de categoría
                       </label>
                     </div>
@@ -677,7 +697,7 @@ const CategoriasAdmin = ({
                       onChange={(e) =>
                         setFormData({ ...formData, name: e.target.value })
                       }
-                      className="w-full bg-gradient-to-r from-neutral-700/30 to-neutral-800/30 border border-neutral-600/50 focus:border-violet-500/50 rounded-xl py-3.5 px-4 text-xs font-bold uppercase tracking-widest text-white focus:outline-none transition-all placeholder:text-neutral-700"
+                      className="w-full rounded-xl border border-white/5 bg-neutral-950 px-3 py-2.5 text-[10px] font-mono uppercase text-neutral-200 outline-none transition-all placeholder:text-neutral-600 focus:border-violet-500/40"
                       placeholder="EJ: BARRA CAFE / FRITURAS"
                     />
                   </div>
@@ -685,20 +705,22 @@ const CategoriasAdmin = ({
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <div className="w-1 h-1 rounded-full bg-violet-400" />
-                      <label className="text-[9px] sm:text-[10px] font-black uppercase text-neutral-400 tracking-wider">
-                        Paleta de Color Técnico asignada
+                      <label className="text-[8px] font-black uppercase tracking-widest text-neutral-400 sm:text-[9px]">
+                        Color de categoría
                       </label>
                     </div>
-                    <div className="grid grid-cols-8 gap-2 bg-black/40 p-3 rounded-xl border border-white/5">
+                    <div className="grid grid-cols-4 gap-2 rounded-xl border border-white/5 bg-neutral-950 p-3 sm:grid-cols-8">
                       {colors.map((color) => (
                         <button
                           key={color}
                           type="button"
                           onClick={() => setFormData({ ...formData, color })}
+                          aria-label={`Seleccionar color ${color}`}
+                          aria-pressed={formData.color === color}
                           className={`h-9 rounded-lg border transition-all flex items-center justify-center ${
                             formData.color === color
-                              ? "border-white scale-[1.03]"
-                              : "border-transparent opacity-40 hover:opacity-100"
+                              ? "scale-[1.03] border-white"
+                              : "border-transparent opacity-70 hover:opacity-100"
                           } ${colorClasses[color].split(" ")[0]} ${
                             colorClasses[color].split(" ")[1]
                           } ${colorClasses[color].split(" ").slice(3).join(" ")}`}
@@ -717,28 +739,31 @@ const CategoriasAdmin = ({
               </div>
 
               {/* Footer Modal */}
-              <div className="border-t border-violet-500/10 bg-gradient-to-t from-neutral-900/80 to-transparent px-6 py-4 flex gap-3 justify-end flex-wrap flex-shrink-0">
+              <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-white/10 bg-neutral-900 px-4 py-4 sm:px-6">
                 {editingIndex !== null && (
                   <button
+                    type="button"
                     onClick={() => {
                       setDeleteConfirm(editingIndex);
                       setIsModalOpen(false);
                     }}
-                    className="px-4 py-2.5 bg-gradient-to-r from-red-500/20 to-red-600/20 border border-red-500/50 text-red-400 hover:border-red-500 rounded-xl font-black uppercase text-[10px] tracking-wider transition-all flex items-center gap-1.5 mr-auto shadow-lg shadow-red-500/10"
+                    className="mr-auto inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-red-300 transition-colors hover:bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
                   >
                     <Trash2 size={14} /> Eliminar
                   </button>
                 )}
 
                 <button
+                  type="button"
                   onClick={handleSaveCategory}
-                  className="px-6 py-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-xl font-black uppercase text-[10px] tracking-[0.15em] flex items-center gap-2 hover:from-violet-600 transition-all shadow-xl shadow-violet-500/20 active:scale-95"
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-violet-600 px-5 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                 >
                   <Save size={14} /> Guardar Cambios
                 </button>
                 <button
+                  type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-5 py-2.5 bg-neutral-700/50 border border-neutral-600/50 text-neutral-300 rounded-xl font-black uppercase text-[10px] tracking-wider hover:bg-neutral-700 transition-all"
+                  className="min-h-10 rounded-xl border border-white/10 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-neutral-300 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                 >
                   Cancelar
                 </button>
@@ -756,44 +781,44 @@ const CategoriasAdmin = ({
             );
 
             return (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl">
-                <div className="bg-neutral-900 border border-red-500/30 w-full max-w-md rounded-3xl p-6 shadow-2xl">
-                  <div className="flex items-center gap-3 mb-4 border-b border-white/5 pb-3">
-                    <AlertTriangle className="text-red-500" size={24} />
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+                <div className="w-full max-w-md rounded-2xl border border-red-500/25 bg-neutral-900 p-5 shadow-2xl sm:p-6">
+                  <div className="mb-4 flex items-center gap-3 border-b border-white/10 pb-3">
+                    <AlertTriangle className="shrink-0 text-red-300" size={22} />
                     <div>
-                      <h3 className="text-xl font-black uppercase tracking-tight text-white">
+                      <h3 className="font-sans text-lg font-bold text-white">
                         Eliminación en Cascada
                       </h3>
-                      <p className="text-[9px] text-red-400 font-bold uppercase tracking-widest">
+                      <p className="mt-1 text-[9px] font-bold uppercase tracking-widest text-red-300">
                         Acción de alto riesgo
                       </p>
                     </div>
                   </div>
 
-                  <p className="text-xs text-neutral-400 mb-4 uppercase tracking-wide leading-relaxed">
+                  <p className="mb-4 text-sm leading-relaxed text-neutral-300">
                     ¿Estás seguro de borrar la categoría{" "}
-                    <span className="text-red-400 font-black">
+                    <span className="font-bold text-red-300">
                       "{catObj?.name}"
                     </span>
                     ? Esta acción destruirá de manera irreversible los
                     siguientes productos ({associatedProds.length}):
                   </p>
 
-                  <div className="bg-black/40 border border-red-500/10 rounded-xl p-3 mb-5 max-h-32 overflow-y-auto space-y-1">
+                  <div className="mb-5 max-h-32 space-y-1 overflow-y-auto rounded-xl border border-red-500/10 bg-black/30 p-3">
                     {associatedProds.length === 0 ? (
-                      <div className="text-[9px] text-neutral-500 uppercase font-bold py-1 italic">
+                      <div className="py-1 text-xs text-neutral-400">
                         Ningún producto se verá afectado.
                       </div>
                     ) : (
                       associatedProds.map((p) => (
                         <div
                           key={p.id}
-                          className="text-[9px] uppercase font-bold bg-red-500/5 text-neutral-400 py-1.5 px-2 rounded-lg border border-red-500/10 flex justify-between"
+                          className="flex items-center justify-between gap-3 rounded-lg border border-red-500/10 bg-red-500/5 px-2 py-1.5 text-[10px] font-semibold text-neutral-300"
                         >
                           <span className="truncate max-w-[200px]">
                             {p.name}
                           </span>
-                          <span className="font-mono text-red-400/80">
+                          <span className="shrink-0 font-mono text-red-300">
                             ${p.price}
                           </span>
                         </div>
@@ -801,16 +826,18 @@ const CategoriasAdmin = ({
                     )}
                   </div>
 
-                  <div className="flex gap-3">
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row">
                     <button
+                      type="button"
                       onClick={() => handleDeleteCategoryFinal(deleteConfirm)}
-                      className="flex-1 bg-red-500 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-red-600 transition-all shadow-lg shadow-red-500/20"
+                      className="min-h-10 flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
                     >
                       Eliminar Todo
                     </button>
                     <button
+                      type="button"
                       onClick={() => setDeleteConfirm(null)}
-                      className="flex-1 bg-neutral-800 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest border border-white/10 hover:border-white/20 transition-all text-neutral-400"
+                      className="min-h-10 flex-1 rounded-xl border border-white/10 px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-neutral-300 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                     >
                       Cancelar
                     </button>

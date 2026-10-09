@@ -55,3 +55,13 @@ contraseña temporal nueva para un administrador específico de la tienda. La
 contraseña se devuelve una sola vez y la cuenta queda obligada a cambiarla al
 iniciar sesión. No se almacenan contraseñas legibles ni se puede consultar la
 contraseña anterior.
+
+## Solicitudes de cambio de contraseña
+
+La pantalla **Configuración > Datos** no muestra ni cambia contraseñas.
+Quien necesite recuperar el acceso debe comunicarse con el equipo de soporte por
+el canal oficial de atención. El personal autorizado puede emitir una
+contraseña temporal con `restablecer-contrasena-negocio`; se muestra una sola
+vez y la cuenta debe cambiarla al iniciar sesión. No se necesita guardar
+contraseñas en tablas ni configurar flujos de recuperación por correo para esta
+pantalla.

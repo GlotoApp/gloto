@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useCart } from "./CartContext";
 import DeliveryMap from "../../pos/DeliveryMap";
+import { getEnabledDeliveryMethods } from "../../../src/lib/deliveryMethods";
 
 const fmt = (n) =>
   new Intl.NumberFormat("es-CO", {
@@ -84,10 +85,10 @@ const capitalizarNombre = (texto) =>
     .join(" ");
 
 const METODOS_ENTREGA = [
-  { id: "recoger", label: "Recoger", Icon: Store },
-  { id: "mesa", label: "En mesa", Icon: Armchair },
-  { id: "punto", label: "En punto", Icon: Navigation },
-  { id: "domicilio", label: "Domicilio", Icon: Truck },
+  { id: "recoger", settingId: "pickup", label: "Recoger", Icon: Store },
+  { id: "mesa", settingId: "table", label: "En mesa", Icon: Armchair },
+  { id: "punto", settingId: "point", label: "En punto", Icon: Navigation },
+  { id: "domicilio", settingId: "delivery", label: "Domicilio", Icon: Truck },
 ];
 
 const clearButtonStyle = {
@@ -149,6 +150,17 @@ const Checkout = ({ onVolver, onConfirmar }) => {
     puedeConfirmarEntrega,
     deliverySettings,
   } = useCart();
+  const enabledDeliveryMethods = useMemo(
+    () => getEnabledDeliveryMethods(deliverySettings?.delivery_methods),
+    [deliverySettings?.delivery_methods],
+  );
+  const availableDeliveryMethods = useMemo(
+    () =>
+      METODOS_ENTREGA.filter(({ settingId }) =>
+        enabledDeliveryMethods.includes(settingId),
+      ),
+    [enabledDeliveryMethods],
+  );
   const [deliveryDistanceMeters, setDeliveryDistanceMeters] = useState(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   const [routeError, setRouteError] = useState("");
@@ -159,6 +171,15 @@ const Checkout = ({ onVolver, onConfirmar }) => {
   const [addressSearchError, setAddressSearchError] = useState("");
   const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+
+  useEffect(() => {
+    if (
+      metodoEntrega &&
+      !availableDeliveryMethods.some(({ id }) => id === metodoEntrega)
+    ) {
+      setMetodoEntrega(null);
+    }
+  }, [availableDeliveryMethods, metodoEntrega, setMetodoEntrega]);
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
   const [fullscreenSummaryHeight, setFullscreenSummaryHeight] = useState(0);
@@ -823,15 +844,14 @@ const Checkout = ({ onVolver, onConfirmar }) => {
         <div
           style={{
             display: "grid",
-            // Definimos las 4 columnas
-            gridTemplateColumns: "repeat(4, 1fr)",
+            gridTemplateColumns: `repeat(${availableDeliveryMethods.length}, 1fr)`,
             gap: "10px",
             marginBottom: "24px",
             // Esto asegura que si los botones son más pequeños que su celda, se centren
             justifyItems: "center",
           }}
         >
-          {METODOS_ENTREGA.map(({ id, label, Icon }) => {
+          {availableDeliveryMethods.map(({ id, label, Icon }) => {
             const activo = metodoEntrega === id;
             return (
               <button

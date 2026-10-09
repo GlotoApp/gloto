@@ -14,7 +14,7 @@ import SubLoading from "./SubLoading";
 
 const DEFAULT_UNITS = ["UNIDAD"];
 const inputClass =
-  "w-full rounded-lg border border-white/10 bg-neutral-800 p-3 text-sm outline-none focus:border-violet-500";
+  "min-h-10 w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-2.5 text-sm text-neutral-100 outline-none transition-colors focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/30";
 const upper = (value) =>
   String(value ?? "")
     .trim()
@@ -29,16 +29,16 @@ const getStockStatus = (item) =>
 function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 p-5 sm:p-8">
-        <div className="mb-8 flex items-center justify-between">
-          <h2 className="text-lg font-black uppercase tracking-tighter">
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-8">
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <h2 className="font-sans text-xl font-bold tracking-tight text-white">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Cerrar"
-            className="rounded-lg p-1.5 hover:bg-white/10"
+            className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
           >
             <X size={18} />
           </button>
@@ -72,7 +72,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
   useEffect(() => setValue(String(item.stock)), [item.stock]);
 
   return (
-    <div className="rounded-2xl border border-white/5 bg-neutral-900/40">
+    <div className="rounded-2xl bg-neutral-900/40 transition-colors hover:bg-neutral-900/60">
       <div
         role="button"
         tabIndex={0}
@@ -83,14 +83,14 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
             setOpen((current) => !current);
           }
         }}
-        className="w-full cursor-pointer p-4 text-left hover:bg-white/5"
+        className="w-full cursor-pointer rounded-2xl p-4 text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/60"
       >
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-white">
               {item.name}
             </p>
-            <p className="text-xs text-neutral-500">
+            <p className="mt-1 text-xs text-neutral-400">
               Categoría: {item.category} · mínimo {formatQuantity(item.minStock)} {item.unit}
             </p>
           </div>
@@ -98,7 +98,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
             <span className={`text-sm font-black ${color}`}>
               {formatQuantity(item.stock)} {item.unit}
             </span>
-            <span className={`text-[9px] font-black uppercase ${color}`}>
+            <span className={`text-[10px] font-bold uppercase ${color}`}>
               {status}
             </span>
             <button
@@ -108,7 +108,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
                 onEdit(item);
               }}
               aria-label={`Editar ${item.name}`}
-              className="rounded-lg p-1.5 text-neutral-500 hover:bg-violet-500/10 hover:text-violet-300"
+              className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-violet-500/10 hover:text-violet-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
             >
               <Edit2 size={16} />
             </button>
@@ -116,7 +116,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
         </div>
       </div>
       {open && (
-        <div className="space-y-4 border-t border-white/5 p-4">
+        <div className="space-y-4 rounded-b-2xl bg-black/20 p-4">
           <div className="flex items-center justify-center gap-3 rounded-lg bg-neutral-800/40 p-4">
             <button
               type="button"
@@ -124,7 +124,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
                 setValue(String(Number((numericValue - stockStep).toFixed(3))))
               }
               aria-label="Disminuir stock"
-              className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-red-400"
+              className="rounded-lg p-2 text-neutral-300 transition-colors hover:bg-neutral-700 hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
             >
               <ArrowDownRight size={18} />
             </button>
@@ -134,7 +134,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
               value={value}
               onChange={(event) => setValue(event.target.value)}
               aria-label={`Stock de ${item.name}`}
-              className={`w-32 appearance-none rounded-lg border border-white/10 bg-neutral-700 px-3 py-2 text-center text-xl font-bold tabular-nums outline-none focus:border-violet-500 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
+              className={`w-32 appearance-none rounded-xl bg-neutral-800 px-3 py-2 text-center text-xl font-bold tabular-nums outline-none focus:ring-2 focus:ring-violet-500/50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
                 numericValue < 0 ? "text-red-400" : "text-white"
               }`}
             />
@@ -144,7 +144,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
                 setValue(String(Number((numericValue + stockStep).toFixed(3))))
               }
               aria-label="Aumentar stock"
-              className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-emerald-400"
+              className="rounded-lg p-2 text-neutral-300 transition-colors hover:bg-neutral-700 hover:text-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
             >
               <ArrowUpRight size={18} />
             </button>
@@ -153,7 +153,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
             <button
               type="button"
               onClick={() => onDelete(item.id)}
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-500/20 px-4 py-2.5 text-[10px] font-black uppercase text-red-400 hover:bg-red-500 hover:text-white"
+              className="flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-red-500/10 px-4 py-2.5 text-xs font-bold uppercase text-red-300 transition-colors hover:bg-red-500 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
             >
               <Trash2 size={14} /> Eliminar
             </button>
@@ -161,7 +161,7 @@ function InventoryCard({ item, onEdit, onDelete, onUpdateStock }) {
               type="button"
               disabled={!changed}
               onClick={() => onUpdateStock(item.id, numericValue - item.stock)}
-              className="flex-1 rounded-lg bg-violet-500 px-4 py-2.5 text-[10px] font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="min-h-10 flex-1 rounded-lg bg-violet-600 px-4 py-2.5 text-xs font-bold uppercase text-white transition-colors hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/70 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Guardar
             </button>
@@ -502,51 +502,57 @@ export default function Inventario() {
 
   return (
     <div className="min-h-screen bg-background p-4 font-sans text-white">
-      <header className="mx-auto mb-10 max-w-7xl space-y-6">
-        <div>
-          <h1 className="text-2xl font-black tracking-tighter">Insumos</h1>
-          <p className="mt-1 text-[10px] font-mono uppercase tracking-widest text-neutral-500">
-            Control de existencias y stock de insumos
-          </p>
+      <header className="mx-auto mb-6 max-w-7xl space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="font-sans text-2xl font-black tracking-tighter text-white">
+            Insumos
+          </h1>
+          <button
+            type="button"
+            onClick={openNew}
+            className="inline-flex min-h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-violet-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-violet-200 transition-colors hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+          >
+            <Plus size={14} /> Nuevo insumo
+          </button>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-2xl border border-white/5 bg-neutral-900/40 p-6">
-            <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl bg-neutral-900/40 p-4 sm:p-5">
+            <p className="text-[10px] font-black uppercase tracking-widest text-neutral-400">
               Valor de bodega
             </p>
-            <p className="mt-2 text-2xl font-black">
+            <p className="mt-2 text-2xl font-bold tabular-nums text-white">
               ${totalValue.toLocaleString("de-DE")}
             </p>
           </div>
-          <div className="rounded-2xl border border-orange-500/30 bg-neutral-900/40 p-6">
-            <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+          <div className="rounded-2xl bg-neutral-900/40 p-4 sm:p-5">
+            <p className="text-[10px] font-black uppercase tracking-widest text-neutral-400">
               Stock bajo
             </p>
-            <p className="mt-2 text-2xl font-black text-orange-400">
+            <p className="mt-2 text-2xl font-bold tabular-nums text-orange-300">
               {lowStock}
             </p>
           </div>
-          <div className="rounded-2xl border border-white/5 bg-neutral-900/40 p-6">
-            <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+          <div className="rounded-2xl bg-neutral-900/40 p-4 sm:p-5">
+            <p className="text-[10px] font-black uppercase tracking-widest text-neutral-400">
               Insumos activos
             </p>
-            <p className="mt-2 text-2xl font-black text-violet-400">
+            <p className="mt-2 text-2xl font-bold tabular-nums text-violet-300">
               {inventory.length}
             </p>
           </div>
         </div>
       </header>
       <main className="mx-auto max-w-7xl space-y-5 pb-20">
-        <div className="rounded-2xl border border-white/5 bg-neutral-900/30 p-3 sm:p-4">
-          <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.5fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(150px,1fr)_auto]">
+        <div className="rounded-2xl bg-neutral-900/30 p-3 sm:p-4">
+          <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.5fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(150px,1fr)]">
             <label className="block min-w-0">
-              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-400">
                 Buscar
               </span>
               <span className="relative block">
                 <Search
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
-                  size={15}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-400/70"
+                  size={16}
                 />
                 <input
                   type="search"
@@ -558,7 +564,7 @@ export default function Inventario() {
               </span>
             </label>
             <label className="block min-w-0">
-              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-400">
                 Categoría
               </span>
               <select
@@ -575,7 +581,7 @@ export default function Inventario() {
               </select>
             </label>
             <label className="block min-w-0">
-              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-400">
                 Unidad
               </span>
               <select
@@ -594,7 +600,7 @@ export default function Inventario() {
               </select>
             </label>
             <label className="block min-w-0">
-              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+              <span className="mb-1.5 block px-1 text-[9px] font-black uppercase tracking-widest text-neutral-400">
                 Estado del stock
               </span>
               <select
@@ -608,18 +614,11 @@ export default function Inventario() {
                 <option value="critico">Críticos</option>
               </select>
             </label>
-            <button
-              type="button"
-              onClick={openNew}
-              className="flex min-h-[46px] items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-violet-500 px-5 py-3 text-[10px] font-black uppercase transition-colors hover:bg-violet-600 sm:col-span-2 xl:col-span-1"
-            >
-              <Plus size={14} /> Nuevo insumo
-            </button>
           </div>
         </div>
         <div className="space-y-3">
           {filteredInventory.length === 0 ? (
-            <p className="py-16 text-center text-neutral-500">
+            <p className="rounded-2xl bg-neutral-900/30 px-5 py-14 text-center text-sm text-neutral-300">
               No hay insumos que coincidan.
             </p>
           ) : (
@@ -641,7 +640,7 @@ export default function Inventario() {
           onClose={() => setModal(false)}
         >
           <div className="space-y-6">
-            <label className="block text-[10px] font-black uppercase tracking-widest text-neutral-500">
+            <label className="block text-[10px] font-black uppercase tracking-widest text-neutral-300">
               Nombre
               <input
                 value={form.name}
@@ -653,7 +652,7 @@ export default function Inventario() {
               />
             </label>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <div className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+              <div className="text-[10px] font-black uppercase tracking-widest text-neutral-300">
                 <label htmlFor="inventory-category">Categoría</label>
                 <select
                   id="inventory-category"
@@ -677,7 +676,7 @@ export default function Inventario() {
                   <button
                     type="button"
                     onClick={() => setShowQuickCategory(true)}
-                    className="mt-2 flex items-center gap-1.5 text-[10px] font-bold normal-case tracking-normal text-violet-300 hover:text-violet-200"
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-md text-[10px] font-bold normal-case tracking-normal text-violet-300 transition-colors hover:text-violet-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                   >
                     <Plus size={13} /> Crear categoría rápida
                   </button>
@@ -697,20 +696,20 @@ export default function Inventario() {
                       }}
                       aria-label="Nombre de la nueva categoría"
                       placeholder="Nombre de la categoría"
-                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-neutral-800 px-3 py-2 text-xs normal-case tracking-normal outline-none focus:border-violet-500"
+                      className="min-h-10 min-w-0 flex-1 rounded-xl border border-white/10 bg-neutral-950 px-3 py-2 text-sm normal-case tracking-normal text-neutral-100 outline-none focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/30"
                     />
                     <button
                       type="button"
                       onClick={createQuickCategory}
                       disabled={!quickCategoryName.trim() || creatingCategory}
-                      className="rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      className="min-h-10 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold uppercase text-white transition-colors hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/70 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {creatingCategory ? "..." : "Crear"}
                     </button>
                   </div>
                 )}
               </div>
-              <label className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+              <label className="text-[10px] font-black uppercase tracking-widest text-neutral-300">
                 Unidad
                 <select
                   value={form.unit}
@@ -739,9 +738,9 @@ export default function Inventario() {
               </label>
             </div>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+              <label className="text-[10px] font-black uppercase tracking-widest text-neutral-300">
                 Existencia actual ({selectedUnit || "UNIDAD"})
-                <span className="mt-1 block text-[9px] font-medium normal-case tracking-normal text-neutral-500">
+                <span className="mt-1 block text-xs font-medium normal-case tracking-normal text-neutral-400">
                   Cantidad disponible expresada en {selectedUnit || "UNIDAD"}.
                 </span>
                 <input
@@ -754,9 +753,9 @@ export default function Inventario() {
                   className={`${inputClass} mt-2`}
                 />
               </label>
-              <label className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+              <label className="text-[10px] font-black uppercase tracking-widest text-neutral-300">
                 Stock mínimo ({selectedUnit || "UNIDAD"})
-                <span className="mt-1 block text-[9px] font-medium normal-case tracking-normal text-neutral-500">
+                <span className="mt-1 block text-xs font-medium normal-case tracking-normal text-neutral-400">
                   Alerta cuando queden esta cantidad o menos.
                 </span>
                 <input
@@ -770,7 +769,7 @@ export default function Inventario() {
                 />
               </label>
             </div>
-            <label className="block text-[10px] font-black uppercase tracking-widest text-neutral-500">
+            <label className="block text-[10px] font-black uppercase tracking-widest text-neutral-300">
               Costo por {selectedUnit || "UNIDAD"}
               <input
                 type="number"
@@ -781,7 +780,7 @@ export default function Inventario() {
                 }
                 className={`${inputClass} mt-2`}
               />
-              <span className="mt-1 block text-[10px] font-medium normal-case tracking-normal text-neutral-500">
+              <span className="mt-1 block text-xs font-medium normal-case tracking-normal text-neutral-400">
                 El stock y su mínimo se registran en {selectedUnit || "UNIDAD"}.
                 {selectedUnitAllowsFraction
                   ? " Esta unidad permite cantidades fraccionarias."
@@ -792,7 +791,7 @@ export default function Inventario() {
               type="button"
               onClick={saveInventory}
               disabled={!form.name.trim() || !form.categoryId || !form.unit}
-              className="w-full rounded-lg bg-violet-500 px-4 py-3 text-[10px] font-black uppercase disabled:opacity-40"
+              className="min-h-11 w-full rounded-xl bg-violet-600 px-4 py-3 text-xs font-bold uppercase text-white transition-colors hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/70 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {editing ? "Actualizar" : "Crear insumo"}
             </button>

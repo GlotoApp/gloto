@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../../src/lib/supabaseClient";
+import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 import { SubLoading } from "./Loading";
 import { useAuth } from "../../src/components/AuthContext";
 import {
@@ -1154,6 +1155,7 @@ export default function MesasPOS() {
   } catch (_) {}
 
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [mesas, setMesas] = useState([]);
   const [products, setProducts] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -1297,6 +1299,29 @@ export default function MesasPOS() {
         return;
       }
 
+      const { data: businessInfo, error: businessInfoError } = await supabase
+        .from("business_info")
+        .select("delivery_methods")
+        .eq("business_id", profile.business_id)
+        .maybeSingle();
+
+      if (businessInfoError) {
+        console.error(
+          "Error verificando si la tienda usa mesas:",
+          businessInfoError,
+        );
+        setLoading(false);
+        return;
+      }
+      if (
+        !getEnabledDeliveryMethods(businessInfo?.delivery_methods).includes(
+          "table",
+        )
+      ) {
+        navigate("/pos", { replace: true });
+        return;
+      }
+
       setBusinessId(profile.business_id);
 
       // Los productos se necesitan al editar; no deben bloquear la carga de mesas.
@@ -1418,7 +1443,7 @@ export default function MesasPOS() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [navigate, user?.id]);
 
   useEffect(() => {
     loadMesasFromDB();

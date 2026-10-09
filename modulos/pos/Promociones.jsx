@@ -455,12 +455,12 @@ const Promociones = () => {
   return (
     <div className="min-h-screen bg-background px-4 py-8 text-white md:px-8">
       <div className="mx-auto max-w-5xl space-y-6">
-        <header className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 pb-5">
+        <header className="flex flex-wrap items-end justify-between gap-4 pb-1">
           <div>
-            <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
+            <p className="mb-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
               Marketplace
             </p>
-            <h1 className="text-3xl font-black tracking-tight">Promociones</h1>
+            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Promociones</h1>
             <p className="mt-2 max-w-xl text-sm text-neutral-400">
               Crea una propuesta promocional. Solo las promociones con pago
               confirmado aparecen en Home.
@@ -476,14 +476,14 @@ const Promociones = () => {
               setCoverFile(null);
               setIsFormOpen((current) => !current);
             }}
-            className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-wider transition hover:bg-violet-500"
+            className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-wider transition hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
           >
             <Plus size={16} /> Nueva promoción
           </button>
         </header>
 
         {!loading && message && (
-          <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 px-4 py-3 text-sm text-violet-200">
+          <div className="rounded-xl bg-violet-500/10 px-4 py-3 text-sm leading-5 text-violet-200">
             {message}
           </div>
         )}
@@ -491,7 +491,7 @@ const Promociones = () => {
         {!loading && isFormOpen && (
           <form
             onSubmit={handleSubmit}
-            className="space-y-5 rounded-2xl border border-white/10 bg-neutral-900/60 p-5"
+            className="space-y-6 rounded-2xl bg-neutral-900/70 p-5 sm:p-7"
           >
             <div className="grid gap-4 md:grid-cols-2">
               <label className="text-xs font-bold text-neutral-300">
@@ -501,7 +501,7 @@ const Promociones = () => {
                   onChange={(event) =>
                     setForm({ ...form, tag: event.target.value })
                   }
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-3 text-sm text-white"
+                  className="mt-2 w-full rounded-xl bg-neutral-950 px-3 py-3 text-sm text-white outline-none transition focus-visible:ring-2 focus-visible:ring-violet-400"
                 >
                   <option>NUEVO</option>
                   <option>PATROCINADO</option>
@@ -518,11 +518,11 @@ const Promociones = () => {
                     setForm({ ...form, offerText: event.target.value })
                   }
                   placeholder="Ej. 20% de descuento en bebidas"
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-3 text-sm text-white outline-none focus:border-violet-500"
+                  className="mt-2 w-full rounded-xl bg-neutral-950 px-3 py-3 text-sm text-white outline-none transition focus-visible:ring-2 focus-visible:ring-violet-400"
                 />
               </label>
             </div>
-            <div className="grid gap-3 rounded-xl border border-white/10 bg-neutral-950/70 p-4 sm:grid-cols-[150px_minmax(0,1fr)]">
+            <div className="grid gap-4 rounded-xl bg-neutral-950/70 p-4 sm:grid-cols-[150px_minmax(0,1fr)]">
               <div className="flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-white/5 text-neutral-500 sm:aspect-square">
                 {coverPreviewUrl ? (
                   <img
@@ -542,7 +542,7 @@ const Promociones = () => {
                   JPG, PNG o WEBP. Máximo 5 MB.
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/10">
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-neutral-800 px-3 py-2.5 text-xs font-bold text-white transition hover:bg-neutral-700 focus-within:ring-2 focus-within:ring-violet-400">
                     <Image size={15} />
                     {coverFile || form.coverPath
                       ? "Cambiar portada"
@@ -607,10 +607,10 @@ const Promociones = () => {
                           durationDays: option.days,
                         }))
                       }
-                      className={`relative flex min-h-40 flex-col items-start rounded-xl border p-4 text-left transition ${
+                      className={`relative flex min-h-40 flex-col items-start rounded-xl p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${
                         isSelected
-                          ? "border-amber-400 bg-amber-400/[0.08] shadow-[0_8px_24px_rgba(245,158,11,0.1)]"
-                          : "border-white/10 bg-neutral-950 hover:border-white/25"
+                          ? "bg-violet-500/15 ring-1 ring-inset ring-violet-400/70"
+                          : "bg-neutral-950 hover:bg-neutral-800"
                       } disabled:cursor-not-allowed disabled:opacity-50`}
                     >
                       {discountPercent > 0 && (
@@ -642,8 +642,8 @@ const Promociones = () => {
                 La promoción empieza cuando se aprueba el pago.
               </p>
             </section>
-            <div className="grid gap-4 border-t border-white/10 pt-5 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-              <div className="flex flex-col items-center justify-center rounded-xl bg-white/[0.035] p-4 text-center">
+            <div className="grid gap-4 pt-2 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+              <div className="flex flex-col items-center justify-center rounded-2xl bg-neutral-950/70 p-5 text-center">
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-black">QR de pago</h2>
                   <CreditCard className="text-violet-300" size={16} />
@@ -669,13 +669,13 @@ const Promociones = () => {
                   Realiza el pago y adjunta el comprobante para validación.
                 </p>
               </div>
-              <div className="rounded-xl bg-white/[0.035] p-4">
+              <div className="rounded-2xl bg-neutral-950/70 p-5">
                 <h2 className="text-sm font-black">Soporte de pago</h2>
                 <p className="mt-1 text-xs text-neutral-500">
                   JPG, PNG o PDF. Máximo 5 MB.
                 </p>
                 <div className="relative mt-4 min-w-0">
-                  <label className="flex min-w-0 w-full cursor-pointer items-center gap-3 rounded-xl border border-dashed border-white/15 px-4 py-3 pr-12 text-sm text-neutral-300 hover:border-violet-400">
+                  <label className="flex min-w-0 w-full cursor-pointer items-center gap-3 rounded-xl bg-neutral-900 px-4 py-3 pr-12 text-sm text-neutral-200 transition hover:bg-neutral-800 focus-within:ring-2 focus-within:ring-violet-400">
                     <FileUp size={18} className="shrink-0 text-violet-300" />
                     <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
                       {paymentFile?.name || "Seleccionar archivo"}
@@ -705,8 +705,8 @@ const Promociones = () => {
                 </div>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-4 border-t border-white/10 pt-4">
-              <p className="text-xs text-amber-300">
+            <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+              <p className="text-sm text-neutral-400">
                 {retryingPromotion
                   ? "El nuevo soporte se enviará a revisión."
                   : "Adjunta el comprobante para enviar la solicitud de revisión."}
@@ -719,7 +719,7 @@ const Promociones = () => {
                   !selectedPackageAvailable ||
                   !paymentFile
                 }
-                className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-black uppercase tracking-wider disabled:opacity-50"
+                className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-wider transition hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 disabled:opacity-50"
               >
                 <Save size={15} />{" "}
                 {saving
@@ -740,7 +740,7 @@ const Promociones = () => {
             fullHeight
           />
         ) : promotions.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-white/10 py-16 text-center text-sm text-neutral-500">
+          <div className="rounded-2xl bg-neutral-900/60 py-16 text-center text-sm text-neutral-400">
             Aún no tienes promociones creadas.
           </div>
         ) : (
@@ -760,7 +760,7 @@ const Promociones = () => {
               return (
                 <article
                   key={promotion.id}
-                  className="flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-neutral-900/50 p-4"
+                  className="flex flex-wrap items-center gap-4 rounded-2xl bg-neutral-900/70 p-4 sm:p-5"
                 >
                   <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-violet-500/10 text-violet-300">
                     {coverUrl ? (
@@ -811,7 +811,7 @@ const Promociones = () => {
                     <button
                       type="button"
                       onClick={() => retryPayment(promotion)}
-                      className="rounded-lg border border-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-white transition hover:bg-white/10"
+                      className="rounded-xl bg-neutral-800 px-3 py-2.5 text-[10px] font-black uppercase tracking-wider text-white transition hover:bg-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                     >
                       Reenviar soporte
                     </button>
@@ -822,7 +822,7 @@ const Promociones = () => {
                     </p>
                   )}
                   {isExpired && (
-                    <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4">
+                    <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-500/[0.07] p-4">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-bold text-amber-200">
                           Tu promoción terminó. ¿Quieres renovarla?
@@ -835,7 +835,7 @@ const Promociones = () => {
                       <button
                         type="button"
                         onClick={() => startRenewal(promotion)}
-                        className="rounded-lg bg-amber-500 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-neutral-950 transition hover:bg-amber-400"
+                        className="rounded-xl bg-amber-500 px-3 py-2.5 text-[10px] font-black uppercase tracking-wider text-neutral-950 transition hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                       >
                         Renovar
                       </button>
@@ -843,7 +843,7 @@ const Promociones = () => {
                         type="button"
                         onClick={() => deleteExpiredPromotion(promotion)}
                         disabled={deletingPromotion === promotion.id}
-                        className="rounded-lg border border-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-white transition hover:bg-white/10 disabled:opacity-50"
+                        className="rounded-xl bg-neutral-800 px-3 py-2.5 text-[10px] font-black uppercase tracking-wider text-white transition hover:bg-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:opacity-50"
                       >
                         {deletingPromotion === promotion.id
                           ? "Eliminando..."

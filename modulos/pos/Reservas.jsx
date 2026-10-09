@@ -11,6 +11,7 @@ import {
   Users,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
+import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 import { useAuth } from "../../src/components/AuthContext";
 import SubLoading from "./SubLoading";
 
@@ -144,12 +145,35 @@ const Reservas = () => {
         return;
       }
 
+      const { data: businessInfo, error: businessInfoError } = await supabase
+        .from("business_info")
+        .select("delivery_methods")
+        .eq("business_id", data.business_id)
+        .maybeSingle();
+      if (businessInfoError) {
+        console.error(
+          "Error verificando si la tienda usa mesas:",
+          businessInfoError,
+        );
+        setErrorMessage("No se pudo verificar la configuración de mesas.");
+        setLoading(false);
+        return;
+      }
+      if (
+        !getEnabledDeliveryMethods(businessInfo?.delivery_methods).includes(
+          "table",
+        )
+      ) {
+        navigate("/pos", { replace: true });
+        return;
+      }
+
       setBusinessId(data.business_id);
       await loadReservations(data.business_id);
     };
 
     loadBusiness();
-  }, [loadReservations, user?.id]);
+  }, [loadReservations, navigate, user?.id]);
 
   useEffect(() => {
     const nuevaReserva = location.state?.nuevaReserva;
@@ -343,21 +367,18 @@ const Reservas = () => {
   return (
     <div className="min-h-screen bg-background p-4 font-sans text-white">
       <div className="mx-auto max-w-7xl pb-20">
-        <header className="mb-10 space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-black tracking-tighter">Reservas</h1>
-              <p className="mt-1 text-[10px] font-mono uppercase tracking-widest text-neutral-500">
-                Disponibilidad y agenda de mesas
-              </p>
-            </div>
+        <header className="mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h1 className="font-sans text-2xl font-black tracking-tighter">
+              Reservas
+            </h1>
             <button
               type="button"
               onClick={() => {
                 setForm((current) => ({ ...current, fecha: selectedDate }));
                 setShowForm(true);
               }}
-              className="rounded-xl bg-violet-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-violet-900/20 transition-colors hover:bg-violet-500"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-500/25 bg-violet-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-violet-200 transition-colors hover:border-violet-400/40 hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
             >
               + Nueva Reserva
             </button>
@@ -378,10 +399,10 @@ const Reservas = () => {
                 <span className="material-symbols-outlined">{icon}</span>
               </span>
               <div className="min-w-0">
-                <p className="truncate text-[8px] font-black uppercase tracking-widest text-neutral-500">
+                <p className="truncate text-[8px] font-black uppercase tracking-widest text-neutral-400">
                   {label}
                 </p>
-                <p className="mt-1 text-2xl font-black leading-none text-white">
+                <p className="mt-1 text-2xl font-bold leading-none text-white">
                   {value}
                 </p>
               </div>
@@ -397,15 +418,17 @@ const Reservas = () => {
             >
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-black">Nueva Reserva</h2>
-                  <p className="text-xs text-neutral-500">
+                  <h2 className="font-sans text-lg font-bold">
+                    Nueva Reserva
+                  </h2>
+                  <p className="text-xs text-neutral-400">
                     La disponibilidad se valida antes de guardar.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowForm(false)}
-                  className="text-xs font-bold text-neutral-500 hover:text-white"
+                  className="min-h-9 rounded-lg px-3 text-xs font-semibold text-neutral-400 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                 >
                   Cancelar
                 </button>
@@ -421,7 +444,7 @@ const Reservas = () => {
                 ].map(([field, label, type]) => (
                   <label
                     key={field}
-                    className="text-xs font-bold text-on-surface-variant"
+                    className="flex flex-col gap-1.5 text-[8px] font-black uppercase tracking-widest text-neutral-400"
                   >
                     {label}
                     <input
@@ -431,11 +454,11 @@ const Reservas = () => {
                       onChange={(event) =>
                         updateForm(field, event.target.value)
                       }
-                      className="mt-1 w-full rounded-xl border border-white/5 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500/50"
+                      className="w-full rounded-xl border border-white/5 bg-neutral-900 px-3 py-2.5 text-[10px] font-mono uppercase text-neutral-200 outline-none transition-all placeholder:text-neutral-600 focus:border-violet-500/40"
                     />
                   </label>
                 ))}
-                <label className="text-xs font-bold text-on-surface-variant sm:col-span-2 lg:col-span-2">
+                <label className="flex flex-col gap-1.5 text-[8px] font-black uppercase tracking-widest text-neutral-400 sm:col-span-2 lg:col-span-2">
                   Notas
                   <input
                     type="text"
@@ -443,12 +466,12 @@ const Reservas = () => {
                     onChange={(event) =>
                       updateForm("notas", event.target.value)
                     }
-                    className="mt-1 w-full rounded-xl border border-white/5 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500/50"
+                    className="w-full rounded-xl border border-white/5 bg-neutral-900 px-3 py-2.5 text-[10px] font-mono uppercase text-neutral-200 outline-none transition-all placeholder:text-neutral-600 focus:border-violet-500/40"
                   />
                 </label>
               </div>
               {reservationDateConflict && (
-                <div className="mt-4 rounded-xl border border-error/40 bg-error/10 px-4 py-3 text-sm font-bold text-error">
+                <div role="alert" className="mt-4 rounded-xl border border-error/40 bg-error/10 px-4 py-3 text-sm font-semibold text-error">
                   Esta mesa ya está ocupada por una reserva en la fecha
                   seleccionada. La hora no cambia la disponibilidad de la mesa.
                 </div>
@@ -456,7 +479,7 @@ const Reservas = () => {
               <button
                 type="submit"
                 disabled={saving || reservationDateConflict}
-                className="mt-4 rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white hover:bg-violet-500 disabled:opacity-50"
+                className="mt-4 min-h-10 rounded-xl bg-violet-600 px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white transition-colors hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {saving ? "Guardando..." : "Crear reserva"}
               </button>
@@ -464,7 +487,7 @@ const Reservas = () => {
           )}
 
           {errorMessage && (
-            <div className="mb-4 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
+            <div role="alert" className="mb-4 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
               {errorMessage}
             </div>
           )}
@@ -476,30 +499,30 @@ const Reservas = () => {
                   <p className="text-[9px] font-black uppercase tracking-[0.25em] text-violet-400">
                     Disponibilidad
                   </p>
-                  <h2 className="mt-1 text-lg font-black">Calendario</h2>
+                  <h2 className="mt-1 font-sans text-lg font-bold">Calendario</h2>
                 </div>
                 <button
                   type="button"
                   onClick={() => moveMonth(-1)}
-                  className="rounded-lg p-2 text-neutral-500 hover:bg-white/10 hover:text-white"
+                  className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                   aria-label="Mes anterior"
                 >
                   <ChevronLeft size={18} />
                 </button>
-                <h2 className="rounded-lg bg-neutral-950 px-3 py-2 text-sm font-black capitalize">
+                <h2 className="rounded-xl border border-white/5 bg-neutral-950 px-3 py-2 text-xs font-bold capitalize text-neutral-200">
                   {formatMonth(monthDate)}
                 </h2>
                 <button
                   type="button"
                   onClick={() => moveMonth(1)}
-                  className="rounded-lg p-2 text-neutral-500 hover:bg-white/10 hover:text-white"
+                  className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                   aria-label="Mes siguiente"
                 >
                   <ChevronRight size={18} />
                 </button>
               </div>
 
-              <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase tracking-widest text-on-surface-variant">
+              <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[8px] font-black uppercase tracking-widest text-neutral-400">
                 {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map(
                   (day) => (
                     <span key={day} className="py-2">
@@ -523,17 +546,18 @@ const Reservas = () => {
                       onClick={() => setSelectedDate(dateKey)}
                       className={`relative min-h-20 rounded-2xl border p-3 text-left transition-all ${
                         isSelected
-                          ? "border-violet-500/50 bg-violet-500/15 text-white shadow-lg shadow-violet-900/10"
-                          : "border-white/6 bg-neutral-950 hover:border-violet-500/40 hover:bg-white/5"
+                          ? "border-violet-500/50 bg-violet-500/15 text-violet-100 shadow-lg shadow-violet-900/10"
+                          : "border-white/5 bg-neutral-950 text-neutral-300 hover:border-violet-500/40 hover:bg-white/5"
                       } ${!isCurrentMonth ? "opacity-35" : ""}`}
+                      aria-pressed={isSelected}
                     >
                       <span
-                        className={`text-sm font-bold ${isToday ? "text-violet-400" : ""}`}
+                        className={`text-sm font-semibold ${isToday ? "text-violet-300" : ""}`}
                       >
                         {day.getDate()}
                       </span>
                       {count > 0 && (
-                        <span className="absolute bottom-2 left-2 rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-black text-white">
+                        <span className="absolute bottom-2 left-2 rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-bold text-white">
                           {count}
                         </span>
                       )}
@@ -552,10 +576,10 @@ const Reservas = () => {
                   <p className="text-[9px] font-black uppercase tracking-[0.25em] text-violet-400">
                     Agenda del día
                   </p>
-                  <h2 className="mt-1 text-lg font-black capitalize">
+                  <h2 className="mt-1 font-sans text-lg font-bold capitalize">
                     {formatLongDate(parseDateKey(selectedDate))}
                   </h2>
-                  <p className="text-xs text-on-surface-variant">
+                  <p className="text-xs text-neutral-400">
                     {selectedReservations.length} reserva
                     {selectedReservations.length === 1 ? "" : "s"}
                   </p>
@@ -569,7 +593,7 @@ const Reservas = () => {
                   dotClassName="bg-violet-400"
                 />
               ) : selectedReservations.length === 0 ? (
-                <div className="py-12 text-center text-sm text-on-surface-variant">
+                <div className="py-12 text-center text-sm text-neutral-400">
                   No hay reservas para este día.
                 </div>
               ) : (
@@ -589,11 +613,11 @@ const Reservas = () => {
                             {formatTime12Hour(reservation.hora_reserva)}
                           </p>
                         </div>
-                        <span className="rounded-full bg-violet-500/15 px-2 py-1 text-[10px] font-black uppercase text-violet-400">
+                        <span className="rounded-full bg-violet-500/15 px-2 py-1 text-[10px] font-bold uppercase text-violet-300">
                           Mesa {reservation.mesa || "-"}
                         </span>
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-3 text-xs text-on-surface-variant">
+                      <div className="mt-3 flex flex-wrap gap-3 text-xs text-neutral-300">
                         <span className="flex items-center gap-1">
                           <Users size={13} /> {reservation.personas || 1}{" "}
                           personas
@@ -608,7 +632,7 @@ const Reservas = () => {
                         <div className="mt-4 flex gap-2 border-t border-white/8 pt-3">
                           <a
                             href={`tel:${reservation.customer_phone}`}
-                            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-blue-400/30 bg-blue-500/10 px-3 py-2 text-xs font-black text-blue-300 transition-colors hover:bg-blue-500/20"
+                            className="flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-sky-400/25 bg-sky-500/10 px-3 py-2 text-xs font-bold text-sky-300 transition-colors hover:bg-sky-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
                             aria-label={`Llamar a ${reservation.customer_name || "cliente"}`}
                           >
                             <Phone size={14} />
@@ -618,7 +642,7 @@ const Reservas = () => {
                             href={`https://wa.me/${normalizeWhatsappNumber(reservation.customer_phone)}?text=${encodeURIComponent(reservationReminderText(reservation))}`}
                             target="_blank"
                             rel="noreferrer"
-                            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-300 transition-colors hover:bg-emerald-500/20"
+                            className="flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-300 transition-colors hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
                             aria-label={`Enviar WhatsApp a ${reservation.customer_name || "cliente"}`}
                           >
                             <MessageCircle size={14} />
@@ -630,7 +654,7 @@ const Reservas = () => {
                         type="button"
                         onClick={() => deleteReservation(reservation)}
                         disabled={deletingId === reservation.id}
-                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs font-black text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                        className="mt-2 flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 transition-colors hover:bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Trash2 size={14} />
                         {deletingId === reservation.id
@@ -638,7 +662,7 @@ const Reservas = () => {
                           : "Eliminar reserva"}
                       </button>
                       {reservation.notes && (
-                        <p className="mt-3 border-t border-outline pt-3 text-xs text-on-surface-variant">
+                        <p className="mt-3 border-t border-outline pt-3 text-xs text-neutral-300">
                           {reservation.notes}
                         </p>
                       )}

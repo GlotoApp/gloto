@@ -1,4 +1,4 @@
-import React, {
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -15,17 +15,23 @@ import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 import SubLoading from "./SubLoading";
 
+const MOVEMENTS_PAGE_SIZE = 25;
 const formatNumber = (value) =>
   Number(value || 0).toLocaleString("es-CO", { maximumFractionDigits: 3 });
-const combineMovements = (...groups) =>
-  groups
-    .flat()
-    .sort(
-      (first, second) =>
-        new Date(second.created_at).getTime() -
-        new Date(first.created_at).getTime(),
-    )
-    .slice(0, 100);
+const combineMovements = (...groups) => {
+  const uniqueMovements = new Map();
+  groups.flat().forEach((movement) => {
+    uniqueMovements.set(
+      `${movement.movement_source || "inventory"}:${movement.id}`,
+      movement,
+    );
+  });
+  return Array.from(uniqueMovements.values()).sort(
+    (first, second) =>
+      new Date(second.created_at).getTime() -
+      new Date(first.created_at).getTime(),
+  );
+};
 
 export default function InventarioMovimientos() {
   const { user } = useAuth();
@@ -40,10 +46,20 @@ export default function InventarioMovimientos() {
   const [expandedMovements, setExpandedMovements] = useState({});
   const [loadError, setLoadError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreMovements, setHasMoreMovements] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   const refreshingRef = useRef(false);
+  const loadingMoreRef = useRef(false);
+  const movementOffsetsRef = useRef({ inventory: 0, productStock: 0 });
+  const sourceHasMoreRef = useRef({ inventory: true, productStock: true });
 
-  const loadMovements = useCallback(async (id) => {
+  const loadMovements = useCallback(async (id, reset = false) => {
+    if (reset) {
+      movementOffsetsRef.current = { inventory: 0, productStock: 0 };
+      sourceHasMoreRef.current = { inventory: true, productStock: true };
+      setHasMoreMovements(true);
+    }
     setLoadError("");
     const { data, error } = await supabase
       .from("inventory_movements")
@@ -52,9 +68,17 @@ export default function InventarioMovimientos() {
       )
       .eq("business_id", id)
       .order("created_at", { ascending: false })
-      .limit(100);
+      .order("id", { ascending: true })
+      .range(
+        movementOffsetsRef.current.inventory,
+        movementOffsetsRef.current.inventory + MOVEMENTS_PAGE_SIZE - 1,
+      );
     if (error) {
       console.error("Error cargando movimientos:", error);
+    } else {
+      movementOffsetsRef.current.inventory += data?.length || 0;
+      sourceHasMoreRef.current.inventory =
+        (data?.length || 0) === MOVEMENTS_PAGE_SIZE;
     }
 
     const rows = data || [];
@@ -68,13 +92,31 @@ export default function InventarioMovimientos() {
       )
       .eq("business_id", id)
       .order("created_at", { ascending: false })
-      .limit(100);
+      .order("id", { ascending: true })
+      .range(
+        movementOffsetsRef.current.productStock,
+        movementOffsetsRef.current.productStock + MOVEMENTS_PAGE_SIZE - 1,
+      );
     if (productStockError) {
       console.error("Error cargando movimientos de stock de productos:", productStockError);
       setLoadError(
         `No se pudieron cargar los movimientos de stock de productos: ${productStockError.message}. Verifica que la migración 108 esté aplicada.`,
       );
+    } else {
+      movementOffsetsRef.current.productStock += productStockRows?.length || 0;
+      sourceHasMoreRef.current.productStock =
+        (productStockRows?.length || 0) === MOVEMENTS_PAGE_SIZE;
     }
+    setHasMoreMovements(
+      sourceHasMoreRef.current.inventory ||
+        sourceHasMoreRef.current.productStock,
+    );
+    const updateMovements = (nextMovements) =>
+      setMovements((current) =>
+        reset
+          ? combineMovements(nextMovements)
+          : combineMovements(current, nextMovements),
+      );
     let ordersById = {};
     const productOrderIds = [
       ...new Set((productStockRows || []).map((movement) => movement.order_id).filter(Boolean)),
@@ -105,13 +147,11 @@ export default function InventarioMovimientos() {
       movement_source: "inventory",
     }));
     if (error) {
-      setMovements(
-        combineMovements(
-          formattedProductRows.map((movement) => ({
-            ...movement,
-            orders: ordersById[movement.order_id] || null,
-          })),
-        ),
+      updateMovements(
+        formattedProductRows.map((movement) => ({
+          ...movement,
+          orders: ordersById[movement.order_id] || null,
+        })),
       );
       setLoadError(
         `No se pudieron cargar los movimientos de insumos: ${error.message}`,
@@ -119,13 +159,11 @@ export default function InventarioMovimientos() {
       return;
     }
     if (rows.length === 0) {
-      setMovements(
-        combineMovements(
-          formattedProductRows.map((movement) => ({
-            ...movement,
-            orders: ordersById[movement.order_id] || null,
-          })),
-        ),
+      updateMovements(
+        formattedProductRows.map((movement) => ({
+          ...movement,
+          orders: ordersById[movement.order_id] || null,
+        })),
       );
       return;
     }
@@ -139,15 +177,13 @@ export default function InventarioMovimientos() {
       );
     if (linkError) {
       console.error("Error cargando vínculos de movimientos:", linkError);
-      setMovements(
-        combineMovements(
-          formattedInventoryRows,
-          formattedProductRows.map((movement) => ({
-            ...movement,
-            orders: ordersById[movement.order_id] || null,
-          })),
-        ),
-      );
+      updateMovements([
+        ...formattedInventoryRows,
+        ...formattedProductRows.map((movement) => ({
+          ...movement,
+          orders: ordersById[movement.order_id] || null,
+        })),
+      ]);
       setLoadError(
         "Los movimientos se cargaron, pero no fue posible obtener el vínculo con las órdenes. Verifica que la migración 007 esté aplicada y vuelve a cargar.",
       );
@@ -210,41 +246,58 @@ export default function InventarioMovimientos() {
       }
     }
 
-    setMovements(
-      combineMovements(
-        formattedInventoryRows.map((movement) => {
-          const link = linksById[movement.id] || {};
-          const orderItem = orderItemsById[link.order_item_id];
-          return {
-            ...movement,
-            ...link,
-            order_items: orderItem
-              ? {
-                  ...orderItem,
-                  orders: ordersById[orderItem.order_id] || null,
-                }
-              : null,
-          };
-        }),
-        formattedProductRows.map((movement) => ({
+    updateMovements([
+      ...formattedInventoryRows.map((movement) => {
+        const link = linksById[movement.id] || {};
+        const orderItem = orderItemsById[link.order_item_id];
+        return {
           ...movement,
-          orders: ordersById[movement.order_id] || null,
-        })),
-      ),
-    );
+          ...link,
+          order_items: orderItem
+            ? {
+                ...orderItem,
+                orders: ordersById[orderItem.order_id] || null,
+              }
+            : null,
+        };
+      }),
+      ...formattedProductRows.map((movement) => ({
+        ...movement,
+        orders: ordersById[movement.order_id] || null,
+      })),
+    ]);
   }, []);
 
   const refreshMovements = useCallback(async (id = businessId) => {
-    if (!id || refreshingRef.current) return;
+    if (!id || refreshingRef.current || loadingMoreRef.current) return;
     refreshingRef.current = true;
     setRefreshing(true);
     try {
-      await loadMovements(id);
+      await loadMovements(id, true);
     } finally {
       refreshingRef.current = false;
       setRefreshing(false);
     }
   }, [businessId, loadMovements]);
+
+  const loadMoreMovements = useCallback(async () => {
+    if (
+      !businessId ||
+      refreshingRef.current ||
+      loadingMoreRef.current ||
+      !hasMoreMovements
+    ) {
+      return;
+    }
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      await loadMovements(businessId);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [businessId, hasMoreMovements, loadMovements]);
 
   useEffect(() => {
     const load = async () => {
@@ -263,11 +316,11 @@ export default function InventarioMovimientos() {
         return;
       }
       setBusinessId(data.business_id);
-      await loadMovements(data.business_id);
+      await loadMovements(data.business_id, true);
       setLoading(false);
     };
     load();
-  }, [user?.id]);
+  }, [user?.id, loadMovements]);
 
   const movementGroups = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -384,57 +437,56 @@ export default function InventarioMovimientos() {
   return (
     <div className="min-h-screen bg-background p-4 font-sans text-white">
       <div className="mx-auto max-w-7xl space-y-6 pb-20">
-        <header className="mb-10 flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-black tracking-tighter">
-              Historial de Inventario
-            </h1>
-            <p className="mt-1 text-[10px] font-mono uppercase tracking-widest text-neutral-500">
-              Entradas y salidas de existencias
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="font-sans text-2xl font-black tracking-tighter text-white">
+            Historial de Inventario
+          </h1>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-neutral-400" aria-live="polite">
+              {refreshing
+                ? "Actualizando movimientos..."
+                : lastUpdated
+                  ? `Actualizado ${lastUpdated.toLocaleTimeString("es-CO")}`
+                  : "Aún no se ha actualizado"}
             </p>
+            <button
+              type="button"
+              onClick={() => refreshMovements()}
+              disabled={!businessId || refreshing}
+              className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl text-violet-300 transition-colors hover:bg-violet-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:cursor-wait disabled:opacity-50"
+              aria-label={refreshing ? "Actualizando historial" : "Actualizar historial"}
+              title={refreshing ? "Actualizando..." : "Actualizar historial"}
+            >
+              <RefreshCcw
+                size={16}
+                className={refreshing ? "animate-spin" : ""}
+              />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => refreshMovements()}
-            disabled={!businessId || refreshing}
-            className="rounded-xl p-2 text-violet-300 hover:bg-violet-500/10 disabled:cursor-wait disabled:opacity-50"
-            aria-label={refreshing ? "Actualizando historial" : "Actualizar historial"}
-            title={refreshing ? "Actualizando..." : "Actualizar historial"}
-          >
-            <RefreshCcw
-              size={16}
-              className={refreshing ? "animate-spin" : ""}
-            />
-          </button>
         </header>
-        <p className="mt-[-1.25rem] text-right text-[10px] text-neutral-500">
-          {refreshing
-            ? "Actualizando movimientos..."
-            : lastUpdated
-              ? `Actualizado ${lastUpdated.toLocaleTimeString("es-CO")}`
-              : "Aún no se ha actualizado"}
-        </p>
         {loadError && (
           <p
             role="alert"
-            className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-200"
+            className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
           >
             {loadError}
           </p>
         )}
-        <div className="overflow-hidden rounded-2xl border border-white/5 bg-neutral-900/40">
-          <div className="grid gap-3 border-b border-white/5 bg-neutral-900/30 p-4 md:grid-cols-[minmax(0,1fr)_180px_180px]">
+        <div className="space-y-4">
+          <div className="grid gap-3 rounded-2xl bg-neutral-900/30 p-3 sm:p-4 md:grid-cols-[minmax(0,1fr)_180px_180px]">
             <input
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="BUSCAR INSUMO O MOTIVO..."
-              className="w-full rounded-xl border border-white/5 bg-neutral-950/60 px-3 py-2.5 text-[10px] font-mono uppercase text-white outline-none focus:border-violet-500/50"
+              aria-label="Buscar movimientos por insumo o motivo"
+              className="min-h-10 w-full rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-neutral-100 outline-none transition-shadow placeholder:text-neutral-500 focus:ring-2 focus:ring-violet-500/40"
             />
             <select
               value={movementType}
               onChange={(event) => setMovementType(event.target.value)}
-              className="rounded-xl border border-white/5 bg-neutral-950/60 px-3 py-2.5 text-[10px] font-black uppercase text-neutral-300 outline-none focus:border-violet-500/50"
+              aria-label="Filtrar movimientos por tipo"
+              className="min-h-10 cursor-pointer rounded-xl bg-neutral-900 px-3 py-2.5 text-[11px] font-mono uppercase text-neutral-200 outline-none focus:ring-2 focus:ring-violet-500/40"
             >
               <option value="all">Todos los movimientos</option>
               <option value="entry">Entradas</option>
@@ -443,7 +495,8 @@ export default function InventarioMovimientos() {
             <select
               value={dateFilter}
               onChange={(event) => setDateFilter(event.target.value)}
-              className="rounded-xl border border-white/5 bg-neutral-950/60 px-3 py-2.5 text-[10px] font-black uppercase text-neutral-300 outline-none focus:border-violet-500/50"
+              aria-label="Filtrar movimientos por fecha"
+              className="min-h-10 cursor-pointer rounded-xl bg-neutral-900 px-3 py-2.5 text-[11px] font-mono uppercase text-neutral-200 outline-none focus:ring-2 focus:ring-violet-500/40"
             >
               <option value="all">Todas las fechas</option>
               <option value="today">Hoy</option>
@@ -453,33 +506,33 @@ export default function InventarioMovimientos() {
             </select>
           </div>
           {dateFilter === "custom" && (
-            <div className="grid gap-3 border-b border-white/5 px-4 pb-4 sm:grid-cols-2">
-              <label className="text-[9px] font-black uppercase tracking-widest text-neutral-500">
+            <div className="grid gap-3 rounded-2xl bg-neutral-900/30 p-4 sm:grid-cols-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-neutral-300">
                 Desde
                 <input
                   type="date"
                   value={dateFrom}
                   onChange={(event) => setDateFrom(event.target.value)}
-                  className="mt-1 w-full rounded-xl border border-white/5 bg-neutral-950/60 px-3 py-2.5 text-xs text-white outline-none focus:border-violet-500/50"
+                  className="mt-1 min-h-10 w-full rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-neutral-100 outline-none focus:ring-2 focus:ring-violet-500/40"
                 />
               </label>
-              <label className="text-[9px] font-black uppercase tracking-widest text-neutral-500">
+              <label className="text-[10px] font-black uppercase tracking-widest text-neutral-300">
                 Hasta
                 <input
                   type="date"
                   value={dateTo}
                   onChange={(event) => setDateTo(event.target.value)}
-                  className="mt-1 w-full rounded-xl border border-white/5 bg-neutral-950/60 px-3 py-2.5 text-xs text-white outline-none focus:border-violet-500/50"
+                  className="mt-1 min-h-10 w-full rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-neutral-100 outline-none focus:ring-2 focus:ring-violet-500/40"
                 />
               </label>
             </div>
           )}
           {movementGroups.length === 0 ? (
-            <p className="py-12 text-center text-sm text-neutral-500">
+            <p className="rounded-2xl bg-neutral-900/30 px-5 py-12 text-center text-sm text-neutral-300">
               No hay movimientos que coincidan con los filtros.
             </p>
           ) : (
-            <div className="space-y-3 p-3 sm:p-4">
+            <div className="space-y-3">
               {movementGroups.map((group) => {
                 const isEntry = group.delta > 0;
                 const expanded = Boolean(expandedMovements[group.id]);
@@ -502,7 +555,7 @@ export default function InventarioMovimientos() {
                 return (
                   <article
                     key={group.id}
-                    className="overflow-hidden rounded-2xl border border-white/5 bg-neutral-900/40 transition-colors hover:border-white/10"
+                    className="overflow-hidden rounded-2xl bg-neutral-900/40 transition-colors hover:bg-neutral-900/60"
                   >
                     <button
                       type="button"
@@ -513,7 +566,7 @@ export default function InventarioMovimientos() {
                           [group.id]: !current[group.id],
                         }))
                       }
-                      className="flex w-full items-center gap-3 p-4 text-left hover:bg-neutral-900/70"
+                      className="flex w-full items-center gap-3 rounded-2xl p-4 text-left transition-colors hover:bg-neutral-900/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/60"
                     >
                       <span
                         className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${isEntry ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}
@@ -529,7 +582,7 @@ export default function InventarioMovimientos() {
                           {title}
                         </span>
                         <span
-                          className={`block text-[10px] font-black uppercase tracking-widest ${isEntry ? "text-emerald-400" : "text-red-400"}`}
+                          className={`block text-xs font-bold uppercase tracking-wide ${isEntry ? "text-emerald-300" : "text-red-300"}`}
                         >
                           {isEntry ? "Entrada" : "Salida"}
                           {group.isSale &&
@@ -546,7 +599,7 @@ export default function InventarioMovimientos() {
                             " · Saldo inicial"}
                           {orderNumber ? ` · Orden #${orderNumber}` : ""}
                         </span>
-                        <span className="block text-[10px] uppercase tracking-widest text-neutral-500">
+                        <span className="mt-1 block text-xs text-neutral-400">
                           {group.isSale
                             ? `${group.movements.length} insumo${group.movements.length === 1 ? "" : "s"} descontado${group.movements.length === 1 ? "" : "s"}`
                             : group.isProductStock
@@ -583,13 +636,13 @@ export default function InventarioMovimientos() {
                       />
                     </button>
                     {expanded && (
-                      <div className="space-y-2 border-t border-white/5 bg-black/10 px-4 py-3">
+                      <div className="space-y-2 bg-black/20 px-4 py-3">
                         {group.movements.map((movement) => {
                           const delta = Number(movement.quantity_delta || 0);
                           return (
                             <div
                               key={movement.id}
-                              className="flex items-center justify-between gap-3 text-xs"
+                              className="flex items-center justify-between gap-3 rounded-lg bg-neutral-900/60 px-3 py-2 text-sm"
                             >
                               <span className="min-w-0 truncate text-neutral-300">
                                 {movement.movement_source === "product_stock"
@@ -626,6 +679,18 @@ export default function InventarioMovimientos() {
                   </article>
                 );
               })}
+            </div>
+          )}
+          {hasMoreMovements && (
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={loadMoreMovements}
+                disabled={loadingMore || refreshing}
+                className="min-h-10 rounded-xl px-5 py-2 text-sm font-semibold text-violet-300 transition-colors hover:bg-violet-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:cursor-wait disabled:opacity-50"
+              >
+                {loadingMore ? "Cargando movimientos..." : "Cargar más movimientos"}
+              </button>
             </div>
           )}
         </div>

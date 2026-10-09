@@ -31,4 +31,6 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
+// This hook is intentionally exported beside its provider from the auth module.
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => useContext(AuthContext);

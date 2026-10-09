@@ -116,11 +116,11 @@ const leerHistorialCierres = () => {
 
 // ─── COMPONENTES REUTILIZABLES (ESTILO ÓRDENES) ──────────────────────────────
 const KPICard = memo(({ label, value, sub, color, loading = false }) => (
-  <div className="bg-neutral-900/60 border border-white/10 rounded-2xl p-5 shadow-lg shadow-black/10 hover:border-white/20 hover:-translate-y-0.5 transition-all">
-    <p className="text-[8px] text-neutral-500 font-black uppercase tracking-widest mb-2">
+  <div className="rounded-2xl bg-neutral-900/50 p-5 transition-colors hover:bg-neutral-900/70">
+    <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-neutral-400">
       {label}
     </p>
-    <p className={`text-xl font-black font-mono ${color}`}>
+    <p className={`text-2xl font-bold font-mono ${color}`}>
       {loading ? (
         <span className="inline-block h-6 w-28 animate-pulse rounded-md bg-white/10 align-middle" />
       ) : (
@@ -130,7 +130,7 @@ const KPICard = memo(({ label, value, sub, color, loading = false }) => (
     {loading ? (
       <span className="mt-2 block h-2 w-20 animate-pulse rounded bg-white/10" />
     ) : sub ? (
-      <span className="text-[7px] text-neutral-500 font-bold block mt-1 uppercase font-mono">
+      <span className="mt-1 block text-xs font-medium text-neutral-400">
         {sub}
       </span>
     ) : null}
@@ -704,16 +704,16 @@ export default function Caja() {
   return (
     <div className="min-h-screen bg-neutral-950 text-white p-4 font-sans selection:bg-violet-500/30">
       {/* ════ HEADER ════ */}
-      <header className="max-w-7xl mx-auto mb-6 flex items-center justify-between gap-4">
+      <header className="mx-auto mb-6 flex max-w-7xl flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-black tracking-tight">
-            CONTROL DE CAJA
+          <h1 className="text-2xl font-black tracking-tight text-white">
+            Control de caja
           </h1>
         </div>
         <button
           type="button"
           onClick={() => setMostrarRegistroNovedad((visible) => !visible)}
-          className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-600/10 px-4 py-2.5 text-[9px] font-black uppercase tracking-wider text-violet-400 transition-all hover:bg-violet-600 hover:text-white"
+          className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
         >
           <PlusCircle size={14} />
           Registrar novedad
@@ -721,28 +721,28 @@ export default function Caja() {
       </header>
 
       {
-        <section className="max-w-7xl mx-auto mb-6 bg-neutral-900/60 border border-white/10 rounded-2xl p-5 sm:p-6 space-y-5 shadow-lg shadow-black/10">
+        <section className="mx-auto mb-6 max-w-7xl space-y-5 rounded-2xl bg-neutral-900/40 p-5 sm:p-6">
           <div>
             <div className="flex items-center gap-2 text-violet-400 mb-2">
               <Lock size={16} />
-              <span className="text-[9px] font-black uppercase tracking-widest">
-                DATOS DEL CIERRE
+              <span className="text-[10px] font-bold uppercase tracking-widest">
+                Datos del cierre
               </span>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-              <h2 className="text-xl font-black text-white uppercase tracking-tight">
+              <h2 className="text-xl font-bold tracking-tight text-white">
                 {turnoIniciado ? "Cierre en curso" : "Cerrar caja"}
               </h2>
               <div className="flex items-center gap-3">
                 <time
                   dateTime={new Date().toISOString()}
-                  className="font-mono text-[10px] font-bold uppercase tracking-widest text-neutral-500"
+                  className="font-mono text-xs font-medium text-neutral-400"
                 >
                   {new Date().toLocaleDateString("es-CO")}
                 </time>
                 <time
                   dateTime={new Date().toISOString()}
-                  className="font-mono text-sm font-bold tracking-wider text-violet-300"
+                  className="font-mono text-base font-semibold tracking-wide text-violet-300"
                 >
                   {horaActual}
                 </time>
@@ -750,10 +750,10 @@ export default function Caja() {
             </div>
           </div>
 
-          <div className="space-y-4 pt-4 border-t border-white/10">
+          <div className="space-y-4 pt-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr] gap-3">
-              <label className="text-[8px] font-black text-neutral-500 uppercase tracking-widest mb-1.5 block">
-                CAJERO DEL CIERRE
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                Cajero del cierre
                 <select
                   autoFocus
                   value={nombreCajero}
@@ -761,7 +761,7 @@ export default function Caja() {
                     setNombreCajero(e.target.value);
                     setTurnoError("");
                   }}
-                  className="mt-1 w-full bg-black/40 border border-white/5 rounded-xl py-2.5 px-3 text-[10px] font-mono text-neutral-300 outline-none focus:border-violet-500/40 transition-all uppercase placeholder:text-neutral-700"
+                  className="mt-1 min-h-11 w-full rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-neutral-100 outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50"
                   required
                 >
                   <option value="" disabled>
@@ -777,8 +777,8 @@ export default function Caja() {
                 </select>
               </label>
 
-              <label className="text-[8px] font-black text-neutral-500 uppercase">
-                DESDE FECHA
+              <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                Desde fecha
                 <input
                   type="date"
                   value={fechaApertura}
@@ -786,11 +786,11 @@ export default function Caja() {
                     setFechaApertura(e.target.value);
                     setTurnoError("");
                   }}
-                  className="mt-1 w-full bg-black/40 border border-white/5 rounded-lg p-2 text-[10px] text-white outline-none focus:border-violet-500/40"
+                  className="mt-1 min-h-11 w-full rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50"
                 />
               </label>
-              <label className="text-[8px] font-black text-neutral-500 uppercase">
-                DESDE HORA
+              <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                Desde hora
                 <input
                   type="time"
                   value={horaApertura}
@@ -798,19 +798,19 @@ export default function Caja() {
                     setHoraApertura(e.target.value);
                     setTurnoError("");
                   }}
-                  className="mt-1 w-full bg-black/40 border border-white/5 rounded-lg p-2 text-[10px] text-white outline-none focus:border-violet-500/40"
+                  className="mt-1 min-h-11 w-full rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50"
                 />
               </label>
             </div>
 
             {turnoError && (
-              <p className="text-[9px] text-red-400 font-mono uppercase">
+              <p role="alert" className="text-sm text-red-300">
                 {turnoError}
               </p>
             )}
 
             {loadError && (
-              <p className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-[9px] text-red-400 font-mono uppercase">
+              <p               className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-300">
                 Error al cargar caja: {loadError}
               </p>
             )}
@@ -825,10 +825,10 @@ export default function Caja() {
                 !horaApertura ||
                 (turnoIniciado && !aperturaModificada)
               }
-              className={`w-full rounded-xl border py-3 text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-30 disabled:pointer-events-none ${
+              className={`min-h-11 w-full rounded-xl py-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:pointer-events-none disabled:opacity-30 ${
                 aperturaModificada
-                  ? "border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500 hover:text-black"
-                  : "border-violet-500/30 bg-violet-600/20 text-violet-400 hover:bg-violet-600 hover:text-white"
+                  ? "bg-amber-500/15 text-amber-300 hover:bg-amber-500 hover:text-black focus-visible:ring-amber-400/60"
+                  : "bg-violet-600 text-white hover:bg-violet-500"
               }`}
             >
               {aperturaModificada ? "ACTUALIZAR DATOS" : "CONSULTAR CAJA"}
@@ -855,7 +855,7 @@ export default function Caja() {
                 }
               >
                 {/* Grid KPIs Modificado */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <KPICard
                     label="TOTAL DE VENTAS"
                     value={fmt(totalVentas)}
@@ -888,7 +888,7 @@ export default function Caja() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Movimientos Manuales - Ocupa 1 columna en móvil y 1 columna en pantallas grandes */}
-                  <div className="relative overflow-hidden bg-neutral-900/60 border border-white/10 rounded-2xl p-5 sm:p-6 shadow-lg shadow-black/10">
+                  <div className="relative overflow-hidden rounded-2xl bg-neutral-900/40 p-5 sm:p-6">
                     {cargandoInicial && (
                       <div className="absolute inset-0 z-10 space-y-4 rounded-2xl bg-neutral-900/90 p-6 animate-pulse">
                         <div className="h-3 w-28 rounded bg-white/10" />
@@ -898,13 +898,13 @@ export default function Caja() {
                         <div className="h-10 rounded-xl bg-white/5" />
                       </div>
                     )}
-                    <div className="flex items-center gap-2 mb-4 text-neutral-400 text-[9px] font-black tracking-widest uppercase">
+                    <div className="mb-4 flex items-center gap-2 text-xs font-bold tracking-widest text-neutral-300">
                       <Receipt size={14} className="text-amber-500" />
                       NOVEDADES
                     </div>
 
                     {novedades.length === 0 ? (
-                      <p className="text-center py-6 text-neutral-600 text-xs font-mono uppercase">
+                      <p className="py-6 text-center text-sm text-neutral-400">
                         Sin novedades registradas
                       </p>
                     ) : (
@@ -912,7 +912,7 @@ export default function Caja() {
                         {novedades.map((n) => (
                           <div
                             key={n.id}
-                            className="flex justify-between items-center p-3 bg-black/30 border border-white/5 rounded-xl"
+                            className="flex items-center justify-between gap-3 rounded-xl bg-black/20 p-3"
                           >
                             <div className="flex items-center gap-3 flex-1">
                               <div
@@ -925,10 +925,10 @@ export default function Caja() {
                                 )}
                               </div>
                               <div className="flex-1">
-                                <p className="text-xs font-semibold text-white uppercase tracking-tight">
+                                <p className="text-sm font-semibold text-white">
                                   {n.concepto}
                                 </p>
-                                <p className="text-[8px] text-neutral-500 font-mono">
+                                <p className="mt-1 text-xs text-neutral-400">
                                   {n.responsable || "Sin responsable"} •{" "}
                                   {n.hora} • {n.id} •{" "}
                                   <span className="text-violet-400 font-bold uppercase">
@@ -938,7 +938,7 @@ export default function Caja() {
                               </div>
                             </div>
                             <span
-                              className={`text-xs font-black font-mono whitespace-nowrap ml-2 ${n.tipo === "egreso" ? "text-red-400" : "text-emerald-400"}`}
+                              className={`ml-2 whitespace-nowrap text-sm font-bold font-mono ${n.tipo === "egreso" ? "text-red-300" : "text-emerald-300"}`}
                             >
                               {n.tipo === "egreso" ? "−" : "+"}
                               {fmt(n.monto)}
@@ -954,22 +954,17 @@ export default function Caja() {
                         onClick={() => setMostrarRegistroNovedad(false)}
                       >
                         <div
-                          className="w-full max-w-sm space-y-4 rounded-2xl border border-white/10 bg-neutral-900 p-6 shadow-2xl"
+                          className="w-full max-w-sm space-y-4 rounded-2xl border border-white/[0.08] bg-neutral-900 p-5 shadow-2xl sm:p-6"
                           onClick={(event) => event.stopPropagation()}
                         >
                           <div className="flex items-center justify-between">
-                            <div>
-                              <p className="text-sm font-black uppercase tracking-widest text-white">
-                                Nueva novedad
-                              </p>
-                              <p className="mt-1 text-[8px] uppercase tracking-wider text-neutral-500">
-                                Registra un movimiento de caja
-                              </p>
-                            </div>
+                            <p className="text-base font-bold text-white">
+                              Nueva novedad
+                            </p>
                             <button
                               type="button"
                               onClick={() => setMostrarRegistroNovedad(false)}
-                              className="rounded-lg p-1.5 text-neutral-500 hover:bg-white/5 hover:text-white"
+                              className="rounded-xl p-2 text-neutral-400 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                               aria-label="Cerrar"
                             >
                               <XCircle size={18} />
@@ -983,7 +978,7 @@ export default function Caja() {
                                 responsable: e.target.value,
                               })
                             }
-                            className="w-full bg-black/40 border border-white/5 rounded-xl py-2 px-3 text-[10px] font-mono text-neutral-300 outline-none focus:border-violet-500/40 uppercase placeholder:text-neutral-800"
+                            className="min-h-11 w-full rounded-xl bg-black/30 px-3 py-2.5 text-sm text-neutral-100 outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50"
                           >
                             <option value="" disabled>
                               {cajeros.length
@@ -1004,10 +999,10 @@ export default function Caja() {
                                   tipo: "egreso",
                                 })
                               }
-                              className={`py-2 rounded-xl text-[9px] font-black uppercase tracking-wider border transition-all ${
+                              className={`min-h-10 rounded-xl px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 ${
                                 nuevaNovedad.tipo === "egreso"
-                                  ? "bg-red-500/10 border-red-500/30 text-red-400"
-                                  : "bg-black/20 border-white/5 text-neutral-500"
+                                  ? "bg-red-500/15 text-red-300"
+                                  : "bg-white/[0.03] text-neutral-400 hover:bg-white/[0.06]"
                               }`}
                             >
                               <MinusCircle size={10} className="inline mr-1" />{" "}
@@ -1020,10 +1015,10 @@ export default function Caja() {
                                   tipo: "ingreso",
                                 })
                               }
-                              className={`py-2 rounded-xl text-[9px] font-black uppercase tracking-wider border transition-all ${
+                              className={`min-h-10 rounded-xl px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 ${
                                 nuevaNovedad.tipo === "ingreso"
-                                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                                  : "bg-black/20 border-white/5 text-neutral-500"
+                                  ? "bg-emerald-500/15 text-emerald-300"
+                                  : "bg-white/[0.03] text-neutral-400 hover:bg-white/[0.06]"
                               }`}
                             >
                               <PlusCircle size={10} className="inline mr-1" />{" "}
@@ -1040,7 +1035,7 @@ export default function Caja() {
                                 concepto: e.target.value,
                               })
                             }
-                            className="w-full bg-black/40 border border-white/5 rounded-xl py-2 px-3 text-[10px] font-mono text-neutral-300 outline-none focus:border-violet-500/40 uppercase placeholder:text-neutral-800"
+                            className="min-h-11 w-full rounded-xl bg-black/30 px-3 py-2.5 text-sm text-neutral-100 outline-none transition-shadow placeholder:text-neutral-500 focus-visible:ring-2 focus-visible:ring-violet-500/50"
                           />
                           <div className="grid grid-cols-3 gap-2">
                             {["efectivo", "tarjeta", "transferencia"].map(
@@ -1050,10 +1045,10 @@ export default function Caja() {
                                   onClick={() =>
                                     setNuevaNovedad({ ...nuevaNovedad, metodo })
                                   }
-                                  className={`py-1.5 rounded-lg text-[8px] font-bold uppercase border transition-all ${
+                                  className={`min-h-9 rounded-lg px-2 py-1.5 text-xs font-semibold capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 ${
                                     nuevaNovedad.metodo === metodo
-                                      ? "bg-violet-500/20 border-violet-500/40 text-violet-400"
-                                      : "bg-black/20 border-white/5 text-neutral-500"
+                                      ? "bg-violet-500/20 text-violet-300"
+                                      : "bg-black/20 text-neutral-400 hover:bg-white/[0.06]"
                                   }`}
                                 >
                                   {metodo}
@@ -1073,7 +1068,7 @@ export default function Caja() {
                                   monto: formatAmountInput(e.target.value),
                                 })
                               }
-                              className="min-w-0 flex-1 bg-black/40 border border-white/5 rounded-xl py-2 px-3 text-[10px] font-mono text-white font-bold outline-none focus:border-violet-500/40 placeholder:text-neutral-800"
+                              className="min-h-11 min-w-0 flex-1 rounded-xl bg-black/30 px-3 py-2.5 text-sm font-mono font-semibold text-white outline-none transition-shadow placeholder:text-neutral-500 focus-visible:ring-2 focus-visible:ring-violet-500/50"
                             />
                             <button
                               onClick={handleRegistrarNovedad}
@@ -1082,7 +1077,7 @@ export default function Caja() {
                                 !nuevaNovedad.concepto ||
                                 !nuevaNovedad.monto
                               }
-                              className="px-4 rounded-xl bg-violet-600/20 text-violet-400 border border-violet-500/30 hover:bg-violet-600 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-all text-[9px] font-black uppercase tracking-wider"
+                              className="min-h-11 rounded-xl bg-violet-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:pointer-events-none disabled:opacity-30"
                             >
                               Guardar
                             </button>
@@ -1093,7 +1088,7 @@ export default function Caja() {
                   </div>
 
                   {/* Formulario de Cierre - Se alinea a la derecha en PC y abajo en el Móvil */}
-                  <div className="relative overflow-hidden bg-neutral-900/60 border border-white/10 rounded-2xl p-5 sm:p-6 space-y-4 shadow-lg shadow-black/10">
+                  <div className="relative space-y-4 overflow-hidden rounded-2xl bg-neutral-900/40 p-5 sm:p-6">
                     {cargandoInicial && (
                       <div className="absolute inset-0 z-10 space-y-4 rounded-2xl bg-neutral-900/90 p-6 animate-pulse">
                         <div className="h-3 w-32 rounded bg-white/10" />
@@ -1105,57 +1100,57 @@ export default function Caja() {
                         <div className="h-12 rounded-xl bg-white/5" />
                       </div>
                     )}
-                    <div className="flex items-center gap-2 text-red-400 text-[9px] font-black tracking-widest uppercase">
+                    <div className="flex items-center gap-2 text-xs font-bold tracking-widest text-red-300">
                       <Lock size={14} />
                       CIERRE DE CAJA
                     </div>
 
-                    <div className="space-y-3 border-t border-white/5 pt-4">
+                    <div className="space-y-3 pt-2">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <p className="text-[8px] font-black uppercase tracking-[0.18em] text-neutral-500">
-                            TURNO ACTIVO
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                            Turno activo
                           </p>
-                          <p className="mt-1 text-sm font-black uppercase tracking-tight text-white">
+                          <p className="mt-1 text-base font-bold text-white">
                             {nombreCajero || "Sin cajero seleccionado"}
                           </p>
                         </div>
-                        <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-300">
+                        <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
                           En curso
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
-                        <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2.5">
-                          <p className="text-[7px] font-black uppercase tracking-widest text-neutral-600">
+                        <div className="rounded-xl bg-black/20 px-3 py-2.5">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
                             Inicio del periodo
                           </p>
-                          <p className="mt-1 font-mono text-[10px] font-bold text-neutral-300">
+                          <p className="mt-1 text-sm font-mono font-semibold text-neutral-200">
                             {fechaApertura} {horaConPeriodo(horaApertura)}
                           </p>
                         </div>
-                        <div className="rounded-xl border border-violet-400/15 bg-violet-400/[0.06] px-3 py-2.5">
-                          <p className="text-[7px] font-black uppercase tracking-widest text-violet-300/60">
+                        <div className="rounded-xl bg-violet-400/[0.08] px-3 py-2.5">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-violet-300">
                             Corte actual
                           </p>
-                          <p className="mt-1 font-mono text-[10px] font-bold text-violet-200">
+                          <p className="mt-1 text-sm font-mono font-semibold text-violet-200">
                             {fechaLocalInput(cierreVista)} {horaFormateada(cierreVista)}
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="space-y-3 border-t border-white/5 pt-4">
+                    <div className="space-y-3 pt-2">
                       <div className="flex items-end justify-between gap-3">
                         <div>
-                          <p className="text-[8px] font-black uppercase tracking-[0.18em] text-neutral-500">
-                            CONTEO DEL CIERRE
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-300">
+                            Conteo del cierre
                           </p>
-                          <p className="mt-1 text-[9px] text-neutral-600">
+                          <p className="mt-1 text-sm text-neutral-400">
                             Compara lo esperado con lo contado.
                           </p>
                         </div>
-                        <span className="rounded-full border border-white/[0.06] bg-white/[0.03] px-2 py-1 text-[7px] font-black uppercase tracking-widest text-neutral-500">
+                        <span className="rounded-full bg-white/[0.05] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-neutral-400">
                           COP
                         </span>
                       </div>
@@ -1175,10 +1170,10 @@ export default function Caja() {
                           const diferencia = declarado - esperado;
                           const colorClase =
                             diferencia > 0
-                              ? "border-emerald-500/30 bg-emerald-500/5"
+                              ? "bg-emerald-500/10"
                               : diferencia < 0
-                                ? "border-red-500/30 bg-red-500/5"
-                                : "border-white/5 bg-black/20";
+                                ? "bg-red-500/10"
+                                : "bg-black/20";
                           const textColor =
                             diferencia > 0
                               ? "text-emerald-400"
@@ -1189,16 +1184,16 @@ export default function Caja() {
                           return (
                             <div
                               key={method}
-                              className={`grid gap-3 rounded-xl border p-3 transition-all ${colorClase}`}
+                              className={`grid gap-3 rounded-xl p-3 transition-colors ${colorClase}`}
                             >
                               <div className="space-y-2">
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="text-[8px] font-mono font-bold uppercase text-neutral-300">
+                                  <span className="text-[10px] font-bold capitalize text-neutral-200">
                                     {method}
                                   </span>
                                   {diferencia !== 0 && (
                                     <span
-                                      className={`text-[7px] font-bold uppercase text-right ${textColor}`}
+                                      className={`text-xs font-semibold text-right ${textColor}`}
                                     >
                                       {diferencia > 0 ? "Sobra" : "Falta"}{" "}
                                       {fmt(Math.abs(diferencia))}
@@ -1206,16 +1201,16 @@ export default function Caja() {
                                   )}
                                 </div>
                                 <div>
-                                  <p className="text-[7px] uppercase tracking-widest text-neutral-600">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                                     Esperado
                                   </p>
-                                  <p className="mt-0.5 font-mono text-xs font-bold text-neutral-300">
+                                  <p className="mt-0.5 text-sm font-mono font-semibold text-neutral-200">
                                     {fmt(esperado)}
                                   </p>
                                 </div>
                               </div>
                               <label className="space-y-1">
-                                <span className="text-[7px] uppercase tracking-widest text-neutral-600">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                                   Contado
                                 </span>
                                 <input
@@ -1229,12 +1224,12 @@ export default function Caja() {
                                       [method]: formatAmountInput(e.target.value),
                                     })
                                   }
-                                  className={`w-full bg-neutral-900 text-right border rounded-lg p-1.5 text-[10px] font-mono font-bold outline-none focus:border-white/20 transition-all ${
+                                  className={`min-h-10 w-full rounded-lg bg-neutral-900 p-2 text-right text-sm font-mono font-semibold outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50 ${
                                     diferencia > 0
-                                      ? "text-emerald-400 border-emerald-500/50"
+                                      ? "text-emerald-300"
                                       : diferencia < 0
-                                        ? "text-red-400 border-red-500/50"
-                                        : "text-white border-white/5"
+                                        ? "text-red-300"
+                                        : "text-white"
                                   }`}
                                 />
                               </label>
@@ -1253,7 +1248,7 @@ export default function Caja() {
                         !aperturaValida ||
                         aperturaModificada
                       }
-                      className="w-full mt-2 py-3 rounded-xl border border-red-500/20 bg-red-600/10 text-red-400 hover:bg-red-600 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-all text-[9px] font-black uppercase tracking-widest"
+                      className="mt-2 min-h-11 w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 disabled:pointer-events-none disabled:opacity-30"
                     >
                       Cerrar caja
                     </button>
@@ -1275,7 +1270,7 @@ export default function Caja() {
             aria-labelledby="cash-close-title"
             initial={{ opacity: 0, y: 12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-7"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-white/[0.08] bg-neutral-900 p-5 shadow-2xl sm:p-7"
           >
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
@@ -1283,11 +1278,11 @@ export default function Caja() {
                 <div>
                   <h2
                     id="cash-close-title"
-                    className="text-lg font-black uppercase tracking-tight text-white"
+                    className="text-lg font-bold tracking-tight text-white"
                   >
                     Caja cerrada correctamente
                   </h2>
-                  <p className="mt-1 text-xs text-neutral-400">
+                  <p className="mt-1 text-sm text-neutral-300">
                     Cierre realizado por {cierreConfirmado.cajero} ·{" "}
                     {cierreConfirmado.fechaCierre} a las{" "}
                     {cierreConfirmado.horaCierre}
@@ -1297,7 +1292,7 @@ export default function Caja() {
               <button
                 type="button"
                 onClick={() => setCierreConfirmado(null)}
-                className="rounded-lg p-2 text-neutral-400 transition hover:bg-white/10 hover:text-white"
+                className="rounded-xl p-2 text-neutral-400 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                 aria-label="Cerrar resumen del cierre"
               >
                 <X size={18} />
@@ -1305,29 +1300,29 @@ export default function Caja() {
             </div>
 
             <div className="mt-5 grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-violet-400/15 bg-violet-400/[0.06] p-3">
-                <p className="text-[8px] font-black uppercase tracking-widest text-violet-300/70">
+              <div className="rounded-xl bg-violet-400/[0.08] p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-violet-300">
                   Total de ventas
                 </p>
                 <p className="mt-1 font-mono text-lg font-black text-white">
                   {fmt(cierreConfirmado.totalVentas)}
                 </p>
-                <p className="mt-1 text-[9px] text-neutral-500">
+                <p className="mt-1 text-xs text-neutral-400">
                   {cierreConfirmado.transacciones}{" "}
                   {cierreConfirmado.transacciones === 1
                     ? "venta"
                     : "ventas"}
                 </p>
               </div>
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
-                <p className="text-[8px] font-black uppercase tracking-widest text-neutral-500">
+              <div className="rounded-xl bg-black/20 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
                   Total contado
                 </p>
                 <p className="mt-1 font-mono text-lg font-black text-white">
                   {fmt(cierreConfirmado.totalContado)}
                 </p>
                 <p
-                  className={`mt-1 text-[9px] font-bold ${
+                  className={`mt-1 text-xs font-semibold ${
                     cierreConfirmado.diferencia === 0
                       ? "text-emerald-400"
                       : cierreConfirmado.diferencia > 0
@@ -1343,7 +1338,7 @@ export default function Caja() {
             </div>
 
             <div className="mt-5 overflow-hidden rounded-xl border border-white/[0.08]">
-              <div className="grid grid-cols-[1fr_repeat(3,minmax(0,1fr))] gap-2 bg-white/[0.04] px-3 py-2 text-[7px] font-black uppercase tracking-wider text-neutral-500 sm:text-[8px]">
+              <div className="grid grid-cols-[1fr_repeat(3,minmax(0,1fr))] gap-2 bg-white/[0.04] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-neutral-400">
                 <span>Método</span>
                 <span className="text-right">Ventas</span>
                 <span className="text-right">Esperado</span>
@@ -1352,7 +1347,7 @@ export default function Caja() {
               {cierreConfirmado.metodos.map((method) => (
                 <div
                   key={method.nombre}
-                  className="grid grid-cols-[1fr_repeat(3,minmax(0,1fr))] gap-2 border-t border-white/[0.06] px-3 py-3 text-[9px]"
+                  className="grid grid-cols-[1fr_repeat(3,minmax(0,1fr))] gap-2 border-t border-white/[0.06] px-3 py-3 text-xs"
                 >
                   <span className="font-bold text-neutral-300">
                     {method.nombre}
@@ -1379,16 +1374,16 @@ export default function Caja() {
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-emerald-500/10 bg-emerald-500/[0.04] p-3">
-                <p className="text-[8px] font-black uppercase tracking-widest text-emerald-300/70">
+              <div className="rounded-xl bg-emerald-500/[0.08] p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">
                   Ingresos manuales
                 </p>
                 <p className="mt-1 font-mono text-sm font-bold text-emerald-300">
                   {fmt(cierreConfirmado.ingresosManuales)}
                 </p>
               </div>
-              <div className="rounded-xl border border-red-500/10 bg-red-500/[0.04] p-3">
-                <p className="text-[8px] font-black uppercase tracking-widest text-red-300/70">
+              <div className="rounded-xl bg-red-500/[0.08] p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-red-300">
                   Egresos manuales
                 </p>
                 <p className="mt-1 font-mono text-sm font-bold text-red-300">
@@ -1396,8 +1391,8 @@ export default function Caja() {
                 </p>
               </div>
             </div>
-            <div className="mt-3 flex items-center justify-between rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2.5">
-              <span className="text-[9px] font-bold uppercase tracking-wider text-neutral-400">
+            <div className="mt-3 flex items-center justify-between rounded-xl bg-black/20 px-3 py-2.5">
+              <span className="text-xs font-semibold text-neutral-300">
                 Efectivo esperado en caja
               </span>
               <span className="font-mono text-sm font-black text-white">
@@ -1406,15 +1401,15 @@ export default function Caja() {
             </div>
 
             {cierreConfirmado.movimientos.length > 0 && (
-              <details className="mt-4 rounded-xl border border-white/[0.08]">
-                <summary className="cursor-pointer px-3 py-3 text-[9px] font-black uppercase tracking-wider text-neutral-300">
+              <details className="mt-4 rounded-xl bg-white/[0.03]">
+                <summary className="cursor-pointer px-3 py-3 text-sm font-semibold text-neutral-200">
                   Ver movimientos ({cierreConfirmado.movimientos.length})
                 </summary>
                 <div className="space-y-2 border-t border-white/[0.06] p-3">
                   {cierreConfirmado.movimientos.map((movement, index) => (
                     <div
                       key={`${movement.tipo}-${movement.concepto}-${index}`}
-                      className="flex items-center justify-between gap-3 text-[9px]"
+                      className="flex items-center justify-between gap-3 text-sm"
                     >
                       <span className="min-w-0 truncate text-neutral-400">
                         {movement.tipo === "ingreso" ? "Ingreso" : "Egreso"} ·{" "}
@@ -1438,7 +1433,7 @@ export default function Caja() {
             <button
               type="button"
               onClick={() => setCierreConfirmado(null)}
-              className="mt-5 w-full rounded-xl bg-violet-600 px-4 py-3 text-[9px] font-black uppercase tracking-widest text-white transition hover:bg-violet-500"
+              className="mt-5 min-h-11 w-full rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
             >
               Entendido
             </button>
