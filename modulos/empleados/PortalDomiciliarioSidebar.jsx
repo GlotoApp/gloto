@@ -39,6 +39,7 @@ const PortalDomiciliarioSidebar = ({
   availabilityBusy,
   onToggleAvailability,
   balance,
+  onOpenBalance,
   displayName,
   onSignOut,
   compact = false,
@@ -52,7 +53,7 @@ const PortalDomiciliarioSidebar = ({
       }
     >
       <div
-        className={`mx-auto flex items-center justify-between gap-4 ${
+        className={`relative mx-auto flex items-center justify-between gap-4 ${
           compact
             ? "max-w-none px-3 py-3 sm:px-6"
             : "max-w-7xl px-4 py-3 sm:px-6"
@@ -86,12 +87,24 @@ const PortalDomiciliarioSidebar = ({
             </>
           )}
         </div>
-        {isPublicApproved && (
-          <div className="pointer-events-auto flex shrink-0 items-center gap-2 rounded-xl border border-emerald-400/20 bg-neutral-950/85 px-3 py-2 text-emerald-200 shadow-lg backdrop-blur-xl">
+        <button
+          type="button"
+          onClick={onOpenBalance}
+          aria-label={`Ver resumen y saldo disponible: ${new Intl.NumberFormat("es-CO", {
+            style: "currency",
+            currency: "COP",
+            maximumFractionDigits: 0,
+          }).format(Number(balance) || 0)}`}
+          className={`pointer-events-auto flex shrink-0 items-center gap-2 rounded-xl border border-emerald-400/20 bg-neutral-950/85 px-3 py-2 text-emerald-200 shadow-lg backdrop-blur-xl transition hover:border-emerald-300/40 hover:bg-neutral-900 ${
+            compact
+              ? "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+              : ""
+          }`}
+        >
             <CircleDollarSign size={17} />
             <div>
               <p className="hidden text-[9px] font-bold uppercase tracking-wider text-emerald-200/70 sm:block">
-                Saldo disponible
+                Saldo · Hoy
               </p>
               <p className="text-xs font-black sm:text-sm">
                 {new Intl.NumberFormat("es-CO", {
@@ -101,8 +114,7 @@ const PortalDomiciliarioSidebar = ({
                 }).format(Number(balance) || 0)}
               </p>
             </div>
-          </div>
-        )}
+        </button>
       </div>
     </header>
 

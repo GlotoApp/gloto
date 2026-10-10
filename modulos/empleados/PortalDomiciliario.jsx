@@ -3,7 +3,9 @@ import {
   Activity,
   Bike,
   Check,
+  ChevronLeft,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   CircleDollarSign,
   Clock3,
@@ -18,6 +20,7 @@ import {
   RefreshCw,
   ShieldAlert,
   UserRound,
+  X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../src/components/AuthContext";
@@ -45,6 +48,70 @@ const formatDate = (value) =>
         timeStyle: "short",
       }).format(new Date(value))
     : "Fecha no disponible";
+
+const getCourierOrderKey = (order) =>
+  `${order.courier_mode || "private"}:${order.order_id}`;
+
+const getOrderDistanceKm = (order, location) => {
+  const serverDistance = Number(order.distance_km);
+  const hasServerDistance =
+    order.distance_km != null &&
+    order.distance_km !== "" &&
+    Number.isFinite(serverDistance);
+  const hasCurrentLocation =
+    location?.latitude != null &&
+    location?.longitude != null &&
+    Number.isFinite(Number(location.latitude)) &&
+    Number.isFinite(Number(location.longitude));
+  const hasDestination =
+    order.destination_latitude != null &&
+    order.destination_longitude != null &&
+    Number.isFinite(Number(order.destination_latitude)) &&
+    Number.isFinite(Number(order.destination_longitude));
+  if (order.courier_mode === "public" || !hasCurrentLocation || !hasDestination) {
+    return hasServerDistance ? serverDistance : null;
+  }
+  const latitude = Number(order.destination_latitude);
+  const longitude = Number(order.destination_longitude);
+  const currentLatitude = Number(location?.latitude);
+  const currentLongitude = Number(location?.longitude);
+  const radians = (degrees) => (degrees * Math.PI) / 180;
+  const latitudeDelta = radians(latitude - currentLatitude);
+  const longitudeDelta = radians(longitude - currentLongitude);
+  const a =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(radians(currentLatitude)) *
+      Math.cos(radians(latitude)) *
+      Math.sin(longitudeDelta / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const getDistanceBetweenPointsKm = (start, end) => {
+  const coordinates = [
+    start?.latitude,
+    start?.longitude,
+    end?.latitude,
+    end?.longitude,
+  ];
+  if (
+    coordinates.some(
+      (coordinate) => coordinate == null || !Number.isFinite(Number(coordinate)),
+    )
+  ) {
+    return null;
+  }
+  const radians = (degrees) => (degrees * Math.PI) / 180;
+  const latitude = radians(Number(end.latitude) - Number(start.latitude));
+  const longitude = radians(Number(end.longitude) - Number(start.longitude));
+  const startLatitude = radians(Number(start.latitude));
+  const endLatitude = radians(Number(end.latitude));
+  const a =
+    Math.sin(latitude / 2) ** 2 +
+    Math.cos(startLatitude) *
+      Math.cos(endLatitude) *
+      Math.sin(longitude / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
 const statusLabel = {
   available: "Disponible",
@@ -91,13 +158,20 @@ const PortalDomiciliario = () => {
   const [section, setSection] = useState("orders");
   const [mode, setMode] = useState("private");
   const [summary, setSummary] = useState(null);
+  const [summaryLoaded, setSummaryLoaded] = useState(false);
   const [orders, setOrders] = useState([]);
+  const [previewOrderIds, setPreviewOrderIds] = useState([]);
+  const [previewedOrderIds, setPreviewedOrderIds] = useState(() => new Set());
+  const seenOfferIdsRef = useRef(new Set());
+  const offerBaselineReadyRef = useRef(false);
   const [history, setHistory] = useState([]);
   const [ledger, setLedger] = useState([]);
   const [topups, setTopups] = useState([]);
   const [sectionLoading, setSectionLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const refreshPromiseRef = useRef(null);
+  const refreshAgainRef = useRef(false);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [availabilityBusy, setAvailabilityBusy] = useState(false);
@@ -105,6 +179,7 @@ const PortalDomiciliario = () => {
   const sourcePreferencesLoadedRef = useRef(false);
   const [mapLocation, setMapLocation] = useState(null);
   const [locationStatus, setLocationStatus] = useState("paused");
+  const [realtimeStatus, setRealtimeStatus] = useState("connecting");
   const [errorMessage, setErrorMessage] = useState("");
   const [notice, setNotice] = useState("");
   const [fullName, setFullName] = useState(
@@ -114,11 +189,18 @@ const PortalDomiciliario = () => {
   const [topupAmount, setTopupAmount] = useState("");
   const [topupProof, setTopupProof] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [earningsOpen, setEarningsOpen] = useState(false);
+  const [dailyEarnings, setDailyEarnings] = useState(null);
+  const [earningsLoading, setEarningsLoading] = useState(false);
+  const [earningsError, setEarningsError] = useState("");
 
   const isPublicApproved = summary?.application_status === "approved";
   const isPublicOnline = Boolean(summary?.is_online);
   const isPrivateOnline = Boolean(summary?.private_is_online);
   const isCourierOnline = isPublicOnline || isPrivateOnline;
+  const activeDelivery = orders.find((order) =>
+    ["assigned", "picked_up"].includes(order.delivery_status),
+  ) || null;
   const canUsePrivate = Boolean(summary?.private_business_id);
   const privateSourceEnabled =
     sourcePreferences?.private ?? canUsePrivate;
@@ -134,6 +216,45 @@ const PortalDomiciliario = () => {
     user?.user_metadata?.name ||
     user?.email ||
     "Domiciliario";
+
+  const updateOrders = useCallback((nextOrders) => {
+    setOrders(nextOrders);
+
+    const availableOrders = nextOrders.filter(
+      (order) => order.delivery_status === "available",
+    );
+    const availableIds = new Set(availableOrders.map(getCourierOrderKey));
+
+    if (!isCourierOnline || !offerBaselineReadyRef.current) {
+      availableIds.forEach((id) => seenOfferIdsRef.current.add(id));
+      setPreviewOrderIds([]);
+      setPreviewedOrderIds(availableIds);
+      offerBaselineReadyRef.current = isCourierOnline;
+      return;
+    }
+
+    const newOfferIds = availableOrders
+      .map(getCourierOrderKey)
+      .filter((id) => !seenOfferIdsRef.current.has(id));
+    newOfferIds.forEach((id) => seenOfferIdsRef.current.add(id));
+
+    setPreviewOrderIds((current) => {
+      const queued = current.filter((id) => availableIds.has(id));
+      const queuedIds = new Set(queued);
+      return [...queued, ...newOfferIds.filter((id) => !queuedIds.has(id))];
+    });
+    setPreviewedOrderIds((current) => {
+      const next = new Set(
+        [...current].filter((id) => availableIds.has(id)),
+      );
+      return next;
+    });
+  }, [isCourierOnline]);
+
+  const finishOrderPreview = useCallback((orderId) => {
+    setPreviewOrderIds((current) => current.filter((id) => id !== orderId));
+    setPreviewedOrderIds((current) => new Set(current).add(orderId));
+  }, []);
 
   const syncLiveLocation = useCallback(
     async (location, { publicEnabled = isPublicOnline, privateEnabled = isPrivateOnline } = {}) => {
@@ -288,6 +409,8 @@ const PortalDomiciliario = () => {
         setErrorMessage(
           error.message || "No se pudo cargar la información de tu cuenta.",
         );
+      } finally {
+        if (mounted) setSummaryLoaded(true);
       }
     };
     fetchSummary();
@@ -302,7 +425,7 @@ const PortalDomiciliario = () => {
       try {
         const { data } = await requestOrders();
         if (!mounted) return;
-        setOrders(data || []);
+        updateOrders(data || []);
         setErrorMessage("");
       } catch (error) {
         if (!mounted) return;
@@ -323,7 +446,7 @@ const PortalDomiciliario = () => {
     return () => {
       mounted = false;
     };
-  }, [requestOrders]);
+  }, [requestOrders, updateOrders]);
 
   useEffect(() => {
     if (!isCourierOnline) return undefined;
@@ -400,27 +523,137 @@ const PortalDomiciliario = () => {
   }, [loadHistory, loadWallet, section]);
 
   const refreshOrders = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const { data } = await requestOrders();
-      setOrders(data || []);
-      setErrorMessage("");
-    } catch (error) {
-      console.error("No se pudieron actualizar los domicilios:", error);
-      setErrorMessage(error.message || "No se pudieron actualizar los pedidos.");
-      setOrders([]);
-    } finally {
-      setRefreshing(false);
+    if (refreshPromiseRef.current) {
+      refreshAgainRef.current = true;
+      return refreshPromiseRef.current;
     }
-  }, [requestOrders]);
+
+    setRefreshing(true);
+    const refreshPromise = (async () => {
+      try {
+        do {
+          refreshAgainRef.current = false;
+          const { data } = await requestOrders();
+          updateOrders(data || []);
+        } while (refreshAgainRef.current);
+        setErrorMessage("");
+      } catch (error) {
+        console.error("No se pudieron actualizar los domicilios:", error);
+        setErrorMessage(error.message || "No se pudieron actualizar los pedidos.");
+      } finally {
+        refreshAgainRef.current = false;
+        refreshPromiseRef.current = null;
+        setRefreshing(false);
+      }
+    })();
+    refreshPromiseRef.current = refreshPromise;
+    return refreshPromise;
+  }, [requestOrders, updateOrders]);
+
+  useEffect(() => {
+    if (!isCourierOnline || section !== "orders") return undefined;
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshOrders();
+    };
+    const refreshWhenOnline = () => refreshOrders();
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("online", refreshWhenOnline);
+
+    return () => {
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("online", refreshWhenOnline);
+    };
+  }, [isCourierOnline, refreshOrders, section]);
 
   useEffect(() => {
     if (!isCourierOnline || section !== "orders") {
       return undefined;
     }
+
+    let active = true;
+    let debounceId = null;
+    const channels = [];
+    const subscribedSources = new Set();
+    const expectedSources = [
+      ...(isPrivateOnline && summary?.private_business_id ? ["private"] : []),
+      ...(isPublicOnline ? ["public"] : []),
+    ];
+    const scheduleRefresh = () => {
+      if (debounceId !== null) window.clearTimeout(debounceId);
+      debounceId = window.setTimeout(() => {
+        debounceId = null;
+        if (active) refreshOrders();
+      }, 150);
+    };
+    const subscribeToSignals = (source, filter) => {
+      const channel = supabase
+        .channel(`courier-order-signals:${user?.id}:${source}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "courier_order_realtime_signals",
+            ...(filter ? { filter } : {}),
+          },
+          scheduleRefresh,
+        )
+        .subscribe((status) => {
+          if (!active) return;
+          if (status === "SUBSCRIBED") {
+            subscribedSources.add(source);
+            if (subscribedSources.size === expectedSources.length) {
+              setRealtimeStatus("connected");
+            }
+            refreshOrders();
+            return;
+          }
+          if (
+            status === "CHANNEL_ERROR" ||
+            status === "TIMED_OUT" ||
+            status === "CLOSED"
+          ) {
+            subscribedSources.delete(source);
+            setRealtimeStatus("fallback");
+            console.error(
+              `Realtime de pedidos no disponible (${source}):`,
+              status,
+            );
+            setErrorMessage(
+              "La conexión en tiempo real no está disponible. Seguiremos buscando pedidos automáticamente.",
+            );
+          }
+        });
+      channels.push(channel);
+    };
+
+    if (isPrivateOnline && summary?.private_business_id) {
+      subscribeToSignals(
+        "private",
+        `business_id=eq.${summary.private_business_id}`,
+      );
+    }
+    if (isPublicOnline) {
+      subscribeToSignals("public");
+    }
+
     const intervalId = window.setInterval(refreshOrders, 30000);
-    return () => window.clearInterval(intervalId);
-  }, [isCourierOnline, refreshOrders, section]);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      if (debounceId !== null) window.clearTimeout(debounceId);
+      channels.forEach((channel) => supabase.removeChannel(channel));
+    };
+  }, [
+    isCourierOnline,
+    isPrivateOnline,
+    isPublicOnline,
+    refreshOrders,
+    section,
+    summary?.private_business_id,
+    user?.id,
+  ]);
 
   const runOrderAction = async (orderId, rpcName, status, successMessage) => {
     setActiveOrderId(orderId);
@@ -432,6 +665,20 @@ const PortalDomiciliario = () => {
         ...(status ? { p_status: status } : {}),
       });
       if (error) throw error;
+      if (status === "delivered") {
+        updateOrders(
+          orders.filter(
+            (order) =>
+              !(
+                order.order_id === orderId &&
+                order.courier_mode ===
+                  (rpcName === "set_public_courier_order_status"
+                    ? "public"
+                    : "private")
+              ),
+          ),
+        );
+      }
       setNotice(successMessage);
       await Promise.all([refreshOrders(), loadSummary()]);
     } catch (error) {
@@ -442,8 +689,14 @@ const PortalDomiciliario = () => {
     }
   };
 
-  const claimOrder = (order) =>
-    runOrderAction(
+  const claimOrder = (order) => {
+    if (activeDelivery || activeOrderId) {
+      setErrorMessage(
+        "Ya tienes un domicilio activo. Complétalo antes de aceptar otro.",
+      );
+      return;
+    }
+    return runOrderAction(
       order.order_id,
       order.courier_mode === "public"
         ? "claim_public_courier_order"
@@ -453,6 +706,7 @@ const PortalDomiciliario = () => {
         ? "Pedido público aceptado. El saldo solo aplica a las entregas públicas."
         : "Pedido de tienda asignado.",
     );
+  };
 
   const updateOrderStatus = (order, status) =>
     runOrderAction(
@@ -527,6 +781,9 @@ const PortalDomiciliario = () => {
         }));
         setMapLocation(null);
         setLocationStatus("paused");
+        setRealtimeStatus("offline");
+        offerBaselineReadyRef.current = false;
+        setPreviewOrderIds([]);
         setNotice("Quedaste desconectado. Tus fuentes elegidas se conservaron.");
       } else {
         if (!hasEnabledSources) {
@@ -547,6 +804,14 @@ const PortalDomiciliario = () => {
             publicEnabled: sourcesToEnable.includes("public"),
             privateEnabled: sourcesToEnable.includes("private"),
           });
+          const { data: currentOrders } = await requestOrders();
+          updateOrders(currentOrders || []);
+          (currentOrders || [])
+            .filter((order) => order.delivery_status === "available")
+            .forEach((order) =>
+              seenOfferIdsRef.current.add(getCourierOrderKey(order)),
+            );
+          offerBaselineReadyRef.current = true;
         } catch (locationError) {
           try {
             for (const source of sourcesToEnable) {
@@ -560,6 +825,7 @@ const PortalDomiciliario = () => {
           }
           throw locationError;
         }
+        setRealtimeStatus("connecting");
         setSummary((current) => ({
           ...current,
           is_online: sourcesToEnable.includes("public"),
@@ -746,6 +1012,24 @@ const PortalDomiciliario = () => {
     }
   };
 
+  const openEarnings = async () => {
+    setEarningsOpen(true);
+    setEarningsLoading(true);
+    setEarningsError("");
+    try {
+      const { data, error } = await supabase.rpc("get_courier_daily_earnings");
+      if (error) throw error;
+      setDailyEarnings(data?.[0] || null);
+    } catch (error) {
+      console.error("No se pudo cargar el resumen diario del domiciliario:", error);
+      setEarningsError(
+        error.message || "No se pudo cargar el resumen de hoy.",
+      );
+    } finally {
+      setEarningsLoading(false);
+    }
+  };
+
   const signOut = async () => {
     try {
       const disconnectRequests = [];
@@ -800,7 +1084,7 @@ const PortalDomiciliario = () => {
   };
   const showFullMap =
     section === "orders" &&
-    (canUsePrivate || isPublicApproved) &&
+    (!summaryLoaded || !summary || canUsePrivate || isPublicApproved) &&
     !(mode === "public" && !isPublicApproved);
 
   const deliveryStats = useMemo(() => {
@@ -812,44 +1096,65 @@ const PortalDomiciliario = () => {
 
   return (
     <main className="min-h-screen bg-[#09090f] text-white">
-      <PortalDomiciliarioSidebar
-        compact={showFullMap}
-        isOpen={menuOpen}
-        onToggle={() => setMenuOpen((open) => !open)}
-        onClose={() => setMenuOpen(false)}
-        section={section}
-        onSectionChange={changeSection}
-        mode={mode}
-        onModeChange={(nextMode) => {
-          setMode(nextMode);
-          setSection("orders");
-          setMenuOpen(false);
-        }}
-        privateOnline={isPrivateOnline}
-        publicOnline={isPublicOnline}
-        privateBusinessName={summary?.private_business_name}
-        privateEnabled={privateSourceEnabled}
-        publicEnabled={publicSourceEnabled}
-        locationStatus={locationStatus}
-        availabilityBusy={availabilityBusy}
-        onToggleAvailability={toggleSourcePreference}
-        canUsePrivate={canUsePrivate}
-        canUsePublic={isPublicApproved}
-        isPublicApproved={isPublicApproved}
-        balance={balance}
-        displayName={displayName}
-        onSignOut={signOut}
-      />
+      {!activeDelivery && (
+        <PortalDomiciliarioSidebar
+          compact={showFullMap}
+          isOpen={menuOpen}
+          onToggle={() => setMenuOpen((open) => !open)}
+          onClose={() => setMenuOpen(false)}
+          section={section}
+          onSectionChange={changeSection}
+          mode={mode}
+          onModeChange={(nextMode) => {
+            setMode(nextMode);
+            setSection("orders");
+            setMenuOpen(false);
+          }}
+          privateOnline={isPrivateOnline}
+          publicOnline={isPublicOnline}
+          privateBusinessName={summary?.private_business_name}
+          privateEnabled={privateSourceEnabled}
+          publicEnabled={publicSourceEnabled}
+          locationStatus={locationStatus}
+          availabilityBusy={availabilityBusy}
+          onToggleAvailability={toggleSourcePreference}
+          canUsePrivate={canUsePrivate}
+          canUsePublic={isPublicApproved}
+          isPublicApproved={isPublicApproved}
+          balance={balance}
+          onOpenBalance={openEarnings}
+          displayName={displayName}
+          onSignOut={signOut}
+        />
+      )}
 
+      {activeDelivery ? (
+        <CourierActiveDelivery
+          order={activeDelivery}
+          location={
+            mapLocation ||
+            (summary?.location_latitude != null &&
+            summary?.location_longitude != null
+              ? {
+                  latitude: summary.location_latitude,
+                  longitude: summary.location_longitude,
+                }
+              : null)
+          }
+          busy={activeOrderId === activeDelivery.order_id}
+          onUpdateStatus={updateOrderStatus}
+          errorMessage={errorMessage}
+        />
+      ) : (
+      <>
       {showFullMap && (
         <CourierMapExperience
           mode={mode}
           isPublicApproved={isPublicApproved}
-          privateOnline={isPrivateOnline}
-          publicOnline={isPublicOnline}
           privateEnabled={privateSourceEnabled}
           publicEnabled={publicSourceEnabled}
           online={isCourierOnline}
+          realtimeStatus={realtimeStatus}
           location={
             mapLocation ||
             (summary?.location_latitude != null &&
@@ -862,12 +1167,13 @@ const PortalDomiciliario = () => {
           }
           radiusKm={Math.min(1, Number(summary?.public_radius_km) || 1)}
           orders={orders}
-          loading={loading}
-          refreshing={refreshing}
+          activeDelivery={activeDelivery}
+          previewOrderIds={previewOrderIds}
+          previewedOrderIds={previewedOrderIds}
+          onFinishOrderPreview={finishOrderPreview}
           activeOrderId={activeOrderId}
           selectedOrderId={selectedOrderId}
           errorMessage={errorMessage}
-          onRefresh={refreshOrders}
           availabilityBusy={availabilityBusy}
           onToggleAvailability={toggleAvailability}
           onSelectOrder={selectMapOrder}
@@ -1117,6 +1423,7 @@ const PortalDomiciliario = () => {
                       order={order}
                       mode="public"
                       busy={activeOrderId === order.order_id}
+                      canClaim={!activeDelivery && activeOrderId === null}
                       isSelected={selectedOrderId === order.order_id}
                       onSelect={() => setSelectedOrderId(order.order_id)}
                       onClaim={claimOrder}
@@ -1138,6 +1445,7 @@ const PortalDomiciliario = () => {
                     order={order}
                     mode="public"
                     busy={activeOrderId === order.order_id}
+                    canClaim={!activeDelivery && activeOrderId === null}
                     isSelected={selectedOrderId === order.order_id}
                     onClaim={claimOrder}
                     onUpdateStatus={updateOrderStatus}
@@ -1197,6 +1505,7 @@ const PortalDomiciliario = () => {
                     order={order}
                     mode={mode}
                     busy={activeOrderId === order.order_id}
+                    canClaim={!activeDelivery && activeOrderId === null}
                     onClaim={claimOrder}
                     onUpdateStatus={updateOrderStatus}
                   />
@@ -1459,6 +1768,18 @@ const PortalDomiciliario = () => {
         )}
       </div>
       )}
+      </>
+      )}
+
+      {earningsOpen && (
+        <CourierEarningsModal
+          balance={balance}
+          data={dailyEarnings}
+          loading={earningsLoading}
+          error={earningsError}
+          onClose={() => setEarningsOpen(false)}
+        />
+      )}
     </main>
   );
 };
@@ -1478,6 +1799,93 @@ const StatCard = ({ icon: Icon, label, value, color }) => (
       <p className="text-xs font-medium text-neutral-500">{label}</p>
       <p className="mt-1 text-xl font-black">{value}</p>
     </div>
+  </div>
+);
+
+const CourierEarningsModal = ({ balance, data, loading, error, onClose }) => (
+  <div
+    className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+    onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}
+  >
+    <section
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="courier-earnings-title"
+      className="w-full max-w-md rounded-3xl border border-white/10 bg-neutral-950 p-5 shadow-2xl sm:p-6"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-emerald-300">
+            Resumen de hoy
+          </p>
+          <h2
+            id="courier-earnings-title"
+            className="mt-1 text-xl font-black text-white"
+          >
+            Tus ganancias
+          </h2>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Cerrar resumen de ganancias"
+          className="rounded-lg p-2 text-neutral-400 transition hover:bg-white/[0.08] hover:text-white"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      {loading ? (
+        <LoadingCard label="Calculando tu resumen de hoy..." />
+      ) : error ? (
+        <div className="mt-5">
+          <p role="alert" className="text-sm text-rose-200">
+            {error}
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="mt-5 rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.07] p-4">
+            <p className="text-xs font-semibold text-emerald-100/70">
+              Ganado en domicilios completados
+            </p>
+            <p className="mt-2 text-3xl font-black text-emerald-200">
+              {formatMoney(data?.gross_earnings)}
+            </p>
+            <p className="mt-1 text-xs text-neutral-400">
+              {Number(data?.completed_deliveries) || 0} domicilios entregados hoy
+            </p>
+          </div>
+
+          <div className="mt-3 rounded-2xl border border-rose-300/15 bg-rose-300/[0.05] p-4">
+            <p className="text-xs font-semibold text-neutral-300">
+              Descontado por pedidos públicos
+            </p>
+            <p className="mt-2 text-xl font-black text-rose-200">
+              {formatMoney(data?.public_fees_deducted)}
+            </p>
+            <p className="mt-1 text-xs text-neutral-500">
+              {Number(data?.public_orders_charged) || 0} tarifas cobradas hoy
+            </p>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
+            <span className="text-xs font-semibold text-neutral-400">
+              Saldo disponible
+            </span>
+            <span className="text-sm font-black text-white">
+              {formatMoney(balance)}
+            </span>
+          </div>
+          <p className="mt-4 text-[11px] leading-5 text-neutral-500">
+            Los descuentos corresponden a las tarifas de los pedidos públicos.
+            Los pedidos de tu tienda no descuentan de este saldo.
+          </p>
+        </>
+      )}
+    </section>
   </div>
 );
 
@@ -1513,6 +1921,7 @@ const OrderCard = ({
   order,
   mode,
   busy,
+  canClaim = true,
   isSelected = false,
   compact = false,
   onClaim,
@@ -1594,10 +2003,10 @@ const OrderCard = ({
             <button
               type="button"
               onClick={() => onClaim(order)}
-              disabled={busy}
+              disabled={busy || !canClaim}
               className="rounded-lg bg-violet-400 px-3 py-2 text-xs font-bold text-neutral-950 transition hover:bg-violet-300 disabled:opacity-50"
             >
-              {busy ? "Tomando..." : "Aceptar"}
+              {busy ? "Tomando..." : canClaim ? "Aceptar" : "Ya tienes una entrega"}
             </button>
           )}
           {order.delivery_status === "assigned" && (
@@ -1720,10 +2129,10 @@ const OrderCard = ({
             <button
               type="button"
               onClick={() => onClaim(order)}
-              disabled={busy}
+              disabled={busy || !canClaim}
               className="rounded-xl bg-violet-500 px-4 py-2.5 text-xs font-black transition hover:bg-violet-400 disabled:opacity-50"
             >
-              {busy ? "Tomando..." : "Tomar pedido"}
+              {busy ? "Tomando..." : canClaim ? "Tomar pedido" : "Ya tienes una entrega"}
             </button>
           )}
           {order.delivery_status === "assigned" && (
@@ -1754,51 +2163,611 @@ const OrderCard = ({
   );
 };
 
+const CourierBusinessLogo = ({ src, name, className = "h-10 w-10" }) => {
+  const [failedSource, setFailedSource] = useState(null);
+
+  return (
+    <span className={`flex shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/[0.06] ${className}`}>
+      {src && failedSource !== src ? (
+        <img
+          src={src}
+          alt={`Logo de ${name || "la tienda"}`}
+          className="h-full w-full object-cover"
+          onError={() => setFailedSource(src)}
+        />
+      ) : (
+        <PackageCheck size={17} className="text-neutral-300" aria-hidden="true" />
+      )}
+    </span>
+  );
+};
+
+const CourierAvailabilitySlider = ({
+  online,
+  busy,
+  onToggle,
+  className = "",
+}) => {
+  const trackRef = useRef(null);
+  const dragRef = useRef(null);
+  const [thumbPosition, setThumbPosition] = useState(null);
+
+  const getThumbPosition = () => {
+    const track = trackRef.current;
+    if (!track) return 5;
+    const thumbSize = 44;
+    return online ? Math.max(5, track.clientWidth - thumbSize - 5) : 5;
+  };
+
+  const handlePointerDown = (event) => {
+    if (busy || event.button !== 0) return;
+    const startPosition = getThumbPosition();
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX };
+    setThumbPosition(startPosition);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const handlePointerMove = (event) => {
+    if (dragRef.current?.pointerId !== event.pointerId || !trackRef.current) {
+      return;
+    }
+    const track = trackRef.current.getBoundingClientRect();
+    const thumbSize = 44;
+    const maxPosition = Math.max(5, track.width - thumbSize - 5);
+    const position = Math.min(
+      maxPosition,
+      Math.max(5, event.clientX - track.left - thumbSize / 2),
+    );
+    setThumbPosition(position);
+  };
+
+  const finishPointer = (event) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    setThumbPosition(null);
+    const delta = event.clientX - drag.startX;
+    const threshold = Math.max(36, (trackRef.current?.clientWidth || 200) * 0.2);
+    if ((!online && delta >= threshold) || (online && delta <= -threshold)) {
+      onToggle();
+    }
+  };
+
+  const handleKeyDown = (event) => {
+    const shouldToggle =
+      (!online && event.key === "ArrowRight") ||
+      (online && event.key === "ArrowLeft") ||
+      event.key === " " ||
+      event.key === "Enter";
+    if (!shouldToggle || busy) return;
+    event.preventDefault();
+    onToggle();
+  };
+
+  const isSearching = online && !busy;
+
+  return (
+    <div
+      ref={trackRef}
+      role="switch"
+      aria-checked={online}
+      aria-disabled={busy}
+      aria-label={
+        online
+          ? "Buscando pedidos. Desliza a la izquierda para desconectarte."
+          : "Desliza a la derecha para conectarte."
+      }
+      tabIndex={busy ? -1 : 0}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishPointer}
+      onPointerCancel={finishPointer}
+      onKeyDown={handleKeyDown}
+      className={`relative flex h-14 w-full touch-pan-y select-none items-center overflow-hidden rounded-full border px-3 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:opacity-50 ${
+        online
+          ? "border-emerald-300/30 bg-emerald-400/15"
+          : "border-white/10 bg-white/[0.05]"
+      } ${busy ? "cursor-wait opacity-60" : "cursor-grab active:cursor-grabbing"} ${className}`}
+    >
+      {online ? (
+        <ChevronLeft
+          size={18}
+          className="absolute right-4 text-emerald-100/50"
+          aria-hidden="true"
+        />
+      ) : (
+        <ChevronRight
+          size={18}
+          className="absolute right-4 text-neutral-400"
+          aria-hidden="true"
+        />
+      )}
+      <span
+        className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-xs font-bold ${
+          isSearching ? "animate-pulse text-emerald-100" : "text-neutral-300"
+        }`}
+      >
+        {isSearching && (
+          <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-300" />
+        )}
+        {busy ? "Conectando..." : online ? "Buscando" : "Desliza para encender"}
+      </span>
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute top-1/2 z-10 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full shadow-lg transition-[left,background-color] duration-150 ${
+          online
+            ? "bg-emerald-300 text-emerald-950"
+            : "bg-neutral-100 text-neutral-900"
+        }`}
+        style={{
+          left:
+            thumbPosition == null
+              ? online
+                ? "calc(100% - 49px)"
+                : "5px"
+              : `${thumbPosition}px`,
+          transition: thumbPosition == null ? undefined : "none",
+        }}
+      >
+        <Power size={17} />
+      </span>
+    </div>
+  );
+};
+
+const CourierActiveDelivery = ({
+  order,
+  location,
+  busy,
+  onUpdateStatus,
+  errorMessage,
+}) => {
+  const [isCardCollapsed, setIsCardCollapsed] = useState(false);
+  const isPublic = order.courier_mode === "public";
+  const isPickedUp = order.delivery_status === "picked_up";
+  const pickupAddress =
+    order.pickup_address || order.business_name || "Ubicación de recogida no registrada";
+  const deliveryAddress = order.delivery_address || "Dirección de entrega no disponible";
+  const hasPickupCoordinates =
+    order.pickup_latitude != null &&
+    order.pickup_longitude != null &&
+    Number.isFinite(Number(order.pickup_latitude)) &&
+    Number.isFinite(Number(order.pickup_longitude));
+  const hasDestinationCoordinates =
+    order.destination_latitude != null &&
+    order.destination_longitude != null &&
+    Number.isFinite(Number(order.destination_latitude)) &&
+    Number.isFinite(Number(order.destination_longitude));
+  const nextStopDistance = getDistanceBetweenPointsKm(
+    location,
+    isPickedUp
+      ? {
+          latitude: order.destination_latitude,
+          longitude: order.destination_longitude,
+        }
+      : {
+          latitude: order.pickup_latitude,
+          longitude: order.pickup_longitude,
+        },
+  );
+  const pickupCoordinates = hasPickupCoordinates
+    ? `${order.pickup_latitude},${order.pickup_longitude}`
+    : "";
+  const destinationCoordinates = hasDestinationCoordinates
+    ? `${order.destination_latitude},${order.destination_longitude}`
+    : "";
+  const mapUrl = (() => {
+    const params = new URLSearchParams({
+      api: "1",
+      origin: pickupCoordinates || pickupAddress,
+      destination: destinationCoordinates || deliveryAddress,
+    });
+    return `https://www.google.com/maps/dir/?${params.toString()}`;
+  })();
+  const pickupMapUrl = (() => {
+    const params = new URLSearchParams({ api: "1" });
+    if (
+      location?.latitude != null &&
+      location?.longitude != null &&
+      Number.isFinite(Number(location.latitude)) &&
+      Number.isFinite(Number(location.longitude))
+    ) {
+      params.set("origin", `${location.latitude},${location.longitude}`);
+    }
+    params.set(
+      "destination",
+      isPickedUp
+        ? destinationCoordinates || deliveryAddress
+        : pickupCoordinates || pickupAddress,
+    );
+    return `https://www.google.com/maps/dir/?${params.toString()}`;
+  })();
+  const paymentMethod = String(order.payment_method || "No especificado")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+
+  return (
+    <section className="relative h-[100dvh] overflow-hidden bg-[#09090f] text-white">
+      <PortalDomiciliarioMap
+        fullScreen
+        location={location}
+        activeDelivery={order}
+        showRadius={false}
+      />
+
+      <article className="pointer-events-auto fixed inset-x-3 bottom-3 z-20 mx-auto max-h-[52dvh] max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-neutral-950/95 shadow-2xl shadow-black/40 backdrop-blur-xl sm:inset-x-6 sm:bottom-5">
+        <button
+          type="button"
+          onClick={() => setIsCardCollapsed((collapsed) => !collapsed)}
+          aria-expanded={!isCardCollapsed}
+          aria-label={
+            isCardCollapsed
+              ? "Mostrar detalles del pedido"
+              : "Ocultar detalles del pedido"
+          }
+          className="flex w-full items-center gap-3 border-b border-white/[0.08] px-4 py-3 text-left transition hover:bg-white/[0.03]"
+        >
+          <CourierBusinessLogo
+            src={order.business_logo_url}
+            name={order.business_name}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold text-white">
+              {order.business_name || (isPublic ? "Pedido público" : "Tienda")}
+            </p>
+            <p className="text-xs text-neutral-400">
+              {isPublic ? "Pedido público" : "Pedido de tienda"}
+            </p>
+            <p className="mt-0.5 text-[11px] font-semibold text-emerald-200">
+              {nextStopDistance == null
+                ? "Distancia no disponible"
+                : `${nextStopDistance < 0.1 ? "<0.1" : nextStopDistance.toFixed(1)} km aprox. hasta ${isPickedUp ? "el cliente" : "la tienda"}`}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+              Domicilio
+            </p>
+            <p className="text-base font-black text-emerald-300">
+              {formatMoney(order.delivery_fee)}
+            </p>
+          </div>
+          {isCardCollapsed ? (
+            <ChevronUp
+              size={19}
+              className="ml-1 shrink-0 text-neutral-300"
+              aria-hidden="true"
+            />
+          ) : (
+            <ChevronDown
+              size={19}
+              className="ml-1 shrink-0 text-neutral-300"
+              aria-hidden="true"
+            />
+          )}
+        </button>
+
+        {!isCardCollapsed && (
+        <div className="space-y-3 px-4 py-3">
+          <div className={`flex gap-3 ${isPickedUp ? "opacity-55" : ""}`}>
+            <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-violet-300 text-xs font-black text-neutral-950">
+              A
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-400">
+                {isPickedUp ? "Recogido en" : "Recoger en"}
+              </p>
+              <p className="mt-0.5 text-sm font-semibold text-white">
+                {pickupAddress}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-emerald-300 text-xs font-black text-neutral-950">
+              B
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-neutral-400">
+                Entregar a {order.customer_name || "Cliente"}
+              </p>
+              <p className="mt-0.5 text-sm font-semibold text-white">
+                {deliveryAddress}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.08] pt-3">
+            <p className="text-xs text-neutral-400">
+              Pago: <span className="font-semibold text-neutral-200">{paymentMethod}</span>
+            </p>
+            {order.customer_phone && (
+              <a
+                href={`tel:${order.customer_phone}`}
+                className="text-xs font-semibold text-violet-200 hover:text-violet-100"
+              >
+                Llamar al cliente
+              </a>
+            )}
+          </div>
+          {order.delivery_instructions && (
+            <p className="rounded-lg bg-white/[0.04] px-3 py-2 text-xs text-neutral-300">
+              Nota: {order.delivery_instructions}
+            </p>
+          )}
+          {errorMessage && (
+            <p
+              role="alert"
+              className="rounded-lg border border-rose-300/20 bg-rose-300/[0.08] px-3 py-2 text-xs text-rose-200"
+            >
+              {errorMessage}
+            </p>
+          )}
+          <div className="flex gap-2">
+            {!isPickedUp && (
+              <a
+                href={pickupMapUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-emerald-300 px-3 text-xs font-bold text-neutral-950 transition hover:bg-emerald-200"
+              >
+                Ir a la tienda
+              </a>
+            )}
+            {mapUrl && (
+              <a
+                href={mapUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border border-white/10 px-3 text-xs font-bold text-neutral-200 transition hover:bg-white/[0.06]"
+              >
+                {isPickedUp ? "Ir al cliente" : "Ver ruta completa"}
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() =>
+                onUpdateStatus(order, isPickedUp ? "delivered" : "picked_up")
+              }
+              disabled={busy}
+              className={`min-h-11 flex-1 rounded-xl px-4 text-sm font-black transition disabled:cursor-wait disabled:opacity-50 ${
+                isPickedUp
+                  ? "bg-emerald-400 text-neutral-950 hover:bg-emerald-300"
+                  : "bg-violet-400 text-neutral-950 hover:bg-violet-300"
+              }`}
+            >
+              {busy
+                ? "Actualizando..."
+                : isPickedUp
+                  ? "Marcar entregado"
+                  : "Recoger pedido"}
+            </button>
+          </div>
+        </div>
+        )}
+      </article>
+    </section>
+  );
+};
+
+const CourierOfferPreview = ({
+  order,
+  location,
+  onExpire,
+  onClaim,
+  isBusy,
+  canAccept,
+}) => {
+  const orderKey = getCourierOrderKey(order);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(
+      () => onExpire(orderKey),
+      15000,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [onExpire, orderKey]);
+
+  const isPublic = order.courier_mode === "public";
+  const distance = getOrderDistanceKm(order, location);
+  const accent = isPublic
+    ? {
+        border: "border-amber-300/30",
+        label: "text-amber-200",
+        badge: "bg-amber-300/15 text-amber-100",
+        action: "bg-amber-300 text-neutral-950 hover:bg-amber-200",
+      }
+    : {
+        border: "border-violet-300/30",
+        label: "text-violet-200",
+        badge: "bg-violet-400/15 text-violet-200",
+        action: "bg-violet-400 text-neutral-950 hover:bg-violet-300",
+      };
+
+  return (
+    <article
+      className={`overflow-hidden rounded-2xl border ${accent.border} bg-neutral-950/95 shadow-xl shadow-black/25 backdrop-blur-xl`}
+    >
+      <div className="flex items-center gap-4 px-4 py-3">
+        <CourierBusinessLogo
+          src={order.business_logo_url}
+          name={order.business_name}
+          className="h-12 w-12"
+        />
+        <div className="min-w-0 flex-1">
+          <p className={`truncate text-xs font-semibold ${accent.label}`}>
+            <span
+              className={`mr-1.5 inline-flex rounded px-1.5 py-0.5 text-[9px] font-black uppercase ${accent.badge}`}
+            >
+              {isPublic ? "Público" : "Tienda"}
+            </span>
+            {order.business_name || "Entrega cercana"}
+          </p>
+          <p className="truncate text-sm font-bold text-white">
+            {isPublic
+              ? "Zona aproximada · dirección al aceptar"
+              : order.delivery_address || "Dirección no disponible"}
+          </p>
+          <p className="mt-1 text-xs font-semibold text-neutral-200">
+            {distance == null
+              ? "Distancia no disponible"
+              : `${distance.toFixed(1)} km aprox. desde donde estás`}
+          </p>
+        </div>
+        <p className="shrink-0 text-sm font-black text-emerald-300">
+          {formatMoney(order.delivery_fee)}
+        </p>
+        <button
+          type="button"
+          onClick={() => onClaim(order)}
+          disabled={isBusy || !canAccept}
+          className={`min-h-11 shrink-0 rounded-lg px-4 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${accent.action}`}
+        >
+          {isBusy
+            ? "Tomando..."
+            : canAccept
+              ? "Aceptar"
+              : "Entrega en curso"}
+        </button>
+      </div>
+      <div aria-hidden="true" className="h-1 bg-white/10">
+        <div
+          className={`h-full origin-left ${isPublic ? "bg-amber-300" : "bg-violet-400"}`}
+          style={{ animation: "courier-offer-countdown 15s linear forwards" }}
+        />
+      </div>
+    </article>
+  );
+};
+
 const CourierMapExperience = ({
   mode,
   isPublicApproved,
-  privateOnline,
-  publicOnline,
   locationStatus,
   online,
+  realtimeStatus,
   location,
   radiusKm,
   orders,
-  loading,
-  refreshing,
+  activeDelivery,
+  previewOrderIds,
+  previewedOrderIds,
+  onFinishOrderPreview,
   activeOrderId,
   selectedOrderId,
   errorMessage,
   availabilityBusy,
-  onRefresh,
   onToggleAvailability,
   onSelectOrder,
   onClaim,
   onUpdateStatus,
 }) => {
   const [ordersExpanded, setOrdersExpanded] = useState(false);
-  const visibleOrders = [...orders].sort((left, right) => {
-    const leftActive = left.delivery_status === "available" ? 1 : 0;
-    const rightActive = right.delivery_status === "available" ? 1 : 0;
-    return leftActive - rightActive;
-  });
+  const [previewCapacity, setPreviewCapacity] = useState(() =>
+    typeof window === "undefined"
+      ? 2
+      : Math.max(1, Math.floor((window.innerHeight * 0.38) / 84)),
+  );
+  const previewOrders = useMemo(() => {
+    if (activeDelivery || activeOrderId !== null) return [];
+    const ordersByKey = new Map(
+      orders.map((order) => [getCourierOrderKey(order), order]),
+    );
+    return previewOrderIds
+      .map((previewId) => ordersByKey.get(previewId))
+      .filter((order) => order?.delivery_status === "available");
+  }, [activeDelivery, activeOrderId, orders, previewOrderIds]);
+  const visiblePreviewOrders = useMemo(
+    () => previewOrders.slice(0, previewCapacity),
+    [previewCapacity, previewOrders],
+  );
+  const visiblePreviewOrderIds = useMemo(
+    () => new Set(visiblePreviewOrders.map(getCourierOrderKey)),
+    [visiblePreviewOrders],
+  );
+  const visibleOrders = useMemo(
+    () => activeDelivery
+      ? [activeDelivery]
+      : [...orders]
+        .filter(
+          (order) =>
+            order.delivery_status === "available" &&
+            previewedOrderIds.has(getCourierOrderKey(order)),
+        ),
+    [activeDelivery, orders, previewedOrderIds],
+  );
+  const mapOrders = useMemo(
+    () => activeDelivery
+      ? []
+      : orders.filter(
+        (order) =>
+          order.delivery_status === "available" &&
+          (
+            visiblePreviewOrderIds.has(getCourierOrderKey(order)) ||
+            previewedOrderIds.has(getCourierOrderKey(order))
+          ),
+      ),
+    [activeDelivery, orders, previewedOrderIds, visiblePreviewOrderIds],
+  );
   const selectOrder = (orderId) => {
     setOrdersExpanded(true);
     onSelectOrder(orderId);
   };
+
+  useEffect(() => {
+    const updatePreviewCapacity = () => {
+      setPreviewCapacity(
+        Math.max(1, Math.floor((window.innerHeight * 0.38) / 84)),
+      );
+    };
+    window.addEventListener("resize", updatePreviewCapacity);
+    return () => window.removeEventListener("resize", updatePreviewCapacity);
+  }, []);
 
   return (
     <>
       <PortalDomiciliarioMap
         fullScreen
         location={location}
-        orders={orders}
+        orders={mapOrders}
         radiusKm={radiusKm}
         showRadius={isPublicApproved}
         online={online}
         selectedOrderId={selectedOrderId}
         onSelectOrder={selectOrder}
       />
+
+      {online &&
+        !activeDelivery &&
+        activeOrderId === null &&
+        visiblePreviewOrders.length > 0 && (
+        <div
+          className={`pointer-events-none fixed inset-x-3 z-20 sm:inset-x-6 ${
+            errorMessage ? "top-[112px]" : "top-[72px]"
+          }`}
+        >
+          <div
+            aria-label={`${previewOrders.length} ofertas pendientes`}
+            className="pointer-events-auto mx-auto flex max-h-[46dvh] max-w-3xl flex-col gap-3 overflow-hidden"
+          >
+            {visiblePreviewOrders.map((order) => (
+              <CourierOfferPreview
+                key={getCourierOrderKey(order)}
+                order={order}
+                location={location}
+                onExpire={onFinishOrderPreview}
+                onClaim={onClaim}
+                isBusy={activeOrderId === order.order_id}
+                canAccept={activeDelivery === null && activeOrderId === null}
+              />
+            ))}
+            {previewOrders.length > visiblePreviewOrders.length && (
+              <p className="px-2 text-right text-[10px] font-medium text-neutral-300 drop-shadow">
+                +{previewOrders.length - visiblePreviewOrders.length} en espera
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="pointer-events-none fixed inset-x-3 top-[68px] z-20 sm:inset-x-6">
@@ -1813,78 +2782,49 @@ const CourierMapExperience = ({
 
       <div className="pointer-events-none fixed inset-x-3 bottom-3 z-20 sm:inset-x-6 sm:bottom-5">
         <div className="pointer-events-auto mx-auto max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/95 shadow-xl shadow-black/30 backdrop-blur-xl">
-          <div className="flex items-center gap-3 p-3">
-            <span
-              className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-                online ? "bg-emerald-400" : "bg-neutral-500"
-              }`}
+          <div className="p-3">
+            <CourierAvailabilitySlider
+              online={online}
+              busy={availabilityBusy}
+              onToggle={onToggleAvailability}
             />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-white">
-                {online ? "Disponible" : "En pausa"}
-              </p>
-              <p className="text-[11px] text-neutral-400">
-                {locationStatus === "error"
-                  ? "Revisa el permiso de ubicación"
-                  : locationStatus === "updating"
-                    ? "Actualizando ubicación..."
-                    : locationStatus === "live"
-                      ? `Ubicación en vivo · ${[
-                          privateOnline && "Tienda",
-                          publicOnline && "Público",
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}`
-                      : online
-                        ? "Localizando..."
-                      : loading
-                        ? "Buscando pedidos..."
-                        : "Ubicación pausada"}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={refreshing || loading}
-              aria-label="Actualizar pedidos"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-50"
-            >
-              <RefreshCw
-                size={16}
-                className={refreshing ? "animate-spin" : undefined}
-              />
-            </button>
-            <div className="hidden items-center gap-1.5 sm:flex">
-              {privateOnline && (
-                <span className="rounded-lg bg-violet-400/10 px-2 py-1.5 text-[10px] font-semibold text-violet-200">
-                  Tienda
-                </span>
-              )}
-              {publicOnline && (
-                <span className="rounded-lg bg-emerald-400/10 px-2 py-1.5 text-[10px] font-semibold text-emerald-200">
-                  Público
-                </span>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={onToggleAvailability}
-              disabled={availabilityBusy}
-              className={`min-h-10 shrink-0 rounded-xl px-3.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                online
-                  ? "border border-rose-300/20 bg-rose-400/10 text-rose-100 hover:bg-rose-400/15"
-                  : "bg-emerald-400 text-emerald-950 hover:bg-emerald-300"
-              }`}
-            >
-              {availabilityBusy
-                ? "Un momento..."
-                : online
-                  ? "Desconectarme"
-                  : "Conectarme"}
-            </button>
+            <span className="sr-only" role="status">
+              {locationStatus === "error"
+                ? "Revisa el permiso de ubicación."
+                : locationStatus === "updating"
+                  ? "Actualizando ubicación."
+                  : locationStatus === "live"
+                    ? "Ubicación en vivo."
+                    : online
+                      ? "Localizando."
+                      : "Ubicación pausada."}{" "}
+              {online &&
+                (realtimeStatus === "connected"
+                  ? "Pedidos en tiempo real conectados."
+                  : realtimeStatus === "fallback"
+                    ? "Actualización automática activa."
+                    : "Conectando pedidos en tiempo real.")}
+            </span>
           </div>
 
-          {visibleOrders.length > 0 && (
+          {activeDelivery ? (
+            <>
+              <p className="border-t border-white/[0.08] px-4 py-2.5 text-xs font-semibold text-emerald-200">
+                Solo puedes llevar un pedido a la vez
+              </p>
+              <div className="border-t border-white/[0.08] p-2.5">
+                <CourierActiveDelivery
+                  order={activeDelivery}
+                  busy={activeOrderId === activeDelivery.order_id}
+                  onUpdateStatus={onUpdateStatus}
+                />
+              </div>
+            </>
+          ) : activeOrderId !== null ? (
+            <p className="border-t border-white/[0.08] px-4 py-3 text-center text-xs text-neutral-300">
+              Confirmando tu pedido...
+            </p>
+          ) : (visibleOrders.length > 0 || previewOrderIds.length > 0) && (
             <>
               <button
                 type="button"
@@ -1893,7 +2833,9 @@ const CourierMapExperience = ({
                 className="flex w-full items-center justify-between border-t border-white/[0.08] px-4 py-2.5 text-left text-xs font-semibold text-neutral-300 transition hover:bg-white/[0.04]"
               >
                 <span>
-                  {ordersExpanded ? "Ocultar pedidos" : "Ver pedidos"}
+                  {ordersExpanded
+                    ? "Ocultar pedidos"
+                    : `Pedidos acumulados (${visibleOrders.length})`}
                 </span>
                 {ordersExpanded ? (
                   <ChevronUp size={16} />
@@ -1903,18 +2845,25 @@ const CourierMapExperience = ({
               </button>
               {ordersExpanded && (
                 <div className="max-h-[32dvh] space-y-2 overflow-y-auto border-t border-white/[0.08] p-2.5">
-                  {visibleOrders.map((order) => (
-                    <OrderCard
-                      key={order.order_id}
-                      order={order}
-                      mode={order.courier_mode || mode}
-                      busy={activeOrderId === order.order_id}
-                      isSelected={selectedOrderId === order.order_id}
-                      compact
-                      onClaim={() => onClaim(order)}
-                      onUpdateStatus={(status) => onUpdateStatus(order, status)}
-                    />
-                  ))}
+                  {visibleOrders.length > 0 ? (
+                    visibleOrders.map((order) => (
+                      <OrderCard
+                        key={getCourierOrderKey(order)}
+                        order={order}
+                        mode={order.courier_mode || mode}
+                        busy={activeOrderId === order.order_id}
+                        canClaim={activeDelivery === null && activeOrderId === null}
+                        isSelected={selectedOrderId === order.order_id}
+                        compact
+                        onClaim={() => onClaim(order)}
+                        onUpdateStatus={(status) => onUpdateStatus(order, status)}
+                      />
+                    ))
+                  ) : (
+                    <p className="px-3 py-4 text-center text-xs text-neutral-500">
+                      Los pedidos aparecerán aquí al terminar su vista previa.
+                    </p>
+                  )}
                 </div>
               )}
             </>
