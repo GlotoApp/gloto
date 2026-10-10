@@ -12,12 +12,14 @@ import {
   History,
   Info,
   LoaderCircle,
+  LocateFixed,
   MapPin,
   MapPinned,
   PackageCheck,
   Phone,
   Power,
   RefreshCw,
+  Route,
   ShieldAlert,
   UserRound,
   X,
@@ -1150,7 +1152,6 @@ const PortalDomiciliario = () => {
       {showFullMap && (
         <CourierMapExperience
           mode={mode}
-          isPublicApproved={isPublicApproved}
           privateEnabled={privateSourceEnabled}
           publicEnabled={publicSourceEnabled}
           online={isCourierOnline}
@@ -1165,7 +1166,6 @@ const PortalDomiciliario = () => {
                 }
               : null)
           }
-          radiusKm={Math.min(1, Number(summary?.public_radius_km) || 1)}
           orders={orders}
           activeDelivery={activeDelivery}
           previewOrderIds={previewOrderIds}
@@ -1332,7 +1332,6 @@ const PortalDomiciliario = () => {
                   : null
               }
               orders={orders}
-              radiusKm={summary?.public_radius_km}
               online={isPublicOnline}
               onSelectOrder={selectMapOrder}
             />
@@ -1579,6 +1578,13 @@ const PortalDomiciliario = () => {
                   El saldo se actualiza cuando se aprueba una recarga o tomas un
                   pedido público.
                 </p>
+                {Number(summary?.commission_percentage) > 0 && (
+                  <p className="mt-2 text-xs text-emerald-100/60">
+                    Comisión de pedidos públicos:{" "}
+                    {Number(summary.commission_percentage)}% del costo del
+                    domicilio, descontada del saldo al aceptar.
+                  </p>
+                )}
               </section>
               <form
                 onSubmit={submitTopup}
@@ -1967,7 +1973,10 @@ const OrderCard = ({
             <p className="mt-1 truncate text-[11px] text-neutral-400">
               {order.delivery_address ||
                 (isPublicOffer
-                  ? "Ubicación aproximada"
+                  ? order.distance_km != null &&
+                    Number.isFinite(Number(order.distance_km))
+                    ? `Tienda a ${Number(order.distance_km).toFixed(1)} km`
+                    : "Pedido de tienda cercana"
                   : order.distance_km != null &&
                       Number.isFinite(Number(order.distance_km))
                     ? `A ${Number(order.distance_km).toFixed(1)} km`
@@ -2324,6 +2333,7 @@ const CourierActiveDelivery = ({
   errorMessage,
 }) => {
   const [isCardCollapsed, setIsCardCollapsed] = useState(false);
+  const [fitRouteRequest, setFitRouteRequest] = useState(0);
   const isPublic = order.courier_mode === "public";
   const isPickedUp = order.delivery_status === "picked_up";
   const pickupAddress =
@@ -2339,6 +2349,13 @@ const CourierActiveDelivery = ({
     order.destination_longitude != null &&
     Number.isFinite(Number(order.destination_latitude)) &&
     Number.isFinite(Number(order.destination_longitude));
+  const hasCourierCoordinates =
+    location?.latitude != null &&
+    location?.longitude != null &&
+    Number.isFinite(Number(location.latitude)) &&
+    Number.isFinite(Number(location.longitude));
+  const canCenterRoute =
+    hasPickupCoordinates || hasDestinationCoordinates || hasCourierCoordinates;
   const nextStopDistance = getDistanceBetweenPointsKm(
     location,
     isPickedUp
@@ -2393,60 +2410,72 @@ const CourierActiveDelivery = ({
         fullScreen
         location={location}
         activeDelivery={order}
-        showRadius={false}
+        fitRouteRequest={fitRouteRequest}
       />
 
-      <article className="pointer-events-auto fixed inset-x-3 bottom-3 z-20 mx-auto max-h-[52dvh] max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-neutral-950/95 shadow-2xl shadow-black/40 backdrop-blur-xl sm:inset-x-6 sm:bottom-5">
-        <button
-          type="button"
-          onClick={() => setIsCardCollapsed((collapsed) => !collapsed)}
-          aria-expanded={!isCardCollapsed}
-          aria-label={
-            isCardCollapsed
-              ? "Mostrar detalles del pedido"
-              : "Ocultar detalles del pedido"
-          }
-          className="flex w-full items-center gap-3 border-b border-white/[0.08] px-4 py-3 text-left transition hover:bg-white/[0.03]"
-        >
-          <CourierBusinessLogo
-            src={order.business_logo_url}
-            name={order.business_name}
-          />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold text-white">
-              {order.business_name || (isPublic ? "Pedido público" : "Tienda")}
-            </p>
-            <p className="text-xs text-neutral-400">
-              {isPublic ? "Pedido público" : "Pedido de tienda"}
-            </p>
-            <p className="mt-0.5 text-[11px] font-semibold text-emerald-200">
-              {nextStopDistance == null
-                ? "Distancia no disponible"
-                : `${nextStopDistance < 0.1 ? "<0.1" : nextStopDistance.toFixed(1)} km aprox. hasta ${isPickedUp ? "el cliente" : "la tienda"}`}
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
-              Domicilio
-            </p>
-            <p className="text-base font-black text-emerald-300">
-              {formatMoney(order.delivery_fee)}
-            </p>
-          </div>
-          {isCardCollapsed ? (
-            <ChevronUp
-              size={19}
-              className="ml-1 shrink-0 text-neutral-300"
-              aria-hidden="true"
+      <article className="courier-active-delivery-card pointer-events-auto fixed inset-x-3 bottom-3 z-20 mx-auto max-h-[52dvh] max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-neutral-950/95 shadow-2xl shadow-black/40 backdrop-blur-xl sm:inset-x-6 sm:bottom-5">
+        <div className="flex items-center border-b border-white/[0.08]">
+          <button
+            type="button"
+            onClick={() => setIsCardCollapsed((collapsed) => !collapsed)}
+            aria-expanded={!isCardCollapsed}
+            aria-label={
+              isCardCollapsed
+                ? "Mostrar detalles del pedido"
+                : "Ocultar detalles del pedido"
+            }
+            className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left transition hover:bg-white/[0.03]"
+          >
+            <CourierBusinessLogo
+              src={order.business_logo_url}
+              name={order.business_name}
             />
-          ) : (
-            <ChevronDown
-              size={19}
-              className="ml-1 shrink-0 text-neutral-300"
-              aria-hidden="true"
-            />
-          )}
-        </button>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-bold text-white">
+                {order.business_name || (isPublic ? "Pedido público" : "Tienda")}
+              </p>
+              <p className="text-xs text-neutral-400">
+                {isPublic ? "Pedido público" : "Pedido de tienda"}
+              </p>
+              <p className="mt-0.5 text-[11px] font-semibold text-emerald-200">
+                {nextStopDistance == null
+                  ? "Distancia no disponible"
+                  : `${nextStopDistance < 0.1 ? "<0.1" : nextStopDistance.toFixed(1)} km aprox. hasta ${isPickedUp ? "el cliente" : "la tienda"}`}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+                Domicilio
+              </p>
+              <p className="text-base font-black text-emerald-300">
+                {formatMoney(order.delivery_fee)}
+              </p>
+            </div>
+            {isCardCollapsed ? (
+              <ChevronUp
+                size={19}
+                className="ml-1 shrink-0 text-neutral-300"
+                aria-hidden="true"
+              />
+            ) : (
+              <ChevronDown
+                size={19}
+                className="ml-1 shrink-0 text-neutral-300"
+                aria-hidden="true"
+              />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setFitRouteRequest((request) => request + 1)}
+            disabled={!canCenterRoute}
+            aria-label="Centrar la ruta en el mapa"
+            title="Centrar la ruta en el mapa"
+            className="mr-3 grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-emerald-200 transition hover:border-emerald-300/30 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Route size={19} aria-hidden="true" />
+          </button>
+        </div>
 
         {!isCardCollapsed && (
         <div className="space-y-3 px-4 py-3">
@@ -2610,7 +2639,7 @@ const CourierOfferPreview = ({
           <p className="mt-1 text-xs font-semibold text-neutral-200">
             {distance == null
               ? "Distancia no disponible"
-              : `${distance.toFixed(1)} km aprox. desde donde estás`}
+              : `${distance.toFixed(1)} km aprox. de la tienda`}
           </p>
         </div>
         <p className="shrink-0 text-sm font-black text-emerald-300">
@@ -2641,12 +2670,10 @@ const CourierOfferPreview = ({
 
 const CourierMapExperience = ({
   mode,
-  isPublicApproved,
   locationStatus,
   online,
   realtimeStatus,
   location,
-  radiusKm,
   orders,
   activeDelivery,
   previewOrderIds,
@@ -2662,6 +2689,7 @@ const CourierMapExperience = ({
   onUpdateStatus,
 }) => {
   const [ordersExpanded, setOrdersExpanded] = useState(false);
+  const [recenterRequest, setRecenterRequest] = useState(0);
   const [previewCapacity, setPreviewCapacity] = useState(() =>
     typeof window === "undefined"
       ? 2
@@ -2729,11 +2757,10 @@ const CourierMapExperience = ({
         fullScreen
         location={location}
         orders={mapOrders}
-        radiusKm={radiusKm}
-        showRadius={isPublicApproved}
         online={online}
         selectedOrderId={selectedOrderId}
         onSelectOrder={selectOrder}
+        recenterRequest={recenterRequest}
       />
 
       {online &&
@@ -2781,12 +2808,31 @@ const CourierMapExperience = ({
       )}
 
       <div className="pointer-events-none fixed inset-x-3 bottom-3 z-20 sm:inset-x-6 sm:bottom-5">
+        {!activeDelivery && (
+          <div className="pointer-events-auto mx-auto mb-2 flex w-full max-w-xl justify-end">
+            <button
+              type="button"
+              onClick={() => setRecenterRequest((request) => request + 1)}
+              disabled={
+                !location ||
+                location.latitude == null ||
+                location.longitude == null
+              }
+              aria-label="Centrar mapa en mi ubicación"
+              title="Centrar mapa en mi ubicación"
+              className="grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-neutral-950/95 text-emerald-200 shadow-lg shadow-black/30 backdrop-blur-xl transition hover:border-emerald-300/30 hover:bg-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <LocateFixed size={20} strokeWidth={2.2} />
+            </button>
+          </div>
+        )}
         <div className="pointer-events-auto mx-auto max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/95 shadow-xl shadow-black/30 backdrop-blur-xl">
-          <div className="p-3">
+          <div className="flex items-center gap-2 p-3">
             <CourierAvailabilitySlider
               online={online}
               busy={availabilityBusy}
               onToggle={onToggleAvailability}
+              className="min-w-0 flex-1"
             />
             <span className="sr-only" role="status">
               {locationStatus === "error"

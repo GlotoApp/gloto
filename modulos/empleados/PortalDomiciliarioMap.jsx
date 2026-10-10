@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER = [4.5709, -74.2973];
+const ROUTING_URL = "https://router.project-osrm.org/route/v1/driving";
 
 const isValidCoordinate = (latitude, longitude) =>
   latitude !== null &&
@@ -15,28 +16,117 @@ const isValidCoordinate = (latitude, longitude) =>
   Math.abs(Number(latitude)) <= 90 &&
   Math.abs(Number(longitude)) <= 180;
 
+const fitActiveDeliveryBounds = (map, L, delivery, location, animate) => {
+  if (!map || !delivery) return;
+  const points = [
+    [delivery.pickup_latitude, delivery.pickup_longitude],
+    [delivery.destination_latitude, delivery.destination_longitude],
+    [location?.latitude, location?.longitude],
+  ]
+    .filter(([latitude, longitude]) => isValidCoordinate(latitude, longitude))
+    .map(([latitude, longitude]) => [Number(latitude), Number(longitude)]);
+
+  if (points.length === 0) return;
+  const bounds = L.latLngBounds(points);
+  const deliveryCard = document.querySelector(
+    ".courier-active-delivery-card",
+  );
+  const mapHeight = map.getSize().y || window.innerHeight;
+  const deliveryCardTop =
+    deliveryCard?.getBoundingClientRect().top ?? mapHeight;
+  const paddingBottom = Math.max(40, mapHeight - deliveryCardTop + 24);
+
+  if (points.length === 1) {
+    map.setView(points[0], 15, { animate });
+    return;
+  }
+
+  map.fitBounds(bounds, {
+    paddingTopLeft: [32, 80],
+    paddingBottomRight: [32, paddingBottom],
+    maxZoom: 15,
+    animate,
+  });
+};
+
+const fitActiveRouteBounds = (map, routeBounds, animate) => {
+  if (!map || !routeBounds?.isValid()) return;
+  const mapHeight = map.getSize().y || window.innerHeight;
+  const deliveryCard = document.querySelector(
+    ".courier-active-delivery-card",
+  );
+  const deliveryCardTop =
+    deliveryCard?.getBoundingClientRect().top ?? mapHeight;
+  const paddingBottom = Math.max(40, mapHeight - deliveryCardTop + 24);
+
+  map.fitBounds(routeBounds, {
+    paddingTopLeft: [32, 80],
+    paddingBottomRight: [32, paddingBottom],
+    maxZoom: 15,
+    animate,
+  });
+};
+
 const PortalDomiciliarioMap = ({
   location,
   orders = [],
-  radiusKm = 10,
   online = false,
   onSelectOrder,
   fullScreen = false,
-  showRadius = true,
   selectedOrderId,
   activeDelivery = null,
+  recenterRequest = 0,
+  fitRouteRequest = 0,
 }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const leafletRef = useRef(null);
   const hasCenteredRef = useRef(false);
   const courierMarkerRef = useRef(null);
-  const radiusCircleRef = useRef(null);
   const orderMarkersRef = useRef(null);
+  const routeLayerRef = useRef(null);
+  const fittedRoadRouteRef = useRef(null);
   const fittedActiveDeliveryRef = useRef(null);
+  const lastRecenterRequestRef = useRef(recenterRequest);
+  const lastFitRouteRequestRef = useRef(fitRouteRequest);
   const onSelectOrderRef = useRef(onSelectOrder);
   const [mapError, setMapError] = useState("");
+  const [routeError, setRouteError] = useState("");
   const [mapReady, setMapReady] = useState(false);
+  const routeDeliveryOrderId = activeDelivery?.order_id;
+  const routeDeliveryStatus = activeDelivery?.delivery_status;
+  const pickupLatitude = Number(activeDelivery?.pickup_latitude);
+  const pickupLongitude = Number(activeDelivery?.pickup_longitude);
+  const destinationLatitude = Number(activeDelivery?.destination_latitude);
+  const destinationLongitude = Number(activeDelivery?.destination_longitude);
+  const routeLocationLatitude = isValidCoordinate(
+    location?.latitude,
+    location?.longitude,
+  )
+    ? Math.round(Number(location.latitude) * 1000) / 1000
+    : null;
+  const routeLocationLongitude = routeLocationLatitude === null
+    ? null
+    : Math.round(Number(location.longitude) * 1000) / 1000;
+  const hasActiveDelivery = Boolean(activeDelivery);
+  const routeKey = [
+    routeDeliveryOrderId,
+    routeDeliveryStatus,
+    routeLocationLatitude,
+    routeLocationLongitude,
+    pickupLatitude,
+    pickupLongitude,
+    destinationLatitude,
+    destinationLongitude,
+  ].join(":");
+  const hasEnoughRoutePoints =
+    (routeLocationLatitude !== null ? 1 : 0) +
+      (routeDeliveryStatus !== "picked_up" &&
+      isValidCoordinate(pickupLatitude, pickupLongitude)
+        ? 1
+        : 0) +
+      (isValidCoordinate(destinationLatitude, destinationLongitude) ? 1 : 0) >=
+    2;
 
   useEffect(() => {
     onSelectOrderRef.current = onSelectOrder;
@@ -82,8 +172,8 @@ const PortalDomiciliarioMap = ({
       mapRef.current = null;
       leafletRef.current = null;
       courierMarkerRef.current = null;
-      radiusCircleRef.current = null;
       orderMarkersRef.current = null;
+      routeLayerRef.current = null;
     };
   }, []);
 
@@ -94,19 +184,17 @@ const PortalDomiciliarioMap = ({
 
     if (!isValidCoordinate(location?.latitude, location?.longitude)) {
       courierMarkerRef.current?.remove();
-      radiusCircleRef.current?.remove();
       courierMarkerRef.current = null;
-      radiusCircleRef.current = null;
       hasCenteredRef.current = false;
       return;
     }
 
     const point = [Number(location.latitude), Number(location.longitude)];
     const courierIcon = L.divIcon({
-      className: "",
-      html: '<span class="courier-location-pin"><span class="courier-location-wave courier-location-wave--first"></span><span class="courier-location-wave courier-location-wave--second"></span><span class="courier-location-center">●</span></span>',
-      iconSize: [48, 48],
-      iconAnchor: [24, 24],
+      className: "courier-location-icon",
+      html: '<span class="courier-location-dot"><span class="courier-location-dot-center"></span></span>',
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
     });
 
     if (!courierMarkerRef.current) {
@@ -116,44 +204,34 @@ const PortalDomiciliarioMap = ({
     } else {
       courierMarkerRef.current.setLatLng(point);
     }
-    courierMarkerRef.current
-      .getElement()
-      ?.querySelector(".courier-location-pin")
-      ?.classList.toggle("is-live", online);
-
-    if (!showRadius) {
-      radiusCircleRef.current?.remove();
-      radiusCircleRef.current = null;
-    } else if (!radiusCircleRef.current) {
-      radiusCircleRef.current = L.circle(point, {
-        radius: Math.max(0.5, Number(radiusKm) || 10) * 1000,
-        color: "#8b5cf6",
-        weight: 1,
-        fillColor: "#8b5cf6",
-        fillOpacity: 0.08,
-      }).addTo(map);
-    } else {
-      radiusCircleRef.current.setLatLng(point);
-      radiusCircleRef.current.setRadius(Math.max(0.5, Number(radiusKm) || 10) * 1000);
-    }
 
     if (activeDelivery) return;
 
     if (!hasCenteredRef.current) {
-      if (radiusCircleRef.current) {
-        map.fitBounds(radiusCircleRef.current.getBounds(), {
-          padding: [24, 24],
-          maxZoom: 14,
-          animate: false,
-        });
-      } else {
-        map.setView(point, 15, { animate: false });
-      }
+      map.setView(point, 15, { animate: false });
       hasCenteredRef.current = true;
     } else if (online) {
       map.panTo(point, { animate: false });
     }
-  }, [activeDelivery, location, mapReady, online, radiusKm, showRadius]);
+  }, [activeDelivery, location, mapReady, online]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (
+      !mapReady ||
+      !map ||
+      recenterRequest === lastRecenterRequestRef.current
+    ) {
+      return;
+    }
+    lastRecenterRequestRef.current = recenterRequest;
+    if (!isValidCoordinate(location?.latitude, location?.longitude)) return;
+    map.setView(
+      [Number(location.latitude), Number(location.longitude)],
+      15,
+      { animate: true },
+    );
+  }, [location, mapReady, recenterRequest]);
 
   useEffect(() => {
     const L = leafletRef.current;
@@ -183,34 +261,6 @@ const PortalDomiciliarioMap = ({
           ]
         : null;
       const routePoints = [pickup, destination].filter(Boolean);
-      const courier = isValidCoordinate(location?.latitude, location?.longitude)
-        ? [Number(location.latitude), Number(location.longitude)]
-        : null;
-      const nextStop = activeDelivery.delivery_status === "picked_up"
-        ? destination
-        : pickup;
-
-      if (courier && nextStop) {
-        L.polyline([courier, nextStop], {
-          color: "#34d399",
-          weight: 6,
-          opacity: 0.95,
-          lineCap: "round",
-        }).addTo(markerLayer);
-      }
-      if (
-        activeDelivery.delivery_status !== "picked_up" &&
-        pickup &&
-        destination
-      ) {
-        L.polyline(routePoints, {
-          color: "#8b5cf6",
-          weight: 4,
-          opacity: 0.65,
-          lineCap: "round",
-          dashArray: "8 10",
-        }).addTo(markerLayer);
-      }
 
       [
         { point: pickup, label: "A", className: "pickup" },
@@ -240,13 +290,7 @@ const PortalDomiciliarioMap = ({
         fittedActiveDeliveryRef.current !== activeRouteKey &&
         routePoints.length > 0
       ) {
-        const boundsPoints = [...routePoints, ...(courier ? [courier] : [])];
-        const bounds = L.latLngBounds(boundsPoints);
-        mapRef.current?.fitBounds(bounds, {
-          padding: [48, 48],
-          maxZoom: 15,
-          animate: false,
-        });
+        fitActiveDeliveryBounds(mapRef.current, L, activeDelivery, location, false);
         fittedActiveDeliveryRef.current = activeRouteKey;
       }
       return;
@@ -255,18 +299,28 @@ const PortalDomiciliarioMap = ({
     fittedActiveDeliveryRef.current = null;
     orders.forEach((order) => {
       if (order.delivery_status !== "available") return;
+      const isPublicOrder = order.courier_mode === "public";
+      const hasPickupLocation = isValidCoordinate(
+        order.pickup_latitude,
+        order.pickup_longitude,
+      );
+      const markerLatitude =
+        isPublicOrder && hasPickupLocation
+          ? order.pickup_latitude
+          : order.destination_latitude;
+      const markerLongitude =
+        isPublicOrder && hasPickupLocation
+          ? order.pickup_longitude
+          : order.destination_longitude;
       if (
-        !isValidCoordinate(
-          order.destination_latitude,
-          order.destination_longitude,
-        )
+        !isValidCoordinate(markerLatitude, markerLongitude)
       ) {
         return;
       }
 
       const point = [
-        Number(order.destination_latitude),
-        Number(order.destination_longitude),
+        Number(markerLatitude),
+        Number(markerLongitude),
       ];
       const selected = order.order_id === selectedOrderId;
       const logoUrl = typeof order.business_logo_url === "string"
@@ -319,7 +373,9 @@ const PortalDomiciliarioMap = ({
       popup.append(source);
       if (order.distance_km != null) {
         const distance = document.createElement("div");
-        distance.textContent = `${Number(order.distance_km).toFixed(1)} km de ti`;
+        distance.textContent = isPublicOrder
+          ? `${Number(order.distance_km).toFixed(1)} km de la tienda`
+          : `${Number(order.distance_km).toFixed(1)} km de ti`;
         popup.append(distance);
       }
       popup.append(fee);
@@ -329,6 +385,118 @@ const PortalDomiciliarioMap = ({
       marker.addTo(markerLayer);
     });
   }, [activeDelivery, location, mapReady, orders, selectedOrderId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const L = leafletRef.current;
+    if (!mapReady || !map || !L) return undefined;
+
+    if (!hasActiveDelivery) {
+      routeLayerRef.current?.remove();
+      routeLayerRef.current = null;
+      fittedRoadRouteRef.current = null;
+      return undefined;
+    }
+
+    routeLayerRef.current?.remove();
+    routeLayerRef.current = null;
+
+    const points = [];
+    if (routeLocationLatitude !== null) {
+      points.push([routeLocationLongitude, routeLocationLatitude]);
+    }
+    if (
+      routeDeliveryStatus !== "picked_up" &&
+      isValidCoordinate(pickupLatitude, pickupLongitude)
+    ) {
+      points.push([pickupLongitude, pickupLatitude]);
+    }
+    if (isValidCoordinate(destinationLatitude, destinationLongitude)) {
+      points.push([destinationLongitude, destinationLatitude]);
+    }
+
+    if (points.length < 2) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const coordinates = points
+      .map(([longitude, latitude]) => `${longitude},${latitude}`)
+      .join(";");
+
+    fetch(`${ROUTING_URL}/${coordinates}?overview=full&geometries=geojson`, {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("No se pudo consultar la ruta vial.");
+        return response.json();
+      })
+      .then((result) => {
+        const route = result.routes?.[0];
+        if (result.code !== "Ok" || !route?.geometry) {
+          throw new Error("No se encontró una ruta por las calles para este domicilio.");
+        }
+        const routeLayer = L.geoJSON(route.geometry, {
+          style: {
+            color: "#4285f4",
+            weight: 6,
+            opacity: 0.95,
+            lineCap: "round",
+            lineJoin: "round",
+          },
+        }).addTo(map);
+        routeLayerRef.current = routeLayer;
+        const roadRouteKey = `${routeDeliveryOrderId}:${routeDeliveryStatus}`;
+        if (fittedRoadRouteRef.current !== roadRouteKey) {
+          fitActiveRouteBounds(map, routeLayer.getBounds(), false);
+          fittedRoadRouteRef.current = roadRouteKey;
+        }
+        setRouteError(null);
+      })
+      .catch((error) => {
+        if (error.name === "AbortError") return;
+        console.error("No se pudo trazar la ruta vial del domicilio:", error);
+        setRouteError({
+          routeKey,
+          message:
+            error.message || "No se pudo trazar la ruta vial. Intenta de nuevo.",
+        });
+      });
+
+    return () => controller.abort();
+  }, [
+    destinationLatitude,
+    destinationLongitude,
+    hasActiveDelivery,
+    mapReady,
+    pickupLatitude,
+    pickupLongitude,
+    routeDeliveryOrderId,
+    routeDeliveryStatus,
+    routeLocationLatitude,
+    routeLocationLongitude,
+    routeKey,
+  ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const L = leafletRef.current;
+    if (
+      !mapReady ||
+      !map ||
+      !L ||
+      !activeDelivery ||
+      fitRouteRequest === lastFitRouteRequestRef.current
+    ) {
+      return;
+    }
+    lastFitRouteRequestRef.current = fitRouteRequest;
+    if (routeLayerRef.current) {
+      fitActiveRouteBounds(map, routeLayerRef.current.getBounds(), true);
+    } else {
+      fitActiveDeliveryBounds(map, L, activeDelivery, location, true);
+    }
+  }, [activeDelivery, fitRouteRequest, location, mapReady]);
 
   return (
     <div
@@ -349,6 +517,16 @@ const PortalDomiciliarioMap = ({
           className="absolute inset-x-3 bottom-3 z-[400] rounded-xl border border-rose-400/20 bg-neutral-950/90 px-3 py-2 text-xs text-rose-200"
         >
           {mapError}
+        </div>
+      )}
+      {hasActiveDelivery && (!hasEnoughRoutePoints || routeError?.routeKey === routeKey) && (
+        <div
+          role="alert"
+          className="absolute inset-x-3 top-[128px] z-[400] mx-auto max-w-lg rounded-xl border border-amber-300/20 bg-neutral-950/95 px-3 py-2 text-xs text-amber-100 shadow-lg backdrop-blur"
+        >
+          {!hasEnoughRoutePoints
+            ? "Faltan ubicaciones para trazar la ruta por las calles."
+            : routeError.message}
         </div>
       )}
     </div>
