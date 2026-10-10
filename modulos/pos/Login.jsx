@@ -1,19 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
-import { User, Lock, Loader2, Eye, EyeOff, AlertCircle } from "lucide-react";
+import {
+  User,
+  Lock,
+  Loader2,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  MessageCircle,
+} from "lucide-react";
 import {
   getLoginFailureMessage,
   getLoginLockMessage,
   useLoginAttemptLimit,
 } from "../../src/hooks/useLoginAttemptLimit";
 
-const Login = () => {
+const Login = ({ audience = "pos" }) => {
+  const isCourierLogin = audience === "courier";
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [supportPhone, setSupportPhone] = useState("");
+  const [supportLoading, setSupportLoading] = useState(true);
+  const [supportUnavailable, setSupportUnavailable] = useState(false);
   const {
     isLocked,
     lockedUntil,
@@ -23,6 +35,34 @@ const Login = () => {
   } = useLoginAttemptLimit();
 
   const navigate = useNavigate();
+  const supportWhatsAppUrl = (message) =>
+    supportPhone
+      ? `https://wa.me/${supportPhone}?text=${encodeURIComponent(message)}`
+      : "";
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSupportPhone = async () => {
+      const { data, error } = await supabase.rpc(
+        "get_public_support_whatsapp",
+      );
+      if (!isMounted) return;
+
+      if (error) {
+        console.error("No se pudo cargar el WhatsApp de soporte:", error);
+        setSupportUnavailable(true);
+      } else {
+        setSupportPhone(String(data || "").replace(/\D/g, ""));
+      }
+      setSupportLoading(false);
+    };
+
+    loadSupportPhone();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -35,32 +75,75 @@ const Login = () => {
     setLoading(true);
 
     try {
-      const { data: profiles, error: profileError } = await supabase
-        .from("profiles")
-        .select("email")
-        .eq("username", username.trim());
+      let email = username.trim();
+      if (!isCourierLogin) {
+        const { data: profiles, error: profileError } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("username", username.trim());
 
-      if (profileError) throw profileError;
+        if (profileError) throw profileError;
 
-      if (!profiles || profiles.length === 0) {
-        setErrorMsg(getLoginFailureMessage(recordFailedAttempt()));
-        return;
+        if (!profiles || profiles.length === 0) {
+          setErrorMsg(getLoginFailureMessage(recordFailedAttempt()));
+          return;
+        }
+
+        email = profiles[0].email;
       }
 
-      const email = profiles[0].email;
-
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: email,
         password: password,
       });
 
-      if (error) {
-        setErrorMsg(getLoginFailureMessage(recordFailedAttempt()));
-      } else {
-        resetAttempts();
-        navigate("/pos");
+      if (error || !data?.user) {
+        if (isCourierLogin && error) {
+          console.error("No se pudo autenticar el domiciliario:", error);
+        }
+        setErrorMsg(
+          getLoginFailureMessage(
+            recordFailedAttempt(),
+            isCourierLogin
+              ? "Correo o contraseña incorrectos. Verifica tus datos o contacta al soporte de Gloto por WhatsApp para recuperar el acceso."
+              : "Usuario o contraseña incorrectos",
+          ),
+        );
+        return;
       }
-    } catch {
+
+      if (isCourierLogin) {
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", data.user.id)
+          .maybeSingle();
+
+        if (profileError) throw profileError;
+        if (String(profile?.role || "").toLowerCase() !== "domiciliario") {
+          const { error: signOutError } = await supabase.auth.signOut();
+          if (signOutError) throw signOutError;
+          setErrorMsg(
+            "Esta cuenta no tiene acceso al portal privado de domiciliarios.",
+          );
+          return;
+        }
+
+      }
+
+      resetAttempts();
+      navigate(isCourierLogin ? "/domiciliarios" : "/pos");
+    } catch (error) {
+      console.error("Error al iniciar sesión:", error);
+      if (isCourierLogin) {
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) {
+          console.error(
+            "No se pudo cerrar la sesión no verificada del domiciliario:",
+            signOutError,
+          );
+        }
+      }
       setErrorMsg("Ocurrió un error al intentar entrar");
     } finally {
       setLoading(false);
@@ -335,7 +418,9 @@ const Login = () => {
             onError={(e) => (e.target.style.display = "none")}
           />
           <h2 className="gloto-title">BIENVENIDO</h2>
-          <p className="gloto-subtitle">POS</p>
+          <p className="gloto-subtitle">
+            {isCourierLogin ? "DOMICILIARIOS" : "POS"}
+          </p>
         </div>
 
         <form onSubmit={handleLogin} className="gloto-form">
@@ -349,8 +434,11 @@ const Login = () => {
           <div className="gloto-input-group">
             <User size={18} className="gloto-input-icon" />
             <input
-              type="text"
-              placeholder="Nombre de usuario"
+              type={isCourierLogin ? "email" : "text"}
+              placeholder={
+                isCourierLogin ? "Correo del domiciliario" : "Nombre de usuario"
+              }
+              autoComplete={isCourierLogin ? "username" : "off"}
               className="gloto-input"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -396,6 +484,40 @@ const Login = () => {
             )}
           </button>
         </form>
+        {supportPhone ? (
+          <a
+            href={supportWhatsAppUrl(
+              "Hola, olvidé mis credenciales de acceso a Gloto y necesito ayuda.",
+            )}
+            target="_blank"
+            rel="noreferrer"
+            className="gloto-footer-text flex items-center justify-center gap-2 text-center no-underline"
+          >
+            <MessageCircle size={15} />
+            ¿Olvidaste tus credenciales? Escríbenos al WhatsApp de soporte
+          </a>
+        ) : (
+          <p className="gloto-footer-text text-center" role="status">
+            {supportLoading
+              ? "Cargando contacto de soporte..."
+              : supportUnavailable
+                ? "No se pudo cargar WhatsApp. Intenta más tarde."
+                : "WhatsApp de soporte no está configurado."}
+          </p>
+        )}
+        {isCourierLogin && supportPhone && (
+          <a
+            href={supportWhatsAppUrl(
+              "Hola, quiero registrarme como domiciliario público en Gloto.",
+            )}
+            target="_blank"
+            rel="noreferrer"
+            className="gloto-footer-text flex items-center justify-center gap-2 text-center no-underline"
+          >
+            <MessageCircle size={15} />
+            ¿Quieres registrarte como domiciliario? Escríbenos
+          </a>
+        )}
       </div>
     </div>
   );

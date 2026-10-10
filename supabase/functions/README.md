@@ -29,7 +29,72 @@ supabase link --project-ref TU_PROJECT_REF
 supabase functions deploy crear-cuenta-negocio
 supabase functions deploy eliminar-cuenta-negocio
 supabase functions deploy restablecer-contrasena-negocio
+supabase functions deploy crear-cuenta-domiciliario
 ```
+
+La configuración de `crear-cuenta-domiciliario` desactiva la verificación JWT
+del gateway para que la solicitud CORS `OPTIONS` pueda llegar a la función. La
+función valida la sesión del solicitante con `auth.getUser()` y exige un perfil
+`admin` con `business_id` antes de crear una cuenta. Despliega desde la raíz del
+proyecto con Supabase CLI para que se aplique `supabase/config.toml`; si la
+verificación JWT se cambió desde el Dashboard, desactívala para esta función
+para que coincida con esa configuración.
+
+## Portal privado de domiciliarios
+
+Ejecuta `supabase/123_domiciliarios_privados.sql` en el SQL Editor antes de
+publicar el portal. Agrega el vínculo seguro entre un empleado y su cuenta,
+además de funciones protegidas para consultar, tomar y actualizar pedidos de
+domicilio. Los domiciliarios quedan sin `business_id` en su perfil; el negocio
+se resuelve mediante el empleado vinculado, de modo que no obtengan acceso a
+las demás pantallas ni datos del POS. Si en el futuro se necesita eliminar
+usuarios de Auth, ejecuta también estas migraciones para conservar el historial
+de revisiones y eliminar el perfil asociado:
+`supabase/113_auth_user_review_references_set_null.sql` y
+`supabase/124_profiles_auth_user_cascade.sql`. La segunda permite que Auth
+elimine automáticamente el perfil asociado.
+Ejecuta además `supabase/125_domiciliario_read_own_employee.sql` para que cada
+domiciliario pueda leer únicamente el registro de empleado vinculado a su cuenta.
+Ejecuta `supabase/126_detach_domiciliario_from_business.sql` para permitir que
+el acceso a una tienda se quite de forma transaccional sin eliminar la cuenta
+global de Gloto. Ejecuta también
+`supabase/127_remove_employee_from_business.sql` para habilitar la eliminación
+del registro del empleado; si tenía cuenta de domiciliario, la cuenta de Gloto
+se conserva y sus domicilios activos se liberan.
+
+El dueño crea el empleado desde **Configuración > Empleados**, selecciona el
+área **Domiciliario/a** y genera su acceso con correo y contraseña inicial. En
+la misma sección puede restablecer la contraseña o quitar el acceso. Al quitar
+el acceso a una tienda, se desvincula la cuenta únicamente de ese empleado, se
+conserva la cuenta de Auth y la contraseña no cambia. El empleado se conserva y
+sus domicilios asignados vuelven a estar disponibles para el negocio. El
+restablecimiento solo se puede hacer mientras la cuenta siga vinculada al
+empleado. En esta primera fase el portal solo muestra pedidos del negocio que
+creó esa cuenta. La publicación de pedidos para domiciliarios públicos y sus
+recargas no está habilitada todavía.
+
+Crear, restablecer y quitar el vínculo son acciones de la misma Edge Function
+`crear-cuenta-domiciliario`; por eso Supabase muestra un solo nombre en la lista
+de funciones. Desde **Configuración > Empleados**, **Restablecer** cambia la
+contraseña de la cuenta mientras siga vinculada al negocio. **Quitar acceso**
+revoca únicamente el acceso a los pedidos de esa tienda; no borra al usuario de
+Supabase Auth ni le cambia la contraseña.
+
+Después de ejecutar el SQL, despliega o actualiza la función desde la carpeta
+del proyecto que contiene `supabase/config.toml`:
+
+```sh
+supabase link --project-ref TU_PROJECT_REF
+supabase functions deploy crear-cuenta-domiciliario
+```
+
+La misma función elimina el registro laboral desde **Empleados**. Antes de
+usarlo, ejecuta `supabase/127_remove_employee_from_business.sql`; la cuenta
+global de Gloto del domiciliario se conserva y solo se libera su vínculo y los
+domicilios de esta tienda.
+
+La clave `SUPABASE_SERVICE_ROLE_KEY` se usa únicamente dentro del entorno
+administrado de Edge Functions; no se debe copiar al navegador ni al SQL Editor.
 
 En la sección de creación de cuentas, el usuario de administración ingresa el nombre, slug y correo
 del negocio. La función crea el negocio, un usuario confirmado en Auth y su
@@ -65,3 +130,10 @@ contraseña temporal con `restablecer-contrasena-negocio`; se muestra una sola
 vez y la cuenta debe cambiarla al iniciar sesión. No se necesita guardar
 contraseñas en tablas ni configurar flujos de recuperación por correo para esta
 pantalla.
+
+El login público usa el número configurado en **Admin > Sistema** para abrir
+WhatsApp con un mensaje de recuperación de credenciales. En el login de
+domiciliarios también aparece la opción para consultar por el registro público;
+ese flujo aún no está implementado y se gestiona por soporte. Ejecuta
+`supabase/128_public_support_whatsapp_rpc.sql` para que el login pueda leer solo
+el número global de soporte sin exponer permisos sobre la tabla de configuración.

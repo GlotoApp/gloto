@@ -16,6 +16,7 @@ import Upss from "../modulos/pos/Upss";
 import { useAuth } from "./components/AuthContext";
 import Acceso from "../modulos/admin/Acceso";
 import { supabase } from "./lib/supabaseClient";
+import RequireDomiciliario from "../modulos/empleados/RequireDomiciliario";
 
 // Lazy imports
 const POS = lazy(() => import("../modulos/pos/POS"));
@@ -62,21 +63,97 @@ const PlanesFacturacion = lazy(
 const Mercado = lazy(() => import("../modulos/admin/Mercado"));
 const Finanzas = lazy(() => import("../modulos/admin/Finanzas"));
 const Sistema = lazy(() => import("../modulos/admin/Sistema"));
+const DomiciliariosPublicos = lazy(
+  () => import("../modulos/admin/DomiciliariosPublicos"),
+);
 const Login = lazy(() => import("../modulos/pos/Login"));
 const ConfiguracionInicial = lazy(
   () => import("../modulos/pos/ConfiguracionInicial"),
+);
+const PortalDomiciliario = lazy(
+  () => import("../modulos/empleados/PortalDomiciliario"),
 );
 
 // Componentes protectores
 const RequireAdmin = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return <Loading />;
-  return user ? children : <Navigate to="/acceso" replace />;
+  return user ? (
+    <RequireAuth>{children}</RequireAuth>
+  ) : (
+    <Navigate to="/acceso" replace />
+  );
 };
 
 const RequireAuth = ({ children }) => {
   const { user, loading } = useAuth();
-  if (loading) return <Loading />;
+  const [accessStatus, setAccessStatus] = useState("loading");
+  const [retryKey, setRetryKey] = useState(0);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let isMounted = true;
+
+    const checkProfile = async () => {
+      try {
+        const { data: profile, error } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (!isMounted) return;
+        if (error) {
+          console.error("No se pudo verificar el acceso al POS:", error);
+          setAccessStatus("error");
+          return;
+        }
+
+        setAccessStatus(
+          String(profile?.role || "").toLowerCase() === "domiciliario"
+            ? "courier"
+            : "allowed",
+        );
+      } catch (error) {
+        if (!isMounted) return;
+        console.error("Error verificando el perfil para el POS:", error);
+        setAccessStatus("error");
+      }
+    };
+
+    setAccessStatus("loading");
+    checkProfile();
+    return () => {
+      isMounted = false;
+    };
+  }, [retryKey, user?.id]);
+
+  if (loading || (user && accessStatus === "loading")) return <Loading />;
+  if (accessStatus === "courier") {
+    return <Navigate to="/domiciliarios" replace />;
+  }
+  if (accessStatus === "error") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-neutral-950 px-4 text-white">
+        <section className="max-w-md rounded-2xl border border-rose-400/20 bg-neutral-900 p-6 text-center">
+          <h1 className="text-lg font-black">No se pudo verificar tu acceso</h1>
+          <p className="mt-2 text-sm text-neutral-400">
+            El POS permanecerá bloqueado hasta validar tu perfil.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setAccessStatus("loading");
+              setRetryKey((current) => current + 1);
+            }}
+            className="mt-5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold hover:bg-violet-500"
+          >
+            Reintentar
+          </button>
+        </section>
+      </div>
+    );
+  }
   return user ? children : <Navigate to="/login" replace />;
 };
 
@@ -439,6 +516,18 @@ function App() {
         <Routes>
           {/* Rutas Públicas */}
           <Route path="/login" element={<Login />} />
+          <Route
+            path="/domiciliarios/login"
+            element={<Login audience="courier" />}
+          />
+          <Route
+            path="/domiciliarios"
+            element={
+              <RequireDomiciliario>
+                <PortalDomiciliario />
+              </RequireDomiciliario>
+            }
+          />
           <Route path="/acceso" element={<Acceso />} />
           <Route
             path="/login-superadmin"
@@ -468,6 +557,10 @@ function App() {
             <Route index element={<Navigate to="resumen" replace />} />
             <Route path="resumen" element={<Resumen />} />
             <Route path="tiendas" element={<Tiendas />} />
+            <Route
+              path="domiciliarios"
+              element={<DomiciliariosPublicos />}
+            />
             <Route
               path="cuentas/nueva"
               element={<CrearCuentaSuperAdmin />}

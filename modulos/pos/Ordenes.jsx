@@ -415,6 +415,20 @@ const OrderCard = memo(
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <DetailBox label="Cliente" value={orden.cliente} />
                   <DetailBox label="Teléfono" value={orden.telefono} />
+                  {orden.metodoEntrega === "domicilio" &&
+                    orden.deliveryStatus && (
+                      <DetailBox
+                        label="Estado del domicilio"
+                        value={
+                          {
+                            available: "Disponible",
+                            assigned: "Asignado",
+                            picked_up: "Recogido",
+                            delivered: "Entregado",
+                          }[orden.deliveryStatus] || orden.deliveryStatus
+                        }
+                      />
+                    )}
                   {orden.deliveryDetails && orden.deliveryDetails.length > 0 ? (
                     <>
                       {orden.deliveryDetails.map((detail, index) => (
@@ -1124,6 +1138,7 @@ const mapDatabaseOrderToUi = (order) => {
     tipPercent: Number(metadata.tip_percent || 0),
     status: normalizeStatus(order.status),
     databaseStatus: String(order.status || "pending").toLowerCase(),
+    deliveryStatus: String(order.delivery_status || "").toLowerCase(),
     origen: "pos",
     cliente: order.customer_name || "Cliente",
     telefono: order.customer_phone || "Sin teléfono",

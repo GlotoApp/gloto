@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   Crown,
   CreditCard,
+  Bike,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -20,6 +21,11 @@ const navItems = [
   { label: "Resumen", path: "/gestion/resumen", icon: LayoutDashboard },
   { label: "Marketplace", path: "/gestion/marketplace", icon: Tag },
   { label: "Tiendas", path: "/gestion/tiendas", icon: Store },
+  {
+    label: "Domiciliarios",
+    path: "/gestion/domiciliarios",
+    icon: Bike,
+  },
   { label: "Crear cuenta", path: "/gestion/cuentas/nueva", icon: UserPlus },
   {
     label: "Suscripciones",

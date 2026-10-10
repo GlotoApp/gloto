@@ -8,3 +8,6 @@ verify_jwt = true
 
 [functions.restablecer-contrasena-negocio]
 verify_jwt = true
+
+[functions.crear-cuenta-domiciliario]
+verify_jwt = false
