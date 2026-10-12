@@ -15,6 +15,10 @@ import {
 } from "./OrderInvoicePdf";
 import { supabase } from "../../src/lib/supabaseClient";
 import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
+import {
+  calculateDeliveryPricing,
+  calculateTipAmount,
+} from "../../src/lib/deliveryPricing";
 import { useAuth } from "../../src/components/AuthContext";
 import DeliveryMap from "./DeliveryMap";
 
@@ -1609,6 +1613,7 @@ const POS = () => {
     tarjeta: { label: "Tarjeta", icon: "credit_card" },
     transferencia: { label: "Transferencia", icon: "account_balance" },
     dividir: { label: "Dividir", icon: "call_split" }, // El nuevo método
+    variado: { label: "Variado", icon: "more_horiz" },
   };
 
   const categoryOrder = useMemo(
@@ -2525,20 +2530,25 @@ const POS = () => {
     };
   }, [deliveryDestination]);
 
-  const deliveryRate = Number(deliverySettings?.delivery_fee_per_km);
-  const minimumDeliveryFee = Number(deliverySettings?.min_delivery_fee);
-  const maximumDeliveryFee = Number(deliverySettings?.max_delivery_fee);
-  const deliveryPricingConfigured =
-    deliverySettings?.delivery_fee_per_km !== null &&
-    deliverySettings?.delivery_fee_per_km !== undefined &&
-    deliverySettings?.min_delivery_fee !== null &&
-    deliverySettings?.min_delivery_fee !== undefined &&
-    deliverySettings?.max_delivery_fee !== null &&
-    deliverySettings?.max_delivery_fee !== undefined &&
-    Number.isFinite(deliveryRate) &&
-    Number.isFinite(minimumDeliveryFee) &&
-    Number.isFinite(maximumDeliveryFee) &&
-    minimumDeliveryFee <= maximumDeliveryFee;
+  const {
+    configured: deliveryPricingConfigured,
+    baseDeliveryFee,
+    nightSurcharge: calculatedNightDeliverySurcharge,
+    nightSurchargePercent,
+    deliveryFee: calculatedDeliveryFee,
+  } = calculateDeliveryPricing(
+    deliverySettings,
+    deliveryRouteDistanceMeters,
+    deliveryClock,
+  );
+  const deliveryBaseCharge =
+    deliveryMethod === "delivery" && baseDeliveryFee !== null
+      ? baseDeliveryFee
+      : 0;
+  const deliveryBaseFee =
+    deliveryMethod === "delivery" ? baseDeliveryFee : null;
+  const nightDeliverySurcharge =
+    deliveryMethod === "delivery" ? calculatedNightDeliverySurcharge : 0;
   const deliveryDistanceKm =
     deliveryRouteDistanceMeters === null
       ? null
@@ -2547,51 +2557,18 @@ const POS = () => {
     (sum, item) => sum + item.price * item.qty,
     0,
   );
-  const deliveryBaseFee =
-    deliveryDistanceKm !== null && deliveryPricingConfigured
-      ? Math.round(deliveryDistanceKm * deliveryRate)
-      : null;
-  const deliveryFeeBeforeRounding =
-    deliveryBaseFee === null
-      ? null
-      : Math.max(minimumDeliveryFee, deliveryBaseFee);
-  const roundedDeliveryFee =
-    deliveryFeeBeforeRounding === null
-      ? null
-      : Math.ceil(deliveryFeeBeforeRounding / 100) * 100;
-  const deliveryBaseCharge =
-    deliveryMethod === "delivery" && roundedDeliveryFee !== null
-      ? Math.min(maximumDeliveryFee, roundedDeliveryFee)
-      : 0;
-  const surchargeStart = String(
-    deliverySettings?.night_delivery_surcharge_start || "",
-  ).slice(0, 5);
-  const surchargeEnd = String(
-    deliverySettings?.night_delivery_surcharge_end || "",
-  ).slice(0, 5);
-  const currentDeliveryTime = `${String(deliveryClock.getHours()).padStart(2, "0")}:${String(deliveryClock.getMinutes()).padStart(2, "0")}`;
-  const isNightDeliverySurchargeTime =
-    Boolean(deliverySettings?.night_delivery_surcharge_enabled) &&
-    Boolean(surchargeStart && surchargeEnd && surchargeStart !== surchargeEnd) &&
-    (surchargeStart < surchargeEnd
-      ? currentDeliveryTime >= surchargeStart &&
-        currentDeliveryTime < surchargeEnd
-      : currentDeliveryTime >= surchargeStart ||
-        currentDeliveryTime < surchargeEnd);
-  const nightSurchargePercent =
-    Number(deliverySettings?.night_delivery_surcharge_percent) || 0;
-  const nightDeliverySurcharge =
-    deliveryMethod === "delivery" &&
-    roundedDeliveryFee !== null &&
-    isNightDeliverySurchargeTime
-      ? Math.ceil(
-          Math.round((deliveryBaseCharge * nightSurchargePercent) / 100) / 100,
-        ) * 100
-      : 0;
-  const deliveryFee = deliveryBaseCharge + nightDeliverySurcharge;
-  const tipPercent = Number(deliverySettings?.tip_percent) || 0;
-  const tipAmount = Math.round((itemsSubtotal * tipPercent) / 100);
+  const deliveryFee =
+    deliveryMethod === "delivery" ? calculatedDeliveryFee : 0;
+  const tipPercent = Math.max(
+    0,
+    Math.min(100, Number(deliverySettings?.tip_percent) || 0),
+  );
   const totalWithoutTip = itemsSubtotal + deliveryFee;
+  const tipAmount = calculateTipAmount(
+    itemsSubtotal,
+    deliveryFee,
+    tipPercent,
+  );
   const total = totalWithoutTip + tipAmount;
   const assignedTotal = splitPayments.reduce(
     (acc, curr) => acc + (parseFloat(curr.amount) || 0),
@@ -3077,7 +3054,7 @@ const POS = () => {
               {
                 metodo: String(paymentMethod).toLowerCase(),
                 monto:
-                  String(paymentMethod).toLowerCase() === "efectivo"
+                  paymentMethod === "efectivo"
                     ? Number(moneyPaid) || 0
                     : Number(total) || 0,
               },
@@ -3087,12 +3064,14 @@ const POS = () => {
     const totalPagado =
       paymentMethod === "efectivo"
         ? Number(moneyPaid) || 0
-        : paymentMethod === "dividir"
-          ? splitPayments.reduce(
-              (sum, item) => sum + (Number(item.amount) || 0),
-              0,
-            )
-          : 0;
+        : paymentMethod === "variado"
+          ? Number(total) || 0
+          : paymentMethod === "dividir"
+            ? splitPayments.reduce(
+                (sum, item) => sum + (Number(item.amount) || 0),
+                0,
+              )
+            : 0;
 
     const submittedTotal =
       paymentMethod === "efectivo" ? orderTotal : total;
@@ -3219,7 +3198,7 @@ const POS = () => {
           items,
           orderNumber: orderPayload.order_number,
           trackingToken,
-          total,
+          total: orderPayload.total,
           paymentMethods: paymentMethodsPayload,
         };
         cancelEditingOrder();
@@ -3258,7 +3237,7 @@ const POS = () => {
         items,
         orderNumber,
         trackingToken,
-        total,
+        total: orderPayload.total,
         paymentMethods: paymentMethodsPayload,
       };
 
@@ -3534,8 +3513,14 @@ const POS = () => {
         </label>
       </div>
 
-      <div className="grid grid-cols-4 gap-1.5">
-        {["efectivo", "tarjeta", "transferencia", "dividir"].map((method) => (
+      <div className="grid grid-cols-5 gap-1.5">
+        {[
+          "efectivo",
+          "tarjeta",
+          "transferencia",
+          "dividir",
+          "variado",
+        ].map((method) => (
           <button
             key={method}
             onClick={() => handlePaymentMethodChange(method)}
@@ -3554,6 +3539,11 @@ const POS = () => {
           </button>
         ))}
       </div>
+      {paymentMethod === "variado" && (
+        <p className="mt-1 text-center text-[9px] font-semibold text-amber-300">
+          El pago se registrará como variado en Caja.
+        </p>
+      )}
       {paymentMethod === "efectivo" && (
         <div className="mt-1 animate-in fade-in slide-in-from-top-2 duration-300">
           <div className="rounded-xl border border-white/5 bg-white/[0.03] px-2 py-1.5">
@@ -3610,7 +3600,7 @@ const POS = () => {
         label="Dirección"
         value={address}
         setValue={setAddress}
-        placeholder="Ingresa la dirección"
+        placeholder="Ingresa el barrio"
         size={isDeliveryMapFullscreen ? "md" : "compact"}
         onChange={(event) => {
           const value = event.target.value;

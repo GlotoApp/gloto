@@ -11,3 +11,6 @@ verify_jwt = true
 
 [functions.crear-cuenta-domiciliario]
 verify_jwt = false
+
+[functions.gestionar-cuenta-empleado]
+verify_jwt = false

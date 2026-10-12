@@ -20,6 +20,7 @@ export default function DeliveryMap({
   onRouteErrorChange,
   fullHeight = false,
   compact = false,
+  showCoordinates = true,
 }) {
   const mapElement = useRef(null);
   const mapInstance = useRef(null);
@@ -289,7 +290,7 @@ export default function DeliveryMap({
 
   return (
     <div
-      className={`relative isolate ${fullHeight ? "h-full min-h-[220px]" : compact ? "h-40" : "h-48"} w-full overflow-hidden rounded-lg border border-outline bg-neutral-800`}
+      className={`relative isolate ${fullHeight ? "h-full min-h-[220px]" : compact ? "h-40" : "h-[400px]"} w-full overflow-hidden rounded-lg border border-outline bg-neutral-800`}
     >
       <div
         ref={mapElement}
@@ -301,7 +302,7 @@ export default function DeliveryMap({
           ? "Arrastra el pin para ajustar el destino"
           : "Selecciona el destino tocando el mapa"}
       </p>
-      {destination && (
+      {showCoordinates && destination && (
         <div
           aria-label={`Coordenadas del destino: ${Number(destination.latitude).toFixed(6)}, ${Number(destination.longitude).toFixed(6)}`}
           className="pointer-events-none absolute bottom-2 left-2 z-[500] rounded-md border border-white/15 bg-neutral-950/90 px-2 py-1 font-mono text-[10px] font-semibold text-white shadow-md"

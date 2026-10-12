@@ -965,6 +965,7 @@ const normalizePaymentMethod = (paymentMethod) => {
   if (["card", "tarjeta"].includes(key)) return "Tarjeta";
   if (["transfer", "transferencia"].includes(key)) return "Transferencia";
   if (["split", "dividir", "dividido"].includes(key)) return "Dividido";
+  if (["variado", "por_definir"].includes(key)) return "Variado";
   return paymentMethod || "Sin pago";
 };
 

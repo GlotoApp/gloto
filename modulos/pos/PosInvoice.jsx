@@ -44,12 +44,19 @@ const PosInvoice = ({ order, onClose }) => {
   const metodoPagoTexto = () => {
     if (!order.paymentMethods || order.paymentMethods.length === 0)
       return "No especificado";
+    const formatMethod = (method) =>
+      ["variado", "por_definir"].includes(method)
+        ? "Efectivo/Tarjeta/Trans"
+        : method;
     if (order.paymentMethods.length === 1) {
       const pago = order.paymentMethods[0];
-      return `${pago.metodo}: $ ${formatPrice(pago.monto)}`;
+      return `${formatMethod(pago.metodo)}: $ ${formatPrice(pago.monto)}`;
     }
     return order.paymentMethods
-      .map((p) => `${p.metodo}: $ ${formatPrice(p.monto)}`)
+      .map(
+        (p) =>
+          `${formatMethod(p.metodo)}: $ ${formatPrice(p.monto)}`,
+      )
       .join(" | ");
   };
 

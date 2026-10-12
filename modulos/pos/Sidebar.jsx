@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
+import { useEmployeeAccess } from "../../src/components/EmployeeAccessContext";
+import { getEmployeePermissionForPath } from "../../src/lib/employeePermissions";
 
 const Sidebar = ({
   isExpanded,
@@ -32,6 +34,12 @@ const Sidebar = ({
   const location = useLocation();
   const navigate = useNavigate();
   const navRef = useRef(null);
+  const { isEmployee, permissions } = useEmployeeAccess();
+  const canAccessPath = (path) => {
+    if (!isEmployee) return true;
+    const permission = getEmployeePermissionForPath(path);
+    return Boolean(permission && permissions[permission] === true);
+  };
 
   const [cajaOpen, setCajaOpen] = useState(false);
   const [catalogoOpen, setCatalogoOpen] = useState(false);
@@ -132,6 +140,12 @@ const Sidebar = ({
     { name: "Datos", path: "/pos/configuracion/datos" },
     { name: "Empleados", path: "/pos/configuracion/empleados" },
   ];
+  const visibleFinanzasSubMenu = finanzasSubMenu.filter((sub) =>
+    canAccessPath(sub.path),
+  );
+  const visibleConfigSubMenu = configSubMenu.filter((sub) =>
+    canAccessPath(sub.path),
+  );
 
   useEffect(() => {
     if (isExpanded) {
@@ -314,6 +328,15 @@ const Sidebar = ({
 
   useEffect(() => {
     let isMounted = true;
+    if (
+      isEmployee &&
+      permissions.inventario !== true &&
+      permissions.finanzas !== true
+    ) {
+      return () => {
+        isMounted = false;
+      };
+    }
 
     const refreshPlanAccess = async () => {
       const { data, error } = await supabase.rpc("get_business_plan_access");
@@ -339,12 +362,17 @@ const Sidebar = ({
       isMounted = false;
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [isEmployee, permissions.finanzas, permissions.inventario]);
 
   useEffect(() => {
     let isMounted = true;
     let channel;
     let refreshTimeout;
+    if (isEmployee && permissions.notificaciones !== true) {
+      return () => {
+        isMounted = false;
+      };
+    }
 
     const loadNotifications = async ({ sync = false } = {}) => {
       if (sync) {
@@ -424,7 +452,7 @@ const Sidebar = ({
       if (refreshTimeout) window.clearTimeout(refreshTimeout);
       if (channel) supabase.removeChannel(channel);
     };
-  }, []);
+  }, [isEmployee, permissions.notificaciones]);
 
   const handleLogout = async () => {
     setShowLogoutConfirm(false);
@@ -561,6 +589,11 @@ const Sidebar = ({
           style={{ scrollbarGutter: isExpanded ? "stable" : "auto" }}
         >
           {menuItems
+            .filter(
+              (item) =>
+                canAccessPath(item.path) ||
+                item.subMenu?.some((sub) => canAccessPath(sub.path)),
+            )
             .filter((item) => item.name !== "Inventario" || inventoryEnabled)
             .filter(
               (item) =>
@@ -628,7 +661,7 @@ const Sidebar = ({
 
                   {cajaOpen && isExpanded && (
                     <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
-                      {cajaSubMenu.map((sub) => {
+                      {cajaSubMenu.filter((sub) => canAccessPath(sub.path)).map((sub) => {
                         const isSubActive = location.pathname === sub.path;
                         return (
                           <Link
@@ -713,7 +746,7 @@ const Sidebar = ({
                   </button>
                   {ordersOpen && isExpanded && (
                     <div className="ml-5 mt-1 flex flex-col space-y-0.5 border-l border-white/30 pl-2">
-                      {ordersSubMenu.map((sub) => {
+                      {ordersSubMenu.filter((sub) => canAccessPath(sub.path)).map((sub) => {
                         const isSubActive = location.pathname === sub.path;
                         return (
                           <Link
@@ -797,7 +830,7 @@ const Sidebar = ({
 
                   {catalogoOpen && isExpanded && (
                     <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
-                      {catalogoSubMenu.map((sub) => {
+                      {catalogoSubMenu.filter((sub) => canAccessPath(sub.path)).map((sub) => {
                         const isSubActive = location.pathname === sub.path;
                         return (
                           <Link
@@ -888,7 +921,7 @@ const Sidebar = ({
 
                   {inventarioOpen && isExpanded && (
                     <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
-                      {item.subMenu.map((sub) => {
+                      {item.subMenu.filter((sub) => canAccessPath(sub.path)).map((sub) => {
                         const isSubActive = location.pathname === sub.path;
                         return (
                           <Link
@@ -978,6 +1011,7 @@ const Sidebar = ({
             );
           })}
 
+          {visibleFinanzasSubMenu.length > 0 && (
           <div className="flex flex-col transition-all duration-300">
             <button
               onClick={handleToggleClickFinanzas}
@@ -1038,7 +1072,7 @@ const Sidebar = ({
 
             {finanzasOpen && isExpanded && (
               <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
-                {finanzasSubMenu.map((sub) => {
+                {visibleFinanzasSubMenu.map((sub) => {
                   const isSubActive = location.pathname === sub.path;
                   return (
                     <Link
@@ -1065,7 +1099,9 @@ const Sidebar = ({
               </div>
             )}
           </div>
+          )}
 
+          {visibleConfigSubMenu.length > 0 && (
           <div className="flex flex-col transition-all duration-300">
             <button
               onClick={handleToggleClickConfig}
@@ -1126,7 +1162,7 @@ const Sidebar = ({
 
             {configOpen && isExpanded && (
               <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
-                {configSubMenu.map((sub) => (
+                {visibleConfigSubMenu.map((sub) => (
                   <Link
                     key={sub.path}
                     to={sub.path}
@@ -1141,12 +1177,14 @@ const Sidebar = ({
                   </Link>
                 ))}
               </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </nav>
 
         <div className="relative border-t border-white/10 p-3">
           <div className="relative">
+            {canAccessPath("/pos/notificaciones") && (
             <div className={`mb-2 ${isExpanded ? "" : "flex justify-center"}`}>
               <button
                 type="button"
@@ -1174,6 +1212,7 @@ const Sidebar = ({
                 )}
               </button>
             </div>
+            )}
 
             <button
               type="button"
@@ -1209,13 +1248,16 @@ const Sidebar = ({
                   <p className="min-w-0 truncate text-on-surface font-body-sm text-[11px] font-black tracking-tight">
                     {businessName}
                   </p>
-                  <span
-                    className={`${accountPlanStyles.accent} shrink-0 font-label-caps text-[9px] uppercase font-black tracking-[0.1em]`}
-                  >
-                    {planName}
-                  </span>
+                  {(!isEmployee || permissions.finanzas === true) && (
+                    <span
+                      className={`${accountPlanStyles.accent} shrink-0 font-label-caps text-[9px] uppercase font-black tracking-[0.1em]`}
+                    >
+                      {planName}
+                    </span>
+                  )}
                 </div>
-                {ticketUsage && (
+                {ticketUsage &&
+                  (!isEmployee || permissions.finanzas === true) && (
                   <p
                     className={`mt-0.5 truncate text-center text-[9px] ${accountPlanStyles.details}`}
                   >

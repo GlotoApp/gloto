@@ -68,6 +68,7 @@ const Estadisticas = () => {
   };
 
   const [dashboard, setDashboard] = useState(null);
+  const [deliveryFeesTotal, setDeliveryFeesTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
@@ -76,6 +77,8 @@ const Estadisticas = () => {
     const end = getLocalDateString(today);
     const daysByPeriod = {
       Hoy: 1,
+      Ayer: 1,
+      Anteayer: 1,
       "Últimos 7 Días": 7,
       "30 Días": 30,
       "2 Meses": 60,
@@ -85,6 +88,10 @@ const Estadisticas = () => {
     if (activePeriod === "Personalizado") {
       if (!customRange.start || !customRange.end) return;
       start = customRange.start;
+    } else if (activePeriod === "Ayer" || activePeriod === "Anteayer") {
+      const date = new Date(today);
+      date.setDate(date.getDate() - (activePeriod === "Ayer" ? 1 : 2));
+      start = getLocalDateString(date);
     } else {
       const date = new Date(today);
       date.setDate(date.getDate() - (daysByPeriod[activePeriod] || 30) + 1);
@@ -95,20 +102,82 @@ const Estadisticas = () => {
     const loadDashboard = async () => {
       setLoading(true);
       setLoadError("");
-      const { data, error } = await supabase.rpc("get_statistics_dashboard", {
-        p_start_date: start,
-        p_end_date: activePeriod === "Personalizado" ? customRange.end : end,
-      });
+      const endDate =
+        activePeriod === "Personalizado"
+          ? customRange.end
+          : ["Ayer", "Anteayer"].includes(activePeriod)
+            ? start
+            : end;
+      const startTimestamp = new Date(`${start}T00:00:00`);
+      const endTimestamp = new Date(`${endDate}T00:00:00`);
+      endTimestamp.setDate(endTimestamp.getDate() + 1);
+
+      const [
+        { data: dashboardResponse, error: dashboardError },
+        deliveryOrdersResult,
+      ] = await Promise.all([
+        supabase.functions.invoke("gestionar-cuenta-empleado", {
+          body: {
+            action: "statistics-dashboard",
+            startDate: start,
+            endDate,
+          },
+        }),
+        supabase
+          .from("orders")
+          .select("delivery_fee, created_at")
+          .eq("order_type", "delivery")
+          .eq("is_reservation", false)
+          .not("status", "in", "(cancelled,cancelado)")
+          .gte("created_at", startTimestamp.toISOString())
+          .lt("created_at", endTimestamp.toISOString())
+          .order("created_at", { ascending: true })
+          .range(0, 999),
+      ]);
 
       if (cancelled) return;
-      if (error) {
-        setLoadError(error.message);
+      let deliveryOrders = deliveryOrdersResult.data || [];
+      let deliveryOrdersError = deliveryOrdersResult.error;
+      for (
+        let offset = 1000;
+        !deliveryOrdersError && deliveryOrdersResult.data?.length === 1000;
+        offset += 1000
+      ) {
+        const { data: nextPage, error } = await supabase
+          .from("orders")
+          .select("delivery_fee, created_at")
+          .eq("order_type", "delivery")
+          .eq("is_reservation", false)
+          .not("status", "in", "(cancelled,cancelado)")
+          .gte("created_at", startTimestamp.toISOString())
+          .lt("created_at", endTimestamp.toISOString())
+          .order("created_at", { ascending: true })
+          .range(offset, offset + 999);
+        if (cancelled) return;
+        deliveryOrdersError = error;
+        deliveryOrders = deliveryOrders.concat(nextPage || []);
+        if (nextPage?.length !== 1000) break;
+      }
+
+      if (dashboardError || deliveryOrdersError) {
+        const errorMessage = dashboardError
+          ? dashboardResponse?.error || dashboardError.message
+          : deliveryOrdersError.message;
+        setLoadError(errorMessage);
         setDashboard(null);
+        setDeliveryFeesTotal(0);
       } else {
+        const data = dashboardResponse?.data;
         const payload = Array.isArray(data)
           ? data[0]?.get_statistics_dashboard
           : data?.get_statistics_dashboard || data;
         setDashboard(payload || null);
+        setDeliveryFeesTotal(
+          deliveryOrders.reduce(
+            (total, order) => total + Number(order.delivery_fee || 0),
+            0,
+          ),
+        );
       }
       setLoading(false);
     };
@@ -168,14 +237,13 @@ const Estadisticas = () => {
       color: "bg-orange-500",
     },
     {
-      label: "Venta Domicilios",
-      value: Number(summary.delivery_sales || 0),
+      label: "Costos de Domicilio",
+      value: deliveryFeesTotal,
       formatValue: formatMoney,
-      sub: "Ventas a domicilio",
+      sub: "Tarifas de domicilio del período",
       icon: Truck,
       progress: summary.total_sold
-        ? (Number(summary.delivery_sales || 0) / Number(summary.total_sold)) *
-          100
+        ? (deliveryFeesTotal / Number(summary.total_sold)) * 100
         : 0,
       color: "bg-blue-500",
     },
@@ -271,7 +339,7 @@ Periodo Evaluado: ${getPeriodString()}
 - Facturación: ${formatMoney(summary.total_sold)} COP
 - Pedidos: ${Number(summary.total_orders || 0)}
 - Ticket Promedio: ${formatMoney(summary.average_ticket)} COP
-- Ventas a Domicilio: ${formatMoney(summary.delivery_sales)} COP
+- Costos de domicilio: ${formatMoney(deliveryFeesTotal)} COP
 
 2. CANALES DE VENTA
 ${channelRows.map((row) => `- ${row.channel}: ${formatMoney(row.total)} COP (${row.orders} pedidos)`).join("\n") || "- Sin ventas en el período"}
@@ -369,6 +437,18 @@ ${
                   className="bg-neutral-950 text-neutral-200 uppercase font-sans font-bold"
                 >
                   Hoy
+                </option>
+                <option
+                  value="Ayer"
+                  className="bg-neutral-950 text-neutral-200 uppercase font-sans font-bold"
+                >
+                  Ayer
+                </option>
+                <option
+                  value="Anteayer"
+                  className="bg-neutral-950 text-neutral-200 uppercase font-sans font-bold"
+                >
+                  Anteayer
                 </option>
                 <option
                   value="Últimos 7 Días"

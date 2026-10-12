@@ -1,11 +1,5 @@
 // Checkout.jsx
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronLeft,
@@ -25,6 +19,7 @@ import {
 import { useCart } from "./CartContext";
 import DeliveryMap from "../../pos/DeliveryMap";
 import { getEnabledDeliveryMethods } from "../../../src/lib/deliveryMethods";
+import { calculateDeliveryPricing } from "../../../src/lib/deliveryPricing";
 
 const fmt = (n) =>
   new Intl.NumberFormat("es-CO", {
@@ -55,8 +50,10 @@ const getPlaceLabel = (properties = {}) => {
   ].filter(Boolean).join(" ");
   const primary = streetAddress || properties.name;
   const locality = [
+    properties.neighbourhood,
     properties.district,
     properties.suburb,
+    properties.quarter,
     properties.city,
     properties.state,
     properties.country,
@@ -73,6 +70,40 @@ const getPlaceLabel = (properties = {}) => {
     .join(", ");
 };
 
+const normalizeNeighborhoodQuery = (value = "") =>
+  String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(
+      (word) =>
+        word &&
+        !["el", "la", "los", "las", "de", "del", "barrio", "sector"].includes(
+          word,
+        ),
+    );
+
+const matchesNeighborhoodQuery = (properties = {}, query = "") => {
+  const queryWords = normalizeNeighborhoodQuery(query);
+  if (!queryWords.length) return false;
+
+  const placeWords = normalizeNeighborhoodQuery(
+    [
+      properties.name,
+      properties.neighbourhood,
+      properties.suburb,
+      properties.quarter,
+      properties.district,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  return queryWords.every((queryWord) =>
+    placeWords.some((placeWord) => placeWord.startsWith(queryWord)),
+  );
+};
+
 // Capitaliza cada palabra: primera letra mayúscula, el resto en minúscula.
 // Ej: "jorge puerta" -> "Jorge Puerta"
 const capitalizarNombre = (texto) =>
@@ -86,7 +117,7 @@ const capitalizarNombre = (texto) =>
 
 const METODOS_ENTREGA = [
   { id: "recoger", settingId: "pickup", label: "Recoger", Icon: Store },
-  { id: "mesa", settingId: "table", label: "En mesa", Icon: Armchair },
+  { id: "mesa", settingId: "table", label: "En mesa" },
   { id: "punto", settingId: "point", label: "En punto", Icon: Navigation },
   { id: "domicilio", settingId: "delivery", label: "Domicilio", Icon: Truck },
 ];
@@ -222,9 +253,11 @@ const Checkout = ({ onVolver, onConfirmar }) => {
     }
     return { latitude, longitude };
   }, [datosCliente.latitude, datosCliente.longitude]);
+  const addressSearchCenterRef = useRef(destination);
   const handleDestinationChange = useCallback(
     (point) => {
       setDeliveryDistanceMeters(null);
+      addressSearchCenterRef.current = point;
       actualizarDatoCliente("latitude", point.latitude);
       actualizarDatoCliente("longitude", point.longitude);
       actualizarDatoCliente("direccion", "");
@@ -316,13 +349,11 @@ const Checkout = ({ onVolver, onConfirmar }) => {
       if (controller.signal.aborted) return;
       setIsSearchingAddress(true);
       setShowAddressSuggestions(true);
-      const params = new URLSearchParams({
-        q: query,
-        limit: "15",
-      });
-      if (origin) {
-        params.set("lat", String(origin.latitude));
-        params.set("lon", String(origin.longitude));
+      const searchCenter = addressSearchCenterRef.current || origin;
+      const params = new URLSearchParams({ q: query, limit: "30" });
+      if (searchCenter) {
+        params.set("lat", String(searchCenter.latitude));
+        params.set("lon", String(searchCenter.longitude));
       }
       fetch(`${PHOTON_URL}?${params}`, { signal: controller.signal })
         .then((response) => {
@@ -331,23 +362,37 @@ const Checkout = ({ onVolver, onConfirmar }) => {
         })
         .then((result) => {
           const features = result.features || [];
-          const orderedFeatures = origin
-            ? features
-                .map((feature) => {
-                  const [longitude, latitude] =
-                    feature.geometry?.coordinates || [];
-                  return {
-                    feature,
-                    distance:
-                      Number.isFinite(latitude) &&
-                      Number.isFinite(longitude)
-                        ? getDistanceKm(origin, { latitude, longitude })
-                        : Number.POSITIVE_INFINITY,
-                  };
-                })
-                .sort((first, second) => first.distance - second.distance)
-                .map(({ feature }) => feature)
-            : features;
+          const orderedFeatures = features
+            .map((feature) => {
+              const [longitude, latitude] =
+                feature.geometry?.coordinates || [];
+              return {
+                feature,
+                matchesQuery: matchesNeighborhoodQuery(
+                  feature.properties,
+                  query,
+                ),
+                distance:
+                  searchCenter &&
+                  Number.isFinite(latitude) &&
+                  Number.isFinite(longitude)
+                    ? getDistanceKm(searchCenter, { latitude, longitude })
+                    : Number.POSITIVE_INFINITY,
+                isNeighborhood:
+                  feature.properties?.osm_key === "place" &&
+                  ["neighbourhood", "suburb", "quarter"].includes(
+                    feature.properties?.osm_value,
+                  ),
+              };
+            })
+            .sort(
+              (first, second) =>
+                Number(second.matchesQuery) - Number(first.matchesQuery) ||
+                Number(second.isNeighborhood) -
+                  Number(first.isNeighborhood) ||
+                first.distance - second.distance,
+            )
+            .map(({ feature }) => feature);
           setAddressSuggestions(orderedFeatures);
           if (!orderedFeatures.length) {
             setAddressSearchError(
@@ -420,53 +465,24 @@ const Checkout = ({ onVolver, onConfirmar }) => {
     return () => observer?.disconnect();
   }, [isMapFullscreen]);
 
-  const deliveryRate = Number(deliverySettings?.delivery_fee_per_km);
-  const minimumDeliveryFee = Number(deliverySettings?.min_delivery_fee);
-  const maximumDeliveryFee = Number(deliverySettings?.max_delivery_fee);
-  const deliveryPricingConfigured =
-    deliverySettings?.delivery_fee_per_km != null &&
-    deliverySettings?.min_delivery_fee != null &&
-    deliverySettings?.max_delivery_fee != null &&
-    Number.isFinite(deliveryRate) &&
-    Number.isFinite(minimumDeliveryFee) &&
-    Number.isFinite(maximumDeliveryFee) &&
-    minimumDeliveryFee <= maximumDeliveryFee;
+  const {
+    configured: deliveryPricingConfigured,
+    baseDeliveryFee,
+    nightSurcharge,
+    nightSurchargePercent,
+    deliveryFee: calculatedDeliveryFee,
+  } = calculateDeliveryPricing(
+    deliverySettings,
+    deliveryDistanceMeters,
+    currentTime,
+  );
+  const deliveryFee =
+    metodoEntrega === "domicilio" ? calculatedDeliveryFee : 0;
   const distanceKm =
-    deliveryDistanceMeters === null ? null : deliveryDistanceMeters / 1000;
-  const rawDeliveryFee =
-    distanceKm !== null && deliveryPricingConfigured
-      ? Math.max(minimumDeliveryFee, Math.round(distanceKm * deliveryRate))
-      : null;
-  const roundedDeliveryFee =
-    rawDeliveryFee === null ? null : Math.ceil(rawDeliveryFee / 100) * 100;
-  const baseDeliveryFee =
-    roundedDeliveryFee === null
+    deliveryDistanceMeters === null
       ? null
-      : Math.min(maximumDeliveryFee, roundedDeliveryFee);
-  const surchargeStart = String(
-    deliverySettings?.night_delivery_surcharge_start || "",
-  ).slice(0, 5);
-  const surchargeEnd = String(
-    deliverySettings?.night_delivery_surcharge_end || "",
-  ).slice(0, 5);
-  const currentDeliveryTime = `${String(currentTime.getHours()).padStart(2, "0")}:${String(currentTime.getMinutes()).padStart(2, "0")}`;
-  const isNightSurchargeTime =
-    Boolean(deliverySettings?.night_delivery_surcharge_enabled) &&
-    Boolean(surchargeStart && surchargeEnd && surchargeStart !== surchargeEnd) &&
-    (surchargeStart < surchargeEnd
-      ? currentDeliveryTime >= surchargeStart &&
-        currentDeliveryTime < surchargeEnd
-      : currentDeliveryTime >= surchargeStart ||
-        currentDeliveryTime < surchargeEnd);
-  const nightSurchargePercent =
-    Number(deliverySettings?.night_delivery_surcharge_percent) || 0;
-  const nightSurcharge =
-    baseDeliveryFee !== null && isNightSurchargeTime
-      ? Math.ceil(
-          Math.round((baseDeliveryFee * nightSurchargePercent) / 100) / 100,
-        ) * 100
-      : 0;
-  const deliveryFee = baseDeliveryFee === null ? 0 : baseDeliveryFee + nightSurcharge;
+      : Number(deliveryDistanceMeters) / 1000;
+  const checkoutTotal = totalPrecio + deliveryFee;
   const isDeliveryValueLoading =
     isCalculatingRoute ||
     isLocating ||
@@ -557,6 +573,10 @@ const Checkout = ({ onVolver, onConfirmar }) => {
       getPlaceLabel(feature.properties) ||
       `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}`;
     skipReverseGeocodeRef.current = `${Number(latitude).toFixed(6)},${Number(longitude).toFixed(6)}`;
+    addressSearchCenterRef.current = {
+      latitude: Number(latitude),
+      longitude: Number(longitude),
+    };
     skipAddressSearchRef.current = label;
     setDeliveryDistanceMeters(null);
     setAddressSuggestions([]);
@@ -587,11 +607,14 @@ const Checkout = ({ onVolver, onConfirmar }) => {
       >
         <MapPin size={16} style={iconInsideStyle} />
         <input
-          style={inputStyle}
+          style={{
+            ...inputStyle,
+            paddingRight: datosCliente.direccion ? 190 : 126,
+          }}
           placeholder={
             isResolvingAddress
               ? "Buscando dirección del punto..."
-              : "Dirección (ej. Calle 10 # 5-20)"
+              : "Ingresa el barrio"
           }
           value={datosCliente.direccion}
           autoComplete="off"
@@ -620,7 +643,7 @@ const Checkout = ({ onVolver, onConfirmar }) => {
         {datosCliente.direccion && (
           <button
             type="button"
-            style={clearButtonStyle}
+            style={{ ...clearButtonStyle, right: 116, padding: 8 }}
             onClick={() => {
               setDeliveryDistanceMeters(null);
               setAddressSuggestions([]);
@@ -632,8 +655,72 @@ const Checkout = ({ onVolver, onConfirmar }) => {
             aria-label="Borrar dirección"
           >
             <X size={16} />
+            <span
+              style={{
+                position: "absolute",
+                width: 1,
+                height: 1,
+                padding: 0,
+                margin: -1,
+                overflow: "hidden",
+                clip: "rect(0, 0, 0, 0)",
+                whiteSpace: "nowrap",
+                border: 0,
+              }}
+            >
+              Borrar
+            </span>
           </button>
         )}
+        <button
+          type="button"
+          onClick={locateCustomer}
+          disabled={isLocating || isResolvingAddress}
+          aria-busy={isLocating || isResolvingAddress}
+          aria-label={
+            isLocating || isResolvingAddress
+              ? "Buscando mi dirección"
+              : "Usar mi ubicación"
+          }
+          title={
+            isLocating || isResolvingAddress
+              ? "Buscando mi dirección"
+              : "Usar mi ubicación"
+          }
+          style={{
+            position: "absolute",
+            right: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            minWidth: 36,
+            height: 36,
+            padding: "0 9px",
+            border: "1px solid rgba(167,139,250,0.35)",
+            borderRadius: 10,
+            color: "#c4b5fd",
+            background: "#222",
+            cursor:
+              isLocating || isResolvingAddress ? "wait" : "pointer",
+            opacity: isLocating || isResolvingAddress ? 0.7 : 1,
+          }}
+        >
+          {isLocating || isResolvingAddress ? (
+            <LoaderCircle size={17} className="animate-spin" />
+          ) : (
+            <LocateFixed size={17} />
+          )}
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {isLocating || isResolvingAddress ? "Buscando" : "Mi ubicación"}
+          </span>
+        </button>
         {showAddressSuggestions && (
           <div
             role="listbox"
@@ -718,31 +805,6 @@ const Checkout = ({ onVolver, onConfirmar }) => {
           </div>
         )}
       </div>
-      <button
-        type="button"
-        onClick={() => locateCustomer()}
-        disabled={isLocating}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "6px",
-          minHeight: "46px",
-          padding: "0 12px",
-          border: "1px solid rgba(167,139,250,0.35)",
-          borderRadius: "12px",
-          color: "#c4b5fd",
-          background: "#171717",
-          fontSize: "11px",
-          fontWeight: 700,
-          whiteSpace: "nowrap",
-          cursor: isLocating ? "wait" : "pointer",
-          opacity: isLocating ? 0.65 : 1,
-        }}
-      >
-        <LocateFixed size={15} />
-        {isLocating ? "Buscando..." : "Usar mi ubicación"}
-      </button>
     </div>
   );
 
@@ -875,10 +937,24 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                   width: "100%", // Asegura que ocupen el espacio de la columna
                 }}
               >
-                <Icon
-                  size={20}
-                  style={{ color: activo ? "#a78bfa" : "inherit" }}
-                />
+                {id === "mesa" ? (
+                  <span
+                    className="material-symbols-outlined"
+                    aria-hidden="true"
+                    style={{
+                      fontSize: "24px",
+                      lineHeight: 1,
+                      color: activo ? "#a78bfa" : "inherit",
+                    }}
+                  >
+                    table_bar
+                  </span>
+                ) : (
+                  <Icon
+                    size={20}
+                    style={{ color: activo ? "#a78bfa" : "inherit" }}
+                  />
+                )}
                 {label}
               </button>
             );
@@ -1056,10 +1132,10 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                             borderColor: "rgba(255,255,255,0.18)",
                             background: "rgba(9,9,11,0.96)",
                           }}
-                          aria-label="Buscar dirección o barrio"
+                          aria-label="Buscar barrio"
                           aria-autocomplete="list"
                           aria-expanded={showAddressSuggestions}
-                          placeholder="Buscar dirección o barrio"
+                          placeholder="Ingresa el barrio"
                           value={datosCliente.direccion}
                           autoComplete="off"
                           onFocus={() => {
@@ -1272,19 +1348,95 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                         onRoutingChange={setIsCalculatingRoute}
                         onRouteErrorChange={setRouteError}
                         fullHeight={isMapFullscreen}
+                        showCoordinates={false}
                       />
+                      {!isMapFullscreen && (
+                        <div
+                          role="region"
+                          aria-label="Resumen del domicilio"
+                          style={{
+                            position: "absolute",
+                            zIndex: 2,
+                            left: "10px",
+                            right: "10px",
+                            bottom: "10px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "7px",
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            borderRadius: "14px",
+                            background: "rgba(9,9,11,0.72)",
+                            backdropFilter: "blur(14px)",
+                            WebkitBackdropFilter: "blur(14px)",
+                            padding: "10px 12px",
+                            color: "#fff",
+                            boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", fontSize: "11px" }}>
+                            <span style={{ color: "rgba(255,255,255,0.65)" }}>Domicilio base</span>
+                            <strong>
+                              {baseDeliveryFee !== null ? (
+                                fmt(baseDeliveryFee)
+                              ) : isDeliveryValueLoading ? (
+                                <LoaderCircle
+                                  size={14}
+                                  aria-label="Calculando domicilio"
+                                  className="animate-spin"
+                                />
+                              ) : (
+                                "—"
+                              )}
+                            </strong>
+                          </div>
+                          {nightSurcharge > 0 && (
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", color: "#fde68a", fontSize: "11px" }}>
+                              <span>Recargo nocturno ({nightSurchargePercent}%)</span>
+                              <strong>+ {fmt(nightSurcharge)}</strong>
+                            </div>
+                          )}
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: "8px",
+                              borderTop: "1px solid rgba(255,255,255,0.12)",
+                              paddingTop: "6px",
+                              fontSize: "12px",
+                            }}
+                          >
+                            <strong>Total domicilio</strong>
+                            <strong>
+                              {baseDeliveryFee !== null ? (
+                                fmt(deliveryFee)
+                              ) : isDeliveryValueLoading ? (
+                                <LoaderCircle
+                                  size={14}
+                                  aria-label="Calculando total"
+                                  className="animate-spin"
+                                />
+                              ) : (
+                                "—"
+                              )}
+                            </strong>
+                          </div>
+                        </div>
+                      )}
                       <button
                         type="button"
                         onClick={() => locateCustomer()}
-                        disabled={isLocating}
+                        disabled={isLocating || isResolvingAddress}
+                        aria-busy={isLocating || isResolvingAddress}
                         aria-label={
                           isLocating
-                            ? "Buscando mi ubicación"
+                            || isResolvingAddress
+                            ? "Buscando mi dirección"
                             : "Usar mi ubicación"
                         }
                         title={
                           isLocating
-                            ? "Buscando mi ubicación"
+                            || isResolvingAddress
+                            ? "Buscando mi dirección"
                             : "Usar mi ubicación"
                         }
                         style={{
@@ -1293,7 +1445,7 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                           right: "12px",
                           bottom: isMapFullscreen
                             ? `calc(${fullscreenSummaryHeight}px + 22px)`
-                            : "30px",
+                            : "112px",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -1304,14 +1456,19 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                           color: "#c4b5fd",
                           background: "rgba(9,9,11,0.94)",
                           boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
-                          cursor: isLocating ? "wait" : "pointer",
-                          opacity: isLocating ? 0.65 : 1,
+                          cursor:
+                            isLocating || isResolvingAddress
+                              ? "wait"
+                              : "pointer",
+                          opacity:
+                            isLocating || isResolvingAddress ? 0.65 : 1,
                         }}
                       >
-                        <LocateFixed
-                          size={19}
-                          className={isLocating ? "animate-pulse" : undefined}
-                        />
+                        {isLocating || isResolvingAddress ? (
+                          <LoaderCircle size={19} className="animate-spin" />
+                        ) : (
+                          <LocateFixed size={19} />
+                        )}
                       </button>
                     </div>
                   ) : (
@@ -1345,8 +1502,9 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                         overflowY: "auto",
                         border: "1px solid rgba(255,255,255,0.12)",
                         borderRadius: "18px",
-                        background: "rgba(9,9,11,0.94)",
-                        backdropFilter: "blur(12px)",
+                        background: "rgba(9,9,11,0.72)",
+                        backdropFilter: "blur(14px)",
+                        WebkitBackdropFilter: "blur(14px)",
                         padding: "14px",
                         boxShadow: "0 12px 40px rgba(0,0,0,0.4)",
                       }}
@@ -1371,26 +1529,10 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                       )}
                       {!destination && (
                         <p style={{ color: "rgba(255,255,255,0.7)", fontSize: "12px", margin: "0 0 8px" }}>
-                          Toca el mapa para marcar el destino o arrastra el marcador verde.
+                          Toca el mapa para marcar el destino o arrastra el marcador de destino.
                         </p>
                       )}
                       <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                          <span style={{ color: "rgba(255,255,255,0.65)" }}>Distancia por carretera</span>
-                          <strong>
-                            {distanceKm !== null ? (
-                              `${distanceKm.toFixed(2)} km`
-                            ) : isDeliveryValueLoading ? (
-                              <LoaderCircle
-                                size={14}
-                                aria-label="Calculando distancia"
-                                className="animate-spin"
-                              />
-                            ) : (
-                              "—"
-                            )}
-                          </strong>
-                        </div>
                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
                           <span style={{ color: "rgba(255,255,255,0.65)" }}>Domicilio base</span>
                           <strong>
@@ -1429,22 +1571,6 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                             )}
                           </strong>
                         </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", color: "rgba(255,255,255,0.7)", fontSize: "12px" }}>
-                          <span>Total del pedido</span>
-                          <strong style={{ color: "#fff" }}>
-                            {baseDeliveryFee !== null ? (
-                              fmt(totalPrecio + deliveryFee)
-                            ) : isDeliveryValueLoading ? (
-                              <LoaderCircle
-                                size={14}
-                                aria-label="Calculando total del pedido"
-                                className="animate-spin"
-                              />
-                            ) : (
-                              "—"
-                            )}
-                          </strong>
-                        </div>
                       </div>
                       <button
                         type="button"
@@ -1475,78 +1601,6 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                     <p role="alert" style={{ color: "#fca5a5", fontSize: "11px", marginTop: "8px" }}>
                       {locationError}
                     </p>
-                  )}
-                  {!isMapFullscreen && (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "6px",
-                        marginTop: "10px",
-                        borderRadius: "12px",
-                        background: "rgba(124,58,237,0.1)",
-                        padding: "12px",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                        <span style={{ color: "rgba(255,255,255,0.65)" }}>
-                          Distancia por carretera
-                        </span>
-                        <strong>
-                          {distanceKm !== null ? (
-                            `${distanceKm.toFixed(2)} km`
-                          ) : isDeliveryValueLoading ? (
-                            <LoaderCircle
-                              size={14}
-                              aria-label="Calculando distancia"
-                              className="animate-spin"
-                            />
-                          ) : (
-                            "—"
-                          )}
-                        </strong>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                        <span style={{ color: "rgba(255,255,255,0.65)" }}>
-                          Domicilio base
-                        </span>
-                        <strong>
-                          {baseDeliveryFee !== null ? (
-                            fmt(baseDeliveryFee)
-                          ) : isDeliveryValueLoading ? (
-                            <LoaderCircle
-                              size={14}
-                              aria-label="Calculando domicilio"
-                              className="animate-spin"
-                            />
-                          ) : (
-                            "—"
-                          )}
-                        </strong>
-                      </div>
-                      {nightSurcharge > 0 && (
-                        <div style={{ display: "flex", justifyContent: "space-between", color: "#fde68a", fontSize: "12px" }}>
-                          <span>Recargo nocturno ({nightSurchargePercent}%)</span>
-                          <strong>+ {fmt(nightSurcharge)}</strong>
-                        </div>
-                      )}
-                      <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "6px", fontSize: "13px" }}>
-                        <strong>Total domicilio</strong>
-                        <strong>
-                          {baseDeliveryFee !== null ? (
-                            fmt(deliveryFee)
-                          ) : isDeliveryValueLoading ? (
-                            <LoaderCircle
-                              size={14}
-                              aria-label="Calculando total"
-                              className="animate-spin"
-                            />
-                          ) : (
-                            "—"
-                          )}
-                        </strong>
-                      </div>
-                    </div>
                   )}
                   {!deliveryPricingConfigured && origin && (
                     <p style={{ color: "#fde68a", fontSize: "11px", marginTop: "8px" }}>
@@ -1648,7 +1702,7 @@ const Checkout = ({ onVolver, onConfirmar }) => {
               Confirmando pedido...
             </>
           ) : (
-            `Confirmar pedido · ${fmt(totalPrecio + deliveryFee)}`
+            `Confirmar pedido · ${fmt(checkoutTotal)}`
           )}
         </button>
       </div>

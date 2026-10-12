@@ -77,6 +77,11 @@ const obtenerMetodosPago = (metadata, paymentMethod, total) => {
     .trim()
     .toLowerCase();
 
+  if (metodoPrincipal === "variado") {
+    return [{ metodo: "variado", monto: total }];
+  }
+  if (metodoPrincipal === "por_definir") return [];
+
   if (["efectivo", "tarjeta", "transferencia"].includes(metodoPrincipal)) {
     return [{ metodo: metodoPrincipal, monto: total }];
   }
@@ -369,6 +374,14 @@ export default function Caja() {
       total +
       transaction.metodosPago
         .filter((item) => item.metodo === "transferencia")
+        .reduce((sum, item) => sum + item.monto, 0),
+    0,
+  );
+  const totalVariado = transaccionesValidas.reduce(
+    (total, transaction) =>
+      total +
+      transaction.metodosPago
+        .filter((item) => ["variado", "por_definir"].includes(item.metodo))
         .reduce((sum, item) => sum + item.monto, 0),
     0,
   );
@@ -855,7 +868,7 @@ export default function Caja() {
                 }
               >
                 {/* Grid KPIs Modificado */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                   <KPICard
                     label="TOTAL DE VENTAS"
                     value={fmt(totalVentas)}
@@ -882,6 +895,13 @@ export default function Caja() {
                     value={fmt(totalTransferencia)}
                     sub="Bancos / Apps digitales"
                     color="text-emerald-400"
+                    loading={cargandoInicial}
+                  />
+                  <KPICard
+                    label="VARIADO"
+                    value={fmt(totalVariado)}
+                    sub="Pagado, método sin registrar"
+                    color="text-fuchsia-400"
                     loading={cargandoInicial}
                   />
                 </div>

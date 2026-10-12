@@ -17,6 +17,10 @@ import { useAuth } from "./components/AuthContext";
 import Acceso from "../modulos/admin/Acceso";
 import { supabase } from "./lib/supabaseClient";
 import RequireDomiciliario from "../modulos/empleados/RequireDomiciliario";
+import {
+  EmployeeAccessProvider,
+  EmployeeRouteGuard,
+} from "./components/EmployeeAccessContext";
 
 // Lazy imports
 const POS = lazy(() => import("../modulos/pos/POS"));
@@ -77,12 +81,58 @@ const PortalDomiciliario = lazy(
 // Componentes protectores
 const RequireAdmin = ({ children }) => {
   const { user, loading } = useAuth();
-  if (loading) return <Loading />;
-  return user ? (
-    <RequireAuth>{children}</RequireAuth>
-  ) : (
-    <Navigate to="/acceso" replace />
-  );
+  const [status, setStatus] = useState("loading");
+  const [retryKey, setRetryKey] = useState(0);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let active = true;
+    const checkAdmin = async () => {
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (!active) return;
+      if (error) {
+        console.error("No se pudo verificar el acceso de superadministrador:", error);
+        setStatus("error");
+        return;
+      }
+      setStatus(profile?.role === "superadmin" ? "allowed" : "unauthorized");
+    };
+    checkAdmin();
+    return () => {
+      active = false;
+    };
+  }, [retryKey, user?.id]);
+
+  if (loading || (user && status === "loading")) return <Loading />;
+  if (!user) return <Navigate to="/acceso" replace />;
+  if (status === "unauthorized") return <Navigate to="/pos" replace />;
+  if (status === "error") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-neutral-950 px-4 text-white">
+        <section className="w-full max-w-md rounded-2xl border border-rose-500/20 bg-neutral-900 p-6 text-center">
+          <h1 className="text-lg font-black">No se pudo verificar el acceso</h1>
+          <p className="mt-2 text-sm text-neutral-300">
+            El área de administración permanecerá bloqueada hasta validar el perfil.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setStatus("loading");
+              setRetryKey((current) => current + 1);
+            }}
+            className="mt-5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold hover:bg-violet-500"
+          >
+            Reintentar
+          </button>
+        </section>
+      </div>
+    );
+  }
+  return status === "allowed" ? <RequireAuth>{children}</RequireAuth> : <Loading />;
 };
 
 const RequireAuth = ({ children }) => {
@@ -619,9 +669,13 @@ function App() {
             element={
               <RequireAuth>
                 <AccountSetupGate>
-                  <PlanAccessGate>
-                    <Layout />
-                  </PlanAccessGate>
+                  <EmployeeAccessProvider>
+                    <EmployeeRouteGuard>
+                      <PlanAccessGate>
+                        <Layout />
+                      </PlanAccessGate>
+                    </EmployeeRouteGuard>
+                  </EmployeeAccessProvider>
                 </AccountSetupGate>
               </RequireAuth>
             }

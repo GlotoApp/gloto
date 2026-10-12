@@ -20,6 +20,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { supabase } from "../../../src/lib/supabaseClient";
+import { calculateTipAmount } from "../../../src/lib/deliveryPricing";
 import { useCart } from "./CartContext";
 
 const fmt = (n) =>
@@ -586,7 +587,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
   const indiceActual = ETAPAS.findIndex((e) => e.id === estadoPedidoActual);
   const esEtapaFinal = indiceActual === ETAPAS.length - 1;
   const { datosCliente, metodoEntrega, metodoPago } = pedido;
-  const tipAmount = Math.max(
+  const storedTipAmount = Math.max(
     0,
     Number(pedido.tipAmount ?? pedido.tip_amount ?? datosCliente?.propina) || 0,
   );
@@ -603,8 +604,16 @@ const SeguimientoPedido = ({ onCerrar }) => {
     0,
     Number(pedido.total || 0) +
       (isMarketplaceOrder ? deliveryFee : 0) -
-      (isMarketplaceOrder ? 0 : tipAmount),
+      (isMarketplaceOrder ? 0 : storedTipAmount),
   );
+  const tipPercent = Math.max(
+    0,
+    Number(pedido.tipPercent ?? pedido.metadata?.tip_percent) || 0,
+  );
+  const tipAmount =
+    storedTipAmount > 0 && tipPercent > 0
+      ? calculateTipAmount(totalDue, 0, tipPercent)
+      : storedTipAmount;
   const datosEntrega =
     {
       domicilio: [

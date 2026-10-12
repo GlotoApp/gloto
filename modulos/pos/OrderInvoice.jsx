@@ -2,6 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { calculateTipAmount } from "../../src/lib/deliveryPricing";
 
 const formatMoney = (value) =>
   new Intl.NumberFormat("es-CO", {
@@ -79,6 +80,8 @@ const displayPaymentMethod = (value) => {
     split: "Dividido",
     dividir: "Dividido",
     dividido: "Dividido",
+    variado: "Efectivo/Tarjeta/Trans",
+    por_definir: "Efectivo/Tarjeta/Trans",
   };
   return labels[normalized] || value || "";
 };
@@ -169,16 +172,18 @@ export const getInvoiceHtml = (
     : "";
   const itemsSubtotal = getItemsSubtotal(order);
   const deliveryFee = Number(order.deliveryFee || 0);
-  const tipAmount = Math.max(0, Number(order.tipAmount || 0));
+  const storedTipAmount = Math.max(0, Number(order.tipAmount || 0));
   const tipPercent = Math.max(0, Number(order.tipPercent || 0));
   const totalWithTip = Number(order.total || 0);
   const marketplaceOrder = order.canal === "marketplace";
   const totalWithoutTip = marketplaceOrder
-    ? Math.max(0, totalWithTip - tipAmount + deliveryFee)
-    : Math.max(0, totalWithTip - tipAmount);
-  const invoiceTotal = marketplaceOrder
-    ? totalWithTip + deliveryFee
-    : totalWithTip;
+    ? Math.max(0, totalWithTip + deliveryFee)
+    : Math.max(0, totalWithTip - storedTipAmount);
+  const tipAmount =
+    storedTipAmount > 0 && tipPercent > 0
+      ? calculateTipAmount(totalWithoutTip, 0, tipPercent)
+      : storedTipAmount;
+  const invoiceTotal = totalWithoutTip + tipAmount;
   const paymentDetails = (Array.isArray(order.paymentMethods)
     ? order.paymentMethods
     : []
@@ -253,7 +258,7 @@ export const getInvoiceHtml = (
       <p><strong>Factura N.º ${escapeHtml(order.numeroFactura)}</strong></p><p class="muted">${escapeHtml(order.horaIngreso)} · ${escapeHtml(displayDeliveryMethod(order.metodoEntrega))}</p></header>
       <section class="columns"><div><p><strong>Cliente:</strong> ${escapeHtml(order.cliente || "Consumidor final")}</p><p><strong>Teléfono:</strong> ${escapeHtml(order.telefono || "No registrado")}</p></div>
       <div><p><strong>Entrega:</strong> ${escapeHtml(displayDeliveryMethod(order.metodoEntrega))}</p>${details}</div></section>
-      <table><thead><tr><th>Producto</th><th class="center">Cantidad</th><th class="right">Precio</th><th class="right">Total</th></tr></thead><tbody>${items || '<tr><td colspan="4">Sin productos</td></tr>'}</tbody></table>
+      <table><thead><tr><th>Producto</th><th class="center">CANT.</th><th class="right">Precio</th><th class="right">Total</th></tr></thead><tbody>${items || '<tr><td colspan="4">Sin productos</td></tr>'}</tbody></table>
       <section class="totals"><p><span>Subtotal</span><strong>${formatMoney(itemsSubtotal)}</strong></p>${deliveryFee > 0 ? `<p><span>Domicilio</span><strong>${formatMoney(deliveryFee)}</strong></p>` : ""}<p class="before-tip"><span>Total sin propina</span><strong>${formatMoney(totalWithoutTip)}</strong></p>${tipAmount > 0 ? `<p><span>Propina${tipPercent > 0 ? ` ${formatPercent(tipPercent)}%` : ""} (Opcional)</span><strong>${formatMoney(tipAmount)}</strong></p>` : ""}<p class="grand"><span>TOTAL A PAGAR</span><span>${formatMoney(invoiceTotal)}</span></p>${paymentMethodMarkup}</section>
       ${order.observaciones ? `<section class="notes"><h2>Observaciones generales</h2><p>${escapeHtml(order.observaciones)}</p></section>` : ""}
       ${mapQr}<section class="document-footer"><p class="non-fiscal">Documento no fiscal — solo para uso interno</p><p class="printed-by">Impreso por el sistema Gloto</p><div class="gloto-brand"><img class="gloto-logo" src="/logogloto.png" alt=""><span>GLOTO</span></div></section><footer class="footer">¡Gracias por tu compra!</footer>

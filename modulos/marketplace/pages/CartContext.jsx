@@ -9,6 +9,7 @@ import React, {
   useRef,
 } from "react";
 import { supabase } from "../../../src/lib/supabaseClient";
+import { calculateTipAmount } from "../../../src/lib/deliveryPricing";
 
 const CartContext = createContext(null);
 const CART_STORAGE_KEY = "gloto_marketplace_cart_v1";
@@ -355,7 +356,11 @@ export const CartProvider = ({ children }) => {
       0,
       Math.min(100, Number(deliverySettings?.tip_percent) || 0),
     );
-    const tipAmount = Math.round((totalPrecio * tipPercent) / 100);
+    const tipAmount = calculateTipAmount(
+      totalPrecio,
+      deliveryFee,
+      tipPercent,
+    );
     const paymentMethod = metodoPago
       .map((item) => (item.metodo || "desconocido").toString().trim())
       .filter(Boolean)

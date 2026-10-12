@@ -145,7 +145,7 @@ Deno.serve(async (request: Request) => {
   }
   const { data: employee, error: employeeError } = await adminClient
     .from("employees")
-    .select("id,name,area,auth_user_id")
+    .select("id,name,area,auth_user_id,store_orders_enabled,store_order_priority_enabled")
     .eq("id", employeeId)
     .eq("business_id", callerProfile.business_id)
     .maybeSingle();
@@ -180,6 +180,95 @@ Deno.serve(async (request: Request) => {
   if (!String(employee.area || "").toLowerCase().includes("domiciliario")) {
     return jsonResponse(404, {
       error: "El empleado no es domiciliario.",
+    });
+  }
+
+  if (action === "set-store-orders-enabled") {
+    if (!employee.auth_user_id) {
+      return jsonResponse(409, {
+        error: "Crea primero el acceso del domiciliario para cambiar la recepción de pedidos.",
+      });
+    }
+    if (typeof body.enabled !== "boolean") {
+      return jsonResponse(400, {
+        error: "Indica si el domiciliario puede recibir pedidos de la tienda.",
+      });
+    }
+    const { data: updatedEmployee, error: updateError } = await adminClient
+      .from("employees")
+      .update({ store_orders_enabled: body.enabled })
+      .eq("id", employeeId)
+      .eq("business_id", callerProfile.business_id)
+      .select("store_orders_enabled")
+      .maybeSingle();
+    if (updateError) {
+      console.error("No se pudo cambiar la recepción de pedidos del domiciliario:", updateError);
+      return jsonResponse(500, {
+        error: "No se pudo cambiar la recepción de pedidos del domiciliario.",
+      });
+    }
+    if (!updatedEmployee) {
+      return jsonResponse(409, {
+        error: "El domiciliario cambió o ya no pertenece a esta tienda.",
+      });
+    }
+    return jsonResponse(200, {
+      success: true,
+      action,
+      enabled: updatedEmployee.store_orders_enabled,
+    });
+  }
+
+  if (action === "set-store-order-priority") {
+    if (!employee.auth_user_id) {
+      return jsonResponse(409, {
+        error: "Crea primero el acceso del domiciliario para cambiar su prioridad.",
+      });
+    }
+    if (typeof body.enabled !== "boolean") {
+      return jsonResponse(400, {
+        error: "Indica si el domiciliario tendrá prioridad en los pedidos de la tienda.",
+      });
+    }
+    const { data: courierProfile, error: courierProfileError } = await adminClient
+      .from("profiles")
+      .select("role,business_id")
+      .eq("id", employee.auth_user_id)
+      .maybeSingle();
+    if (courierProfileError) {
+      console.error("No se pudo validar la cuenta del domiciliario:", courierProfileError);
+      return jsonResponse(500, { error: "No se pudo validar la cuenta del domiciliario." });
+    }
+    if (
+      !courierProfile ||
+      String(courierProfile.role || "").toLowerCase() !== "domiciliario" ||
+      courierProfile.business_id !== null
+    ) {
+      return jsonResponse(409, {
+        error: "La cuenta vinculada no corresponde a un domiciliario.",
+      });
+    }
+
+    const { data: updatedEmployee, error: updateError } = await adminClient
+      .from("employees")
+      .update({ store_order_priority_enabled: body.enabled })
+      .eq("id", employeeId)
+      .eq("business_id", callerProfile.business_id)
+      .select("store_order_priority_enabled")
+      .maybeSingle();
+    if (updateError) {
+      console.error("No se pudo cambiar la prioridad de pedidos:", updateError);
+      return jsonResponse(500, { error: "No se pudo cambiar la prioridad de pedidos." });
+    }
+    if (!updatedEmployee) {
+      return jsonResponse(409, {
+        error: "El domiciliario cambió o ya no pertenece a esta tienda.",
+      });
+    }
+    return jsonResponse(200, {
+      success: true,
+      action,
+      enabled: updatedEmployee.store_order_priority_enabled,
     });
   }
 
@@ -266,7 +355,6 @@ Deno.serve(async (request: Request) => {
   if (employee.auth_user_id) {
     return jsonResponse(409, { error: "Este domiciliario ya tiene un acceso." });
   }
-
   const { data: createdUser, error: createUserError } =
     await adminClient.auth.admin.createUser({
       email,
@@ -276,6 +364,17 @@ Deno.serve(async (request: Request) => {
     });
   if (createUserError || !createdUser.user?.id) {
     console.error("No se pudo crear la cuenta de Auth:", createUserError);
+    if (
+      createUserError?.code === "email_exists" ||
+      /already (registered|exists)|email.*already/i.test(
+        createUserError?.message || "",
+      )
+    ) {
+      return jsonResponse(409, {
+        code: "EMAIL_ALREADY_EXISTS",
+        error: "Este correo ya está registrado. Elige otro correo al que el domiciliario pueda acceder.",
+      });
+    }
     return jsonResponse(400, {
       error: createUserError?.message || "No se pudo crear la cuenta.",
     });
@@ -306,11 +405,13 @@ Deno.serve(async (request: Request) => {
 
   const { data: linkedEmployee, error: linkError } = await adminClient
     .from("employees")
-    .update({ auth_user_id: userId })
+    .update({
+      auth_user_id: userId,
+    })
     .eq("id", employeeId)
     .eq("business_id", callerProfile.business_id)
     .is("auth_user_id", null)
-    .select("id")
+    .select("id,store_order_priority_enabled")
     .maybeSingle();
   if (linkError || !linkedEmployee) {
     console.error("No se pudo vincular el acceso al empleado:", linkError);
@@ -335,5 +436,6 @@ Deno.serve(async (request: Request) => {
     success: true,
     userId,
     email,
+    storeOrderPriorityEnabled: linkedEmployee.store_order_priority_enabled,
   });
 });
