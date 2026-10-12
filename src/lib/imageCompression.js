@@ -1,27 +1,15 @@
-const MAX_WEBP_BYTES = 500 * 1024;
+const MAX_IMAGE_BYTES = 500 * 1024;
 const MIN_DIMENSION = 480;
 const QUALITY_LEVELS = [0.82, 0.72, 0.62];
 
-const encodeWebP = (canvas, quality) =>
-  new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          reject(new Error("No se pudo comprimir la imagen."));
-        } else if (blob.type !== "image/webp") {
-          reject(new Error("Este navegador no pudo convertir la imagen a WebP."));
-        } else {
-          resolve(blob);
-        }
-      },
-      "image/webp",
-      quality,
-    );
+const encodeImage = (canvas, type, quality) =>
+  new Promise((resolve) => {
+    canvas.toBlob(resolve, type, quality);
   });
 
-export const compressCanvasToWebP = async (
+export const compressCanvasToImage = async (
   sourceCanvas,
-  maxBytes = MAX_WEBP_BYTES,
+  maxBytes = MAX_IMAGE_BYTES,
 ) => {
   const outputCanvas = document.createElement("canvas");
   const context = outputCanvas.getContext("2d");
@@ -34,6 +22,7 @@ export const compressCanvasToWebP = async (
   let width = Math.max(1, Math.round(sourceCanvas.width * initialScale));
   let height = Math.max(1, Math.round(sourceCanvas.height * initialScale));
   let smallestBlob = null;
+  let outputType = "image/webp";
 
   while (true) {
     outputCanvas.width = width;
@@ -41,7 +30,30 @@ export const compressCanvasToWebP = async (
     context.drawImage(sourceCanvas, 0, 0, width, height);
 
     for (const quality of QUALITY_LEVELS) {
-      const blob = await encodeWebP(outputCanvas, quality);
+      let blob;
+      try {
+        blob = await encodeImage(outputCanvas, outputType, quality);
+      } catch (error) {
+        if (outputType !== "image/webp") throw error;
+        outputType = "image/png";
+      }
+
+      if (outputType === "image/webp" && (!blob || blob.type !== outputType)) {
+        if (blob && blob.type !== "image/png") {
+          throw new Error(
+            "El navegador devolvió un formato de imagen no compatible.",
+          );
+        }
+        outputType = "image/png";
+      }
+
+      if (!blob || blob.type !== outputType) {
+        blob = await encodeImage(outputCanvas, outputType, quality);
+      }
+      if (!blob || blob.type !== outputType) {
+        throw new Error("No se pudo comprimir la imagen en un formato compatible.");
+      }
+
       if (!smallestBlob || blob.size < smallestBlob.size) smallestBlob = blob;
       if (blob.size <= maxBytes) return blob;
     }

@@ -30,7 +30,7 @@ import {
   removeStorageObjectIfUnused,
   supabase,
 } from "../../src/lib/supabaseClient";
-import { compressCanvasToWebP } from "../../src/lib/imageCompression";
+import { compressCanvasToImage } from "../../src/lib/imageCompression";
 import { useAuth } from "../../src/components/AuthContext";
 import ImageCropEditor from "./ImageCropEditor";
 import SubLoading from "./SubLoading";
@@ -1368,7 +1368,7 @@ const Productos = ({ section = "productos" }) => {
         canvas.height,
       );
 
-      const blob = await compressCanvasToWebP(canvas);
+      const blob = await compressCanvasToImage(canvas);
       const reader = new FileReader();
       const dataUrl = await new Promise((resolve, reject) => {
         reader.onload = () => resolve(reader.result);
@@ -1417,16 +1417,17 @@ const Productos = ({ section = "productos" }) => {
       const imageBlob = await fetch(imageUrl).then((response) =>
         response.blob(),
       );
-      if (imageBlob.type !== "image/webp") {
-        alert("La imagen del producto no se convirtió correctamente a WebP.");
+      if (!["image/webp", "image/png"].includes(imageBlob.type)) {
+        alert("La imagen del producto no se convirtió a un formato compatible.");
         setSavingProduct(false);
         return;
       }
-      uploadedImagePath = `${businessId}/productos-imagenes/${crypto.randomUUID()}.webp`;
+      const extension = imageBlob.type.split("/")[1];
+      uploadedImagePath = `${businessId}/productos-imagenes/${crypto.randomUUID()}.${extension}`;
       const { error: uploadError } = await supabase.storage
         .from("business-assets")
         .upload(uploadedImagePath, imageBlob, {
-          contentType: "image/webp",
+          contentType: imageBlob.type,
           upsert: false,
         });
 
@@ -2693,7 +2694,7 @@ const Productos = ({ section = "productos" }) => {
                               Subir Imagen
                             </span>
                             <span className="text-[7px] sm:text-[8px] text-neutral-400 block mb-2 font-bold">
-                              Cualquier imagen · se guarda en WebP
+                              Se guarda en WebP o PNG según el navegador
                             </span>
                             <span className="text-[7px] sm:text-[8px] text-neutral-500 block font-semibold">
                               Click para seleccionar

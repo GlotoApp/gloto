@@ -17,7 +17,7 @@ import {
   removeStorageObjectIfUnused,
   supabase,
 } from "../../src/lib/supabaseClient";
-import { compressCanvasToWebP } from "../../src/lib/imageCompression";
+import { compressCanvasToImage } from "../../src/lib/imageCompression";
 import {
   DELIVERY_METHODS,
   getEnabledDeliveryMethods,
@@ -214,10 +214,13 @@ const createCroppedImage = async (editor, crop) => {
     canvas.width,
     canvas.height,
   );
-  const webpBlob = await compressCanvasToWebP(canvas);
-  return new File([webpBlob], isCover ? "portada.webp" : "logo.webp", {
-    type: webpBlob.type,
-  });
+  const imageBlob = await compressCanvasToImage(canvas);
+  const extension = imageBlob.type.split("/")[1];
+  return new File(
+    [imageBlob],
+    `${isCover ? "portada" : "logo"}.${extension}`,
+    { type: imageBlob.type },
+  );
 };
 
 const ConfiguracionTienda = ({
@@ -932,9 +935,13 @@ const ConfiguracionTienda = ({
         throw new Error("No se pudo cargar la imagen para editarla.");
       }
       const blob = await response.blob();
-      const file = new File([blob], type === "logo" ? "logo.png" : "portada.webp", {
-        type: blob.type || (type === "logo" ? "image/png" : "image/webp"),
-      });
+      const imageType = blob.type || "image/png";
+      const extension = imageType.split("/")[1];
+      const file = new File(
+        [blob],
+        `${type === "logo" ? "logo" : "portada"}.${extension}`,
+        { type: imageType },
+      );
       openImageEditor(file, type);
     } catch (error) {
       console.error("No se pudo preparar la imagen para recortarla:", error);
@@ -952,15 +959,16 @@ const ConfiguracionTienda = ({
     setMessage("Subiendo imagen...");
 
     const folder = type === "cover" ? "portadas-negocios" : "logos-negocio";
-    const path = `${businessId}/${folder}/${type}-${Date.now()}.webp`;
+    const extension = file.type.split("/")[1];
+    const path = `${businessId}/${folder}/${type}-${Date.now()}.${extension}`;
 
     try {
-      if (file.type !== "image/webp") {
-        throw new Error("La imagen no se convirtió correctamente a WebP.");
+      if (!["image/webp", "image/png"].includes(file.type)) {
+        throw new Error("La imagen no se convirtió a un formato compatible.");
       }
       const { error: uploadError } = await supabase.storage
         .from("business-assets")
-        .upload(path, file, { contentType: "image/webp", upsert: false });
+        .upload(path, file, { contentType: file.type, upsert: false });
       if (uploadError) throw uploadError;
 
       const { data: publicData } = supabase.storage

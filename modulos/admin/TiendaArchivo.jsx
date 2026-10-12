@@ -27,7 +27,7 @@ import {
   removeStorageObjectIfUnused,
   supabase,
 } from "../../src/lib/supabaseClient";
-import { compressCanvasToWebP } from "../../src/lib/imageCompression";
+import { compressCanvasToImage } from "../../src/lib/imageCompression";
 import TiendaDetalle from "./TiendaDetalle";
 
 const WEEKDAYS = [
@@ -53,21 +53,29 @@ const formatCurrency = (amount) =>
     maximumFractionDigits: 0,
   }).format(Number(amount) || 0);
 
-const convertImageToWebP = async (file) => {
+const convertImageToCompatibleFormat = async (file) => {
   const imageUrl = URL.createObjectURL(file);
   try {
     const image = new Image();
+    const imageLoaded = new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () =>
+        reject(new Error("El navegador no pudo abrir esta imagen."));
+    });
     image.src = imageUrl;
-    await image.decode();
+    await imageLoaded;
 
     const scale = Math.min(1, 1400 / Math.max(image.naturalWidth, image.naturalHeight));
+    if (!image.naturalWidth || !image.naturalHeight) {
+      throw new Error("El navegador no pudo leer las dimensiones de esta imagen.");
+    }
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(image.naturalWidth * scale);
     canvas.height = Math.round(image.naturalHeight * scale);
     const context = canvas.getContext("2d");
     if (!context) throw new Error("No se pudo preparar la imagen.");
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return await compressCanvasToWebP(canvas);
+    return await compressCanvasToImage(canvas);
   } finally {
     URL.revokeObjectURL(imageUrl);
   }
@@ -225,14 +233,15 @@ const TiendaArchivo = () => {
     try {
       setSaving(true);
 
-      const webpBlob = await convertImageToWebP(file);
+      const imageBlob = await convertImageToCompatibleFormat(file);
       const folder = type === "cover" ? "portadas-negocios" : "logos-negocio";
-      uploadedPath = `${id}/${folder}/${type}-${Date.now()}.webp`;
+      const extension = imageBlob.type.split("/")[1];
+      uploadedPath = `${id}/${folder}/${type}-${Date.now()}.${extension}`;
 
       const { error: uploadError } = await supabase.storage
         .from("business-assets")
-        .upload(uploadedPath, webpBlob, {
-          contentType: "image/webp",
+        .upload(uploadedPath, imageBlob, {
+          contentType: imageBlob.type,
           upsert: false,
         });
 

@@ -13,7 +13,7 @@ import {
   resolveCategoryIconUrl,
   supabase,
 } from "../../src/lib/supabaseClient";
-import { compressCanvasToWebP } from "../../src/lib/imageCompression";
+import { compressCanvasToImage } from "../../src/lib/imageCompression";
 import ImageCropEditor from "../pos/ImageCropEditor";
 import SuperAdminSectionShell from "./ContenedorSeccion";
 
@@ -37,10 +37,11 @@ const crearWebPCuadrado = async (imageEditor) => {
   canvas.height = 512;
   context.drawImage(image, sourceX, sourceY, size, size, 0, 0, 512, 512);
 
-  const webpBlob = await compressCanvasToWebP(canvas);
+  const imageBlob = await compressCanvasToImage(canvas);
   const filename = imageEditor.file.name.replace(/\.[^.]+$/, "") || "icono";
-  return new File([webpBlob], `${filename}-cuadrado.webp`, {
-    type: "image/webp",
+  const extension = imageBlob.type.split("/")[1];
+  return new File([imageBlob], `${filename}-cuadrado.${extension}`, {
+    type: imageBlob.type,
   });
 };
 
@@ -441,7 +442,7 @@ const SuperAdminMarketplacePanel = () => {
       console.error("No se pudo recortar el icono:", error);
       setMensajeCategorias({
         tipo: "error",
-        texto: "No se pudo preparar y comprimir el recorte WebP.",
+        texto: "No se pudo preparar y comprimir el recorte de imagen.",
       });
     } finally {
       setRecortandoCategoria(false);
@@ -546,15 +547,16 @@ const SuperAdminMarketplacePanel = () => {
           }
 
           if (categoria._iconFile) {
-            if (categoria._iconFile.type !== "image/webp") {
-              throw new Error("El icono seleccionado no está en formato WebP.");
+            if (!["image/webp", "image/png"].includes(categoria._iconFile.type)) {
+              throw new Error("El icono seleccionado no está en un formato compatible.");
             }
-            uploadedPath = `sistema/categories generales iconos/${crypto.randomUUID()}.webp`;
-            operation = "subir el icono WebP al bucket system";
+            const extension = categoria._iconFile.type.split("/")[1];
+            uploadedPath = `sistema/categories generales iconos/${crypto.randomUUID()}.${extension}`;
+            operation = "subir el icono al bucket system";
             const { error: uploadError } = await supabase.storage
               .from("system")
               .upload(uploadedPath, categoria._iconFile, {
-                contentType: "image/webp",
+                contentType: categoria._iconFile.type,
                 upsert: false,
               });
             if (uploadError) throw uploadError;
@@ -655,7 +657,7 @@ const SuperAdminMarketplacePanel = () => {
               await removeStorageObjectIfUnused("system", uploadedPath);
             } catch (cleanupError) {
               console.warn(
-                "No se pudo limpiar el WebP que falló:",
+                "No se pudo limpiar la imagen que falló:",
                 cleanupError,
               );
             }
@@ -915,7 +917,8 @@ const SuperAdminMarketplacePanel = () => {
               <div>
                 <h3 className="font-bold text-white">Categorías visibles</h3>
                 <p className="text-xs text-neutral-400">
-                  Edita nombres y sube imágenes; se comprimen y guardan como WebP.
+                  Edita nombres y sube imágenes; se comprimen como WebP o PNG
+                  según el soporte del navegador.
                 </p>
               </div>
             </div>
