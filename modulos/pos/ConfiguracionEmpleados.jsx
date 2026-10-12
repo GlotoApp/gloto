@@ -70,9 +70,10 @@ const CourierPrioritySwitch = ({ checked, onChange }) => (
         Prioridad para domiciliario de la tienda
       </p>
       <p className="mt-1 text-xs leading-relaxed text-neutral-300">
-        Solo aplica a empleados del área de domiciliarios. Si está conectado,
-        recibirá primero los pedidos de la tienda; si no acepta en 2 minutos,
-        se ofrecerán a los domiciliarios públicos.
+        Solo aplica a empleados del área de domiciliarios. Activado: si está
+        conectado, tendrá prioridad por 2 minutos; después el pedido pasa al
+        público. Desactivado: el pedido queda disponible de inmediato para
+        domiciliarios públicos. Su acceso a pedidos públicos no cambia.
       </p>
     </div>
     <button
