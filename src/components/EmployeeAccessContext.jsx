@@ -19,7 +19,6 @@ const EmployeeAccessContext = createContext({
 
 export const EmployeeAccessProvider = ({ children }) => {
   const { user } = useAuth();
-  const location = useLocation();
   const [access, setAccess] = useState({
     loading: true,
     isEmployee: false,
@@ -101,7 +100,7 @@ export const EmployeeAccessProvider = ({ children }) => {
     return () => {
       active = false;
     };
-  }, [location.pathname, user?.id]);
+  }, [user?.id]);
 
   if (access.loading) return <Loading />;
   return (
