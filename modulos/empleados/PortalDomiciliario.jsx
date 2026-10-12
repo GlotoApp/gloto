@@ -9,10 +9,13 @@ import {
   ChevronUp,
   CircleDollarSign,
   Clock3,
+  Eye,
+  EyeOff,
   History,
   Info,
   LoaderCircle,
   LocateFixed,
+  MessageCircle,
   MapPin,
   MapPinned,
   PackageCheck,
@@ -37,6 +40,14 @@ const formatMoney = (amount) =>
     maximumFractionDigits: 0,
   }).format(Number(amount) || 0);
 
+const normalizeColombianWhatsappNumber = (value) => {
+  const digits = String(value || "")
+    .replace(/\D/g, "")
+    .replace(/^0+/, "");
+  if (!digits) return "";
+  return digits.startsWith("57") ? digits : `57${digits}`;
+};
+
 const locationErrorMessage = (error) =>
   error?.code === "PGRST202" &&
   error?.message?.includes("set_domiciliario_live_location")
@@ -51,8 +62,82 @@ const formatDate = (value) =>
       }).format(new Date(value))
     : "Fecha no disponible";
 
+const courierWorkSessionKey = (userId) =>
+  `gloto:courier-work-session:${userId}`;
+
+const readCourierWorkSession = (userId) => {
+  if (!userId) return null;
+  try {
+    const stored = sessionStorage.getItem(courierWorkSessionKey(userId));
+    if (!stored) return null;
+    const session = JSON.parse(stored);
+    if (
+      typeof session?.startedAt !== "string" ||
+      !Number.isFinite(new Date(session.startedAt).getTime())
+    ) {
+      return null;
+    }
+    return {
+      startedAt: session.startedAt,
+      endedAt:
+        typeof session.endedAt === "string" &&
+        Number.isFinite(new Date(session.endedAt).getTime())
+          ? session.endedAt
+          : null,
+      completedOrderIds: Array.isArray(session.completedOrderIds)
+        ? session.completedOrderIds
+        : [],
+      grossEarnings: Number.isFinite(Number(session.grossEarnings))
+        ? Number(session.grossEarnings)
+        : 0,
+    };
+  } catch (error) {
+    console.error("No se pudo leer la jornada activa del domiciliario:", error);
+    return null;
+  }
+};
+
+const getGeneralDeliveryArea = (address) => {
+  const addressParts = String(address || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return addressParts.length > 1
+    ? addressParts.slice(1).join(", ")
+    : "Zona no disponible";
+};
+
 const getCourierOrderKey = (order) =>
   `${order.courier_mode || "private"}:${order.order_id}`;
+
+const getDistanceBetweenCoordinatesKm = (fromLatitude, fromLongitude, toLatitude, toLongitude) => {
+  const coordinates = [
+    fromLatitude,
+    fromLongitude,
+    toLatitude,
+    toLongitude,
+  ];
+  if (
+    coordinates.some(
+      (coordinate) =>
+        coordinate == null ||
+        coordinate === "" ||
+        !Number.isFinite(Number(coordinate)),
+    )
+  ) {
+    return null;
+  }
+
+  const radians = (degrees) => (degrees * Math.PI) / 180;
+  const latitudeDelta = radians(Number(toLatitude) - Number(fromLatitude));
+  const longitudeDelta = radians(Number(toLongitude) - Number(fromLongitude));
+  const a =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(radians(Number(fromLatitude))) *
+      Math.cos(radians(Number(toLatitude))) *
+      Math.sin(longitudeDelta / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
 const getOrderDistanceKm = (order, location) => {
   const serverDistance = Number(order.distance_km);
@@ -60,6 +145,17 @@ const getOrderDistanceKm = (order, location) => {
     order.distance_km != null &&
     order.distance_km !== "" &&
     Number.isFinite(serverDistance);
+  if (order.courier_mode === "public") {
+    const pickupDistance = getDistanceBetweenCoordinatesKm(
+      order.pickup_latitude,
+      order.pickup_longitude,
+      order.destination_latitude,
+      order.destination_longitude,
+    );
+    if (pickupDistance != null && pickupDistance > 0) return pickupDistance;
+    return hasServerDistance && serverDistance > 0 ? serverDistance : null;
+  }
+
   const hasCurrentLocation =
     location?.latitude != null &&
     location?.longitude != null &&
@@ -77,15 +173,12 @@ const getOrderDistanceKm = (order, location) => {
   const longitude = Number(order.destination_longitude);
   const currentLatitude = Number(location?.latitude);
   const currentLongitude = Number(location?.longitude);
-  const radians = (degrees) => (degrees * Math.PI) / 180;
-  const latitudeDelta = radians(latitude - currentLatitude);
-  const longitudeDelta = radians(longitude - currentLongitude);
-  const a =
-    Math.sin(latitudeDelta / 2) ** 2 +
-    Math.cos(radians(currentLatitude)) *
-      Math.cos(radians(latitude)) *
-      Math.sin(longitudeDelta / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return getDistanceBetweenCoordinatesKm(
+    currentLatitude,
+    currentLongitude,
+    latitude,
+    longitude,
+  );
 };
 
 const getDistanceBetweenPointsKm = (start, end) => {
@@ -129,6 +222,9 @@ const applicationStatus = {
   suspended: "Suspendida",
 };
 
+const COURIER_OFFER_PREVIEW_MS = 20000;
+const COURIER_ORDER_REFRESH_INTERVAL_MS = 3000;
+
 const getLocation = () =>
   new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -160,6 +256,17 @@ const PortalDomiciliario = () => {
   const [section, setSection] = useState("orders");
   const [mode, setMode] = useState("private");
   const [summary, setSummary] = useState(null);
+  const [workSession, setWorkSession] = useState(() =>
+    readCourierWorkSession(user?.id),
+  );
+  const workSessionRef = useRef(workSession);
+  const [sessionDeductions, setSessionDeductions] = useState(0);
+  const [activityError, setActivityError] = useState("");
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [privateBusinessLogo, setPrivateBusinessLogo] = useState({
+    businessId: null,
+    logoUrl: "",
+  });
   const [summaryLoaded, setSummaryLoaded] = useState(false);
   const [orders, setOrders] = useState([]);
   const [previewOrderIds, setPreviewOrderIds] = useState([]);
@@ -176,6 +283,7 @@ const PortalDomiciliario = () => {
   const refreshAgainRef = useRef(false);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [savingName, setSavingName] = useState(false);
   const [availabilityBusy, setAvailabilityBusy] = useState(false);
   const [sourcePreferences, setSourcePreferences] = useState(null);
   const sourcePreferencesLoadedRef = useRef(false);
@@ -185,16 +293,14 @@ const PortalDomiciliario = () => {
   const [errorMessage, setErrorMessage] = useState("");
   const [notice, setNotice] = useState("");
   const [fullName, setFullName] = useState(
-    user?.user_metadata?.full_name || user?.user_metadata?.name || "",
+    user?.user_metadata?.full_name || "",
   );
   const [phone, setPhone] = useState(user?.user_metadata?.phone || "");
   const [topupAmount, setTopupAmount] = useState("");
   const [topupProof, setTopupProof] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
-  const [earningsOpen, setEarningsOpen] = useState(false);
-  const [dailyEarnings, setDailyEarnings] = useState(null);
-  const [earningsLoading, setEarningsLoading] = useState(false);
-  const [earningsError, setEarningsError] = useState("");
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityValuesVisible, setActivityValuesVisible] = useState(true);
 
   const isPublicApproved = summary?.application_status === "approved";
   const isPublicOnline = Boolean(summary?.is_online);
@@ -213,11 +319,98 @@ const PortalDomiciliario = () => {
     (isPublicApproved && publicSourceEnabled);
   const balance = Number(summary?.wallet_balance || 0);
   const displayName =
-    summary?.full_name ||
-    user?.user_metadata?.full_name ||
-    user?.user_metadata?.name ||
-    user?.email ||
+    fullName.trim() ||
+    user?.user_metadata?.full_name?.trim() ||
+    summary?.full_name?.trim() ||
     "Domiciliario";
+
+  const saveWorkSession = useCallback(
+    (nextSession) => {
+      workSessionRef.current = nextSession;
+      setWorkSession(nextSession);
+      if (!user?.id) return;
+      try {
+        const key = courierWorkSessionKey(user.id);
+        if (nextSession) {
+          sessionStorage.setItem(key, JSON.stringify(nextSession));
+        } else {
+          sessionStorage.removeItem(key);
+        }
+      } catch (error) {
+        console.error("No se pudo guardar la jornada del domiciliario:", error);
+      }
+    },
+    [user],
+  );
+
+  const syncWorkSession = useCallback(
+    (online) => {
+      if (!user?.id) return;
+      if (online) {
+        const saved =
+          workSessionRef.current || readCourierWorkSession(user.id);
+        if (saved && !saved.endedAt) {
+          workSessionRef.current = saved;
+          setWorkSession(saved);
+        } else {
+          saveWorkSession({
+            startedAt: new Date().toISOString(),
+            completedOrderIds: [],
+          });
+        }
+      } else if (workSessionRef.current && !workSessionRef.current.endedAt) {
+        saveWorkSession({
+          ...workSessionRef.current,
+          endedAt: new Date().toISOString(),
+        });
+      }
+    },
+    [saveWorkSession, user],
+  );
+
+  useEffect(() => {
+    if (summaryLoaded) syncWorkSession(isCourierOnline);
+  }, [isCourierOnline, summaryLoaded, syncWorkSession]);
+
+  useEffect(() => {
+    const businessId = summary?.private_business_id;
+    if (!businessId) return undefined;
+
+    let active = true;
+    const loadBusinessLogo = async () => {
+      const { data, error } = await supabase
+        .from("businesses")
+        .select("logo_url")
+        .eq("id", businessId)
+        .maybeSingle();
+      if (!active) return;
+      if (error) {
+        console.error("No se pudo cargar el logo de la tienda vinculada:", error);
+        setPrivateBusinessLogo({ businessId, logoUrl: "" });
+        return;
+      }
+      setPrivateBusinessLogo({ businessId, logoUrl: data?.logo_url || "" });
+    };
+
+    loadBusinessLogo();
+    return () => {
+      active = false;
+    };
+  }, [summary?.private_business_id]);
+
+  const recordWorkOrder = useCallback(
+    (order) => {
+      const current = workSessionRef.current;
+      if (!current || current.endedAt || !order?.order_id) return;
+      if (current.completedOrderIds.includes(order.order_id)) return;
+      saveWorkSession({
+        ...current,
+        completedOrderIds: [...current.completedOrderIds, order.order_id],
+        grossEarnings: current.grossEarnings + (Number(order.delivery_fee) || 0),
+      });
+    },
+    [saveWorkSession],
+  );
 
   const updateOrders = useCallback((nextOrders) => {
     setOrders(nextOrders);
@@ -301,10 +494,15 @@ const PortalDomiciliario = () => {
   );
 
   const loadSummary = useCallback(async () => {
-    const { data, error } = await supabase.rpc(
-      "get_public_courier_portal_summary",
-    );
+    const [
+      { data, error },
+      { data: profileName, error: profileNameError },
+    ] = await Promise.all([
+      supabase.rpc("get_public_courier_portal_summary"),
+      supabase.rpc("get_my_courier_profile_name"),
+    ]);
     if (error) throw error;
+    if (profileNameError) throw profileNameError;
     setSummary(data || null);
     if (data?.location_latitude != null && data?.location_longitude != null) {
       setMapLocation({
@@ -340,7 +538,15 @@ const PortalDomiciliario = () => {
       sourcePreferencesLoadedRef.current = true;
     }
     setMode(data?.private_business_id ? "private" : "public");
-    if (data?.full_name) setFullName(data.full_name);
+    const savedName =
+      typeof profileName === "string" ? profileName.trim() : "";
+    if (savedName) {
+      setFullName(savedName);
+    } else if (data?.full_name) {
+      setFullName(data.full_name);
+    } else if (user?.user_metadata?.full_name) {
+      setFullName(user.user_metadata.full_name);
+    }
     if (data?.phone) setPhone(data.phone);
   }, [user?.id]);
 
@@ -365,9 +571,58 @@ const PortalDomiciliario = () => {
     const results = await Promise.all(requests);
     const failed = results.find(({ error }) => error);
     if (failed?.error) throw failed.error;
+    const privateOrders = results.find(({ source }) => source === "private")?.data || [];
+    const assignedPrivateBusinessIds = [
+      ...new Set(
+        privateOrders
+          .filter((order) => order.delivery_status !== "available")
+          .map((order) => order.business_id)
+          .filter(Boolean),
+      ),
+    ];
+    const privateBusinessPhones = new Map();
+    if (assignedPrivateBusinessIds.length > 0) {
+      const { data, error } = await supabase
+        .from("business_info")
+        .select("business_id, whatsapp_phone")
+        .in("business_id", assignedPrivateBusinessIds);
+      if (error) throw error;
+      for (const businessInfo of data || []) {
+        privateBusinessPhones.set(
+          businessInfo.business_id,
+          businessInfo.whatsapp_phone,
+        );
+      }
+    }
+    const publicOrders = results.find(({ source }) => source === "public")?.data || [];
+    const publicOrderDetails = new Map();
+    if (publicOrders.length > 0) {
+      const { data, error } = await supabase.rpc(
+        "get_public_courier_offer_addresses",
+        { p_order_ids: publicOrders.map((order) => order.order_id) },
+      );
+      if (error) throw error;
+      for (const details of data || []) {
+        publicOrderDetails.set(details.order_id, details);
+      }
+    }
     return {
       data: results.flatMap(({ data, source }) =>
-        (data || []).map((order) => ({ ...order, courier_mode: source })),
+        (data || []).map((order) => ({
+          ...order,
+          ...(source === "private"
+            ? {
+                pickup_phone:
+                  privateBusinessPhones.get(order.business_id) ||
+                  order.pickup_phone ||
+                  "",
+              }
+            : {}),
+          ...(source === "public"
+            ? publicOrderDetails.get(order.order_id) || {}
+            : {}),
+          courier_mode: source,
+        })),
       ),
       error: null,
     };
@@ -399,6 +654,57 @@ const PortalDomiciliario = () => {
     setLedger(ledgerResult.data || []);
     setTopups(topupsResult.data || []);
   }, []);
+
+  const refreshSessionDeductions = useCallback(async () => {
+    const current = workSessionRef.current;
+    if (!current || !isPublicApproved) {
+      setSessionDeductions(0);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("public_courier_ledger")
+      .select("amount")
+      .gte("created_at", current.startedAt)
+      .lt("created_at", current.endedAt || new Date().toISOString());
+    if (error) throw error;
+    setSessionDeductions(
+      (data || []).reduce((total, entry) => {
+        const amount = Number(entry.amount) || 0;
+        return amount < 0 ? total + Math.abs(amount) : total;
+      }, 0),
+    );
+  }, [isPublicApproved]);
+
+  const openActivity = async () => {
+    setActivityOpen(true);
+    setActivityLoading(true);
+    setActivityError("");
+    try {
+      await Promise.all([refreshSessionDeductions(), loadSummary()]);
+    } catch (error) {
+      console.error("No se pudo actualizar el resumen de la jornada:", error);
+      setActivityError(
+        error.message || "No se pudo actualizar la información de la jornada.",
+      );
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!activityOpen || !isCourierOnline) return undefined;
+    const timerId = window.setInterval(async () => {
+      try {
+        await refreshSessionDeductions();
+      } catch (error) {
+        console.error("No se pudo actualizar el saldo descontado:", error);
+        setActivityError(
+          error.message || "No se pudieron actualizar los descuentos.",
+        );
+      }
+    }, 15000);
+    return () => window.clearInterval(timerId);
+  }, [activityOpen, isCourierOnline, refreshSessionDeductions]);
 
   useEffect(() => {
     let mounted = true;
@@ -640,7 +946,10 @@ const PortalDomiciliario = () => {
       subscribeToSignals("public");
     }
 
-    const intervalId = window.setInterval(refreshOrders, 30000);
+    const intervalId = window.setInterval(
+      refreshOrders,
+      COURIER_ORDER_REFRESH_INTERVAL_MS,
+    );
     return () => {
       active = false;
       window.clearInterval(intervalId);
@@ -683,22 +992,24 @@ const PortalDomiciliario = () => {
       }
       setNotice(successMessage);
       await Promise.all([refreshOrders(), loadSummary()]);
+      return true;
     } catch (error) {
       console.error("No se pudo actualizar el domicilio:", error);
       setErrorMessage(error.message || "No se pudo actualizar el domicilio.");
+      return false;
     } finally {
       setActiveOrderId(null);
     }
   };
 
-  const claimOrder = (order) => {
+  const claimOrder = async (order) => {
     if (activeDelivery || activeOrderId) {
       setErrorMessage(
         "Ya tienes un domicilio activo. Complétalo antes de aceptar otro.",
       );
       return;
     }
-    return runOrderAction(
+    await runOrderAction(
       order.order_id,
       order.courier_mode === "public"
         ? "claim_public_courier_order"
@@ -710,8 +1021,8 @@ const PortalDomiciliario = () => {
     );
   };
 
-  const updateOrderStatus = (order, status) =>
-    runOrderAction(
+  const updateOrderStatus = async (order, status) => {
+    const updated = await runOrderAction(
       order.order_id,
       order.courier_mode === "public"
         ? "set_public_courier_order_status"
@@ -721,6 +1032,10 @@ const PortalDomiciliario = () => {
         ? "Marcaste el pedido como recogido."
         : "Marcaste el pedido como entregado.",
     );
+    if (updated && status === "delivered") {
+      recordWorkOrder(order);
+    }
+  };
 
   const activateSource = async (source, location) => {
     if (source === "public") {
@@ -781,6 +1096,7 @@ const PortalDomiciliario = () => {
           location_latitude: null,
           location_longitude: null,
         }));
+        syncWorkSession(false);
         setMapLocation(null);
         setLocationStatus("paused");
         setRealtimeStatus("offline");
@@ -839,6 +1155,7 @@ const PortalDomiciliario = () => {
             ? location.longitude
             : null,
         }));
+        syncWorkSession(true);
         setNotice("Estás activo. Recibirás pedidos de tus fuentes elegidas.");
       }
     } catch (error) {
@@ -878,6 +1195,7 @@ const PortalDomiciliario = () => {
         const anotherSourceOnline = isPublic
           ? isPrivateOnline
           : isPublicOnline;
+        syncWorkSession(anotherSourceOnline);
         if (!anotherSourceOnline) {
           setMapLocation(null);
           setLocationStatus("paused");
@@ -911,6 +1229,7 @@ const PortalDomiciliario = () => {
               }
             : { private_is_online: true }),
         }));
+        syncWorkSession(true);
       }
       setSourcePreferences((current) => ({
         private: current?.private ?? canUsePrivate,
@@ -959,6 +1278,11 @@ const PortalDomiciliario = () => {
     setNotice("");
     try {
       const location = await getLocation();
+      const { error: profileNameError } = await supabase.rpc(
+        "set_my_courier_profile_name",
+        { p_full_name: fullName.trim() },
+      );
+      if (profileNameError) throw profileNameError;
       const { error } = await supabase.rpc("apply_for_public_courier", {
         p_full_name: fullName.trim(),
         p_phone: phone.trim(),
@@ -973,6 +1297,36 @@ const PortalDomiciliario = () => {
       setErrorMessage(error.message || "No se pudo enviar la solicitud.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const saveCourierName = async (event) => {
+    event.preventDefault();
+    const name = fullName.trim();
+    if (name.length < 3 || name.length > 120) {
+      setErrorMessage("El nombre debe tener entre 3 y 120 caracteres.");
+      return;
+    }
+
+    setSavingName(true);
+    setErrorMessage("");
+    setNotice("");
+    try {
+      const { data, error } = await supabase.rpc(
+        "set_my_courier_profile_name",
+        { p_full_name: name },
+      );
+      if (error) throw error;
+      setFullName(data);
+      setSummary((current) =>
+        current ? { ...current, full_name: data } : current,
+      );
+      setNotice("Tu nombre se guardó correctamente.");
+    } catch (error) {
+      console.error("No se pudo guardar el nombre del domiciliario:", error);
+      setErrorMessage(error.message || "No se pudo guardar tu nombre.");
+    } finally {
+      setSavingName(false);
     }
   };
 
@@ -1014,24 +1368,6 @@ const PortalDomiciliario = () => {
     }
   };
 
-  const openEarnings = async () => {
-    setEarningsOpen(true);
-    setEarningsLoading(true);
-    setEarningsError("");
-    try {
-      const { data, error } = await supabase.rpc("get_courier_daily_earnings");
-      if (error) throw error;
-      setDailyEarnings(data?.[0] || null);
-    } catch (error) {
-      console.error("No se pudo cargar el resumen diario del domiciliario:", error);
-      setEarningsError(
-        error.message || "No se pudo cargar el resumen de hoy.",
-      );
-    } finally {
-      setEarningsLoading(false);
-    }
-  };
-
   const signOut = async () => {
     try {
       const disconnectRequests = [];
@@ -1062,6 +1398,7 @@ const PortalDomiciliario = () => {
       const disconnectResults = await Promise.all(disconnectRequests);
       const failedDisconnect = disconnectResults.find(({ error }) => error);
       if (failedDisconnect?.error) throw failedDisconnect.error;
+      syncWorkSession(false);
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
       navigate("/domiciliarios/login", { replace: true });
@@ -1095,6 +1432,15 @@ const PortalDomiciliario = () => {
     ).length;
     return { active, available: orders.length - active };
   }, [orders]);
+  const activityStats = useMemo(
+    () => ({
+      earned: workSession?.grossEarnings || 0,
+      deductions: sessionDeductions,
+      net: (workSession?.grossEarnings || 0) - sessionDeductions,
+      isCurrent: Boolean(isCourierOnline && workSession && !workSession.endedAt),
+    }),
+    [isCourierOnline, sessionDeductions, workSession],
+  );
 
   return (
     <main className="min-h-screen bg-[#09090f] text-white">
@@ -1115,6 +1461,11 @@ const PortalDomiciliario = () => {
           privateOnline={isPrivateOnline}
           publicOnline={isPublicOnline}
           privateBusinessName={summary?.private_business_name}
+          privateBusinessLogo={
+            privateBusinessLogo.businessId === summary?.private_business_id
+              ? privateBusinessLogo.logoUrl
+              : ""
+          }
           privateEnabled={privateSourceEnabled}
           publicEnabled={publicSourceEnabled}
           locationStatus={locationStatus}
@@ -1124,7 +1475,13 @@ const PortalDomiciliario = () => {
           canUsePublic={isPublicApproved}
           isPublicApproved={isPublicApproved}
           balance={balance}
-          onOpenBalance={openEarnings}
+          sessionEarnings={activityStats.earned}
+          activityValuesVisible={activityValuesVisible}
+          onToggleActivityValues={() =>
+            setActivityValuesVisible((visible) => !visible)
+          }
+          onOpenActivity={openActivity}
+          onOpenBalance={() => changeSection("wallet")}
           displayName={displayName}
           onSignOut={signOut}
         />
@@ -1194,9 +1551,7 @@ const PortalDomiciliario = () => {
             </p>
             <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
               {section === "orders"
-                ? mode === "public"
-                  ? "Pedidos cerca de ti"
-                  : "Mis domicilios"
+                ? "Inicio"
                 : section === "history"
                   ? "Historial de pedidos"
                   : section === "wallet"
@@ -1400,7 +1755,7 @@ const PortalDomiciliario = () => {
                   description={
                     orders.length > 0
                       ? "Tu pedido activo aparece marcado en el mapa. Puedes desconectarte de nuevas ofertas sin interrumpir esta entrega."
-                      : "Te avisaremos aquí cuando haya nuevos pedidos dentro del radio de servicio. Puedes actualizar la búsqueda cuando quieras."
+                      : "Buscamos pedidos automáticamente dentro de tu zona. Mantente conectado para recibir las nuevas ofertas en tiempo real."
                   }
                 />
               ) : (
@@ -1525,30 +1880,36 @@ const PortalDomiciliario = () => {
             />
           ) : (
             <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-neutral-900/50">
-              <div className="hidden grid-cols-[1.5fr_1fr_1fr_1fr] gap-4 border-b border-white/[0.07] px-5 py-3 text-[10px] font-black uppercase tracking-wider text-neutral-500 sm:grid">
-                <span>Pedido / tienda</span>
+              <div className="hidden grid-cols-[1.4fr_1fr_1.3fr_0.8fr_0.8fr] gap-4 border-b border-white/[0.07] px-5 py-3 text-[10px] font-black uppercase tracking-wider text-neutral-500 sm:grid">
+                <span>Referencia / tienda</span>
                 <span>Fecha</span>
-                <span>Destino</span>
+                <span>Zona de entrega</span>
+                <span>Valor domicilio</span>
                 <span>Estado</span>
               </div>
               {history.map((order) => (
                 <div
                   key={order.order_id}
-                  className="grid gap-2 border-b border-white/[0.06] px-5 py-4 last:border-0 sm:grid-cols-[1.5fr_1fr_1fr_1fr] sm:items-center sm:gap-4"
+                  className="grid gap-2 border-b border-white/[0.06] px-5 py-4 last:border-0 sm:grid-cols-[1.4fr_1fr_1.3fr_0.8fr_0.8fr] sm:items-center sm:gap-4"
                 >
                   <div>
                     <p className="text-sm font-bold">
                       {order.business_name || "Pedido"}
                     </p>
                     <p className="mt-1 text-xs text-neutral-500">
-                      {order.customer_name || "Cliente"}
+                      Pedido #{String(order.order_id || "").slice(0, 8).toUpperCase()}
                     </p>
                   </div>
                   <p className="text-xs text-neutral-400">
                     {formatDate(order.created_at)}
                   </p>
                   <p className="truncate text-xs text-neutral-400">
-                    {order.delivery_address || "Sin dirección"}
+                    {getGeneralDeliveryArea(order.delivery_address)}
+                  </p>
+                  <p className="text-xs font-semibold text-emerald-300">
+                    {order.delivery_fee != null
+                      ? formatMoney(order.delivery_fee)
+                      : "No disponible"}
                   </p>
                   <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-neutral-300">
                     {statusLabel[order.delivery_status] ||
@@ -1720,7 +2081,27 @@ const PortalDomiciliario = () => {
                   </p>
                 </div>
               </div>
-              <ProfileRow label="Nombre" value={displayName} />
+              <form onSubmit={saveCourierName} className="mt-5">
+                <label className="block text-xs font-semibold text-neutral-300">
+                  Nombre completo
+                  <input
+                    required
+                    minLength={3}
+                    maxLength={120}
+                    value={fullName}
+                    onChange={(event) => setFullName(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-white outline-none transition placeholder:text-neutral-600 focus:border-violet-400/50"
+                    placeholder="Escribe tu nombre completo"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={savingName}
+                  className="mt-3 rounded-xl bg-violet-500 px-4 py-2.5 text-xs font-black text-white transition hover:bg-violet-400 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {savingName ? "Guardando..." : "Guardar nombre"}
+                </button>
+              </form>
               <ProfileRow label="Correo de inicio de sesión" value={user?.email} />
               <ProfileRow
                 label="Teléfono"
@@ -1777,13 +2158,16 @@ const PortalDomiciliario = () => {
       </>
       )}
 
-      {earningsOpen && (
-        <CourierEarningsModal
-          balance={balance}
-          data={dailyEarnings}
-          loading={earningsLoading}
-          error={earningsError}
-          onClose={() => setEarningsOpen(false)}
+      {activityOpen && (
+        <CourierActivityModal
+          stats={activityStats}
+          loading={activityLoading}
+          error={activityError}
+          valuesVisible={activityValuesVisible}
+          onToggleValues={() =>
+            setActivityValuesVisible((visible) => !visible)
+          }
+          onClose={() => setActivityOpen(false)}
         />
       )}
     </main>
@@ -1808,92 +2192,101 @@ const StatCard = ({ icon: Icon, label, value, color }) => (
   </div>
 );
 
-const CourierEarningsModal = ({ balance, data, loading, error, onClose }) => (
-  <div
-    className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-    onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}
-  >
-    <section
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="courier-earnings-title"
-      className="w-full max-w-md rounded-3xl border border-white/10 bg-neutral-950 p-5 shadow-2xl sm:p-6"
+const CourierActivityModal = ({
+  stats,
+  loading,
+  error,
+  valuesVisible,
+  onToggleValues,
+  onClose,
+}) => {
+  const concealedValue = "••••••";
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-emerald-300">
-            Resumen de hoy
-          </p>
-          <h2
-            id="courier-earnings-title"
-            className="mt-1 text-xl font-black text-white"
-          >
-            Tus ganancias
-          </h2>
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="courier-activity-title"
+        className="w-full max-w-md rounded-3xl border border-white/10 bg-neutral-950 p-5 shadow-2xl sm:p-6"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-emerald-300">
+              {stats.isCurrent ? "Jornada en curso" : "Resumen de jornada"}
+            </p>
+            <h2
+              id="courier-activity-title"
+              className="mt-1 text-xl font-black text-white"
+            >
+              Dinero de la jornada
+            </h2>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onToggleValues}
+              aria-label={
+                valuesVisible ? "Ocultar valores" : "Mostrar valores"
+              }
+              aria-pressed={valuesVisible}
+              className="rounded-lg p-2 text-neutral-400 transition hover:bg-white/[0.08] hover:text-white"
+            >
+              {valuesVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Cerrar resumen de actividad"
+              className="rounded-lg p-2 text-neutral-400 transition hover:bg-white/[0.08] hover:text-white"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Cerrar resumen de ganancias"
-          className="rounded-lg p-2 text-neutral-400 transition hover:bg-white/[0.08] hover:text-white"
-        >
-          <X size={18} />
-        </button>
-      </div>
 
-      {loading ? (
-        <LoadingCard label="Calculando tu resumen de hoy..." />
-      ) : error ? (
-        <div className="mt-5">
-          <p role="alert" className="text-sm text-rose-200">
-            {error}
+        <div className="mt-5 rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.07] p-4">
+          <p className="text-xs font-semibold text-emerald-100/70">
+            Ganado en domicilios completados
+          </p>
+          <p className="mt-2 text-3xl font-black text-emerald-200">
+            {valuesVisible ? formatMoney(stats.earned) : concealedValue}
           </p>
         </div>
-      ) : (
-        <>
-          <div className="mt-5 rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.07] p-4">
-            <p className="text-xs font-semibold text-emerald-100/70">
-              Ganado en domicilios completados
-            </p>
-            <p className="mt-2 text-3xl font-black text-emerald-200">
-              {formatMoney(data?.gross_earnings)}
-            </p>
-            <p className="mt-1 text-xs text-neutral-400">
-              {Number(data?.completed_deliveries) || 0} domicilios entregados hoy
-            </p>
-          </div>
-
-          <div className="mt-3 rounded-2xl border border-rose-300/15 bg-rose-300/[0.05] p-4">
-            <p className="text-xs font-semibold text-neutral-300">
-              Descontado por pedidos públicos
-            </p>
-            <p className="mt-2 text-xl font-black text-rose-200">
-              {formatMoney(data?.public_fees_deducted)}
-            </p>
-            <p className="mt-1 text-xs text-neutral-500">
-              {Number(data?.public_orders_charged) || 0} tarifas cobradas hoy
-            </p>
-          </div>
-
-          <div className="mt-3 flex items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
-            <span className="text-xs font-semibold text-neutral-400">
-              Saldo disponible
-            </span>
-            <span className="text-sm font-black text-white">
-              {formatMoney(balance)}
-            </span>
-          </div>
-          <p className="mt-4 text-[11px] leading-5 text-neutral-500">
-            Los descuentos corresponden a las tarifas de los pedidos públicos.
-            Los pedidos de tu tienda no descuentan de este saldo.
+        <div className="mt-3 rounded-2xl border border-rose-300/15 bg-rose-300/[0.05] p-4">
+          <p className="text-xs font-semibold text-neutral-300">
+            Descontado de mi saldo
           </p>
-        </>
-      )}
-    </section>
-  </div>
-);
+          <p className="mt-2 text-xl font-black text-rose-200">
+            {valuesVisible
+              ? loading
+                ? "Actualizando..."
+                : formatMoney(stats.deductions)
+              : concealedValue}
+          </p>
+        </div>
+        <div className="mt-3 flex items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
+          <span className="text-xs font-semibold text-neutral-400">
+            Neto generado
+          </span>
+          <span className="text-sm font-black text-white">
+            {valuesVisible ? formatMoney(stats.net) : concealedValue}
+          </span>
+        </div>
+        {error && (
+          <p role="alert" className="mt-3 text-xs text-rose-200">
+            No se pudo actualizar el saldo descontado: {error}
+          </p>
+        )}
+      </section>
+    </div>
+  );
+};
 
 const LoadingCard = ({ label }) => (
   <div className="rounded-2xl border border-white/[0.07] bg-neutral-900/50 px-5 py-16 text-center text-sm text-neutral-400">
@@ -1926,6 +2319,7 @@ const ProfileRow = ({ label, value }) => (
 const OrderCard = ({
   order,
   mode,
+  location,
   busy,
   canClaim = true,
   isSelected = false,
@@ -1942,78 +2336,88 @@ const OrderCard = ({
   const isPublicOffer =
     (order.courier_mode || mode) === "public" &&
     order.delivery_status === "available";
+  const isPublicOrder = (order.courier_mode || mode) === "public";
+  const orderDistance = getOrderDistanceKm(order, location);
+  const orderAccent = isPublicOrder
+    ? {
+        border: isSelected ? "border-white/20" : "border-white/10",
+        background: isSelected ? "bg-white/[0.06]" : "bg-neutral-900/50",
+        label: "text-neutral-300",
+        badge: "bg-white/[0.06] text-neutral-300",
+        action: "bg-emerald-400 text-neutral-950 hover:bg-emerald-300",
+      }
+    : {
+        border: isSelected ? "border-violet-300/50" : "border-violet-300/25",
+        background: isSelected ? "bg-violet-300/[0.07]" : "bg-violet-300/[0.035]",
+        label: "text-violet-200",
+        badge: "bg-violet-400/15 text-violet-200",
+        action: "bg-violet-400 text-neutral-950 hover:bg-violet-300",
+      };
 
   if (compact) {
     return (
       <article
         id={`courier-order-${order.order_id}`}
-        className={`rounded-xl border p-3 transition ${
-          isSelected
-            ? "border-violet-300/50 bg-violet-300/[0.06]"
-            : "border-white/[0.08] bg-white/[0.03]"
-        }`}
+        className={`overflow-hidden rounded-xl border ${orderAccent.border} ${orderAccent.background} transition`}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <span
-              className={`mb-1 inline-flex rounded-md px-1.5 py-0.5 text-[9px] font-bold ${
-                (order.courier_mode || mode) === "public"
-                  ? "bg-emerald-400/10 text-emerald-200"
-                  : "bg-violet-400/10 text-violet-200"
-              }`}
-            >
-              {(order.courier_mode || mode) === "public" ? "Público" : "Tienda"}
-            </span>
-            <p className="truncate text-xs font-semibold text-neutral-300">
-              {order.business_name || "Tu tienda"}
+        <div className="flex items-start gap-3 p-3">
+          <CourierBusinessLogo
+            src={order.business_logo_url}
+            name={order.business_name}
+            className="h-10 w-10"
+          />
+          <div className="min-w-0 flex-1">
+            <p className={`truncate text-[11px] font-semibold ${orderAccent.label}`}>
+              <span
+                className={`mr-1.5 inline-flex rounded px-1.5 py-0.5 text-[9px] font-black uppercase ${orderAccent.badge}`}
+              >
+                {isPublicOrder ? "Público" : "Tienda"}
+              </span>
+              {order.business_name || (isPublicOrder ? "Red Gloto" : "Tienda")}
             </p>
-            <p className="mt-0.5 truncate text-sm font-bold text-white">
-              {order.customer_name || (isPublicOffer ? "Pedido cercano" : "Cliente")}
+            {isPublicOrder ? (
+              <div className="mt-1 space-y-1.5">
+                <div className="flex min-w-0 items-start gap-2">
+                  <CourierPointBadge point="B" />
+                  <p className="line-clamp-2 min-w-0 text-sm font-bold leading-5 text-white">
+                    {order.delivery_address || "Dirección no disponible"}
+                  </p>
+                </div>
+                <div className="flex min-w-0 items-start gap-2">
+                  <CourierPointBadge point="A" />
+                  <p className="line-clamp-1 min-w-0 text-[10px] text-neutral-400">
+                    {order.pickup_address || "Dirección no disponible"}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-1 text-sm font-bold leading-5 text-white">
+                {order.delivery_address || "Dirección de entrega no disponible"}
+              </p>
+            )}
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-500">
+              Domicilio
             </p>
-            <p className="mt-1 truncate text-[11px] text-neutral-400">
-              {order.delivery_address ||
-                (isPublicOffer
-                  ? order.distance_km != null &&
-                    Number.isFinite(Number(order.distance_km))
-                    ? `Tienda a ${Number(order.distance_km).toFixed(1)} km`
-                    : "Pedido de tienda cercana"
-                  : order.distance_km != null &&
-                      Number.isFinite(Number(order.distance_km))
-                    ? `A ${Number(order.distance_km).toFixed(1)} km`
-                    : statusLabel[order.delivery_status] || order.delivery_status)}
+            <p className="mt-1 text-sm font-black text-emerald-300">
+              {formatMoney(order.delivery_fee)}
             </p>
           </div>
-          <p className="shrink-0 text-sm font-bold text-emerald-300">
-            {formatMoney(order.delivery_fee)}
-          </p>
         </div>
-        <div className="mt-3 flex items-center justify-between gap-2">
-          {mapUrl ? (
-            <a
-              href={mapUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs font-semibold text-neutral-300 transition hover:text-white"
-            >
-              Ver ruta
-            </a>
-          ) : (
-            <span />
-          )}
-          {order.customer_phone && (
-            <a
-              href={`tel:${order.customer_phone}`}
-              className="mr-auto text-xs font-semibold text-neutral-300 transition hover:text-white"
-            >
-              Llamar
-            </a>
+        <div className="flex items-center justify-between gap-3 border-t border-white/[0.07] px-3 py-2.5">
+          {orderDistance != null && (
+            <p className="text-lg font-black leading-none text-white">
+              {orderDistance.toFixed(1)}{" "}
+              <span className="text-xs font-bold text-neutral-400">km</span>
+            </p>
           )}
           {order.delivery_status === "available" && (
             <button
               type="button"
               onClick={() => onClaim(order)}
               disabled={busy || !canClaim}
-              className="rounded-lg bg-violet-400 px-3 py-2 text-xs font-bold text-neutral-950 transition hover:bg-violet-300 disabled:opacity-50"
+              className={`rounded-lg px-3 py-2 text-xs font-bold transition disabled:opacity-50 ${orderAccent.action}`}
             >
               {busy ? "Tomando..." : canClaim ? "Aceptar" : "Ya tienes una entrega"}
             </button>
@@ -2023,7 +2427,7 @@ const OrderCard = ({
               type="button"
               onClick={() => onUpdateStatus(order, "picked_up")}
               disabled={busy}
-              className="rounded-lg bg-violet-400 px-3 py-2 text-xs font-bold text-neutral-950 transition hover:bg-violet-300 disabled:opacity-50"
+              className={`rounded-lg px-3 py-2 text-xs font-bold transition disabled:opacity-50 ${orderAccent.action}`}
             >
               {busy ? "Actualizando..." : "Recogí el pedido"}
             </button>
@@ -2073,21 +2477,40 @@ const OrderCard = ({
         {isPublicOffer && (
           <p className="flex items-start gap-2 rounded-xl border border-amber-300/15 bg-amber-300/[0.06] p-3 text-xs leading-5 text-amber-100 sm:col-span-2">
             <Info size={15} className="mt-0.5 shrink-0" />
-            La ubicación del mapa es aproximada. La dirección y los datos de
-            contacto se muestran cuando tomes el pedido.
+            El contacto estará disponible al aceptar.
           </p>
         )}
-        {order.delivery_address && (
+        {isPublicOrder && (
           <div className="flex items-start gap-3 sm:col-span-2">
-            <MapPin size={17} className="mt-0.5 shrink-0 text-violet-300" />
+            {isPublicOrder ? (
+              <CourierPointBadge point="A" />
+            ) : (
+              <MapPin size={17} className="mt-0.5 shrink-0 text-amber-300" />
+            )}
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-                Dirección de entrega
-              </p>
               <p className="mt-1 text-sm text-neutral-200">
-                {order.delivery_address}
+                {order.pickup_address || "Dirección no disponible"}
               </p>
-              {order.delivery_instructions && (
+            </div>
+          </div>
+        )}
+        {(isPublicOrder || order.delivery_address) && (
+          <div className="flex items-start gap-3 sm:col-span-2">
+            {isPublicOrder ? (
+              <CourierPointBadge point="B" />
+            ) : (
+              <MapPin size={17} className="mt-0.5 shrink-0 text-violet-300" />
+            )}
+            <div>
+              {!isPublicOrder && (
+                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+                  Dirección de entrega
+                </p>
+              )}
+              <p className="mt-1 text-sm text-neutral-200">
+                {order.delivery_address || "Dirección no disponible"}
+              </p>
+              {!isPublicOffer && order.delivery_instructions && (
                 <p className="mt-1 text-xs text-neutral-500">
                   Referencia: {order.delivery_instructions}
                 </p>
@@ -2095,7 +2518,7 @@ const OrderCard = ({
             </div>
           </div>
         )}
-        {order.customer_phone && (
+        {!isPublicOffer && order.customer_phone && (
           <a
             href={`tel:${order.customer_phone}`}
             className="flex items-center gap-2 text-sm text-violet-200 hover:text-violet-100"
@@ -2104,10 +2527,9 @@ const OrderCard = ({
             {order.customer_phone}
           </a>
         )}
-        {order.distance_km != null &&
-          Number.isFinite(Number(order.distance_km)) && (
+        {orderDistance != null && (
             <p className="text-xs text-neutral-400">
-              A {Number(order.distance_km).toFixed(1)} km en línea recta
+              {orderDistance.toFixed(1)} km
             </p>
           )}
       </div>
@@ -2191,14 +2613,29 @@ const CourierBusinessLogo = ({ src, name, className = "h-10 w-10" }) => {
   );
 };
 
+const CourierPointBadge = ({ point }) => (
+  <span
+    aria-label={point === "A" ? "Tienda" : "Usuario"}
+    className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[10px] font-black ${
+      point === "A"
+        ? "border-neutral-400/30 bg-white/[0.06] text-neutral-300"
+        : "border-emerald-300/40 bg-emerald-300/15 text-emerald-200"
+    }`}
+  >
+    {point}
+  </span>
+);
+
 const CourierAvailabilitySlider = ({
   online,
   busy,
+  hasActiveDelivery,
   onToggle,
   className = "",
 }) => {
   const trackRef = useRef(null);
   const dragRef = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [thumbPosition, setThumbPosition] = useState(null);
 
   const getThumbPosition = () => {
@@ -2209,39 +2646,52 @@ const CourierAvailabilitySlider = ({
   };
 
   const handlePointerDown = (event) => {
-    if (busy || event.button !== 0) return;
+    if (
+      busy ||
+      !event.isPrimary ||
+      (event.pointerType === "mouse" && event.button !== 0)
+    ) {
+      return;
+    }
     const startPosition = getThumbPosition();
-    dragRef.current = { pointerId: event.pointerId, startX: event.clientX };
+    const track = trackRef.current?.getBoundingClientRect();
+    const maxPosition = Math.max(5, (track?.width || 54) - 49);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startPosition,
+      maxPosition,
+    };
+    setIsDragging(true);
     setThumbPosition(startPosition);
     event.currentTarget.setPointerCapture(event.pointerId);
-    event.preventDefault();
   };
 
   const handlePointerMove = (event) => {
-    if (dragRef.current?.pointerId !== event.pointerId || !trackRef.current) {
-      return;
-    }
-    const track = trackRef.current.getBoundingClientRect();
-    const thumbSize = 44;
-    const maxPosition = Math.max(5, track.width - thumbSize - 5);
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     const position = Math.min(
-      maxPosition,
-      Math.max(5, event.clientX - track.left - thumbSize / 2),
+      drag.maxPosition,
+      Math.max(5, drag.startPosition + event.clientX - drag.startX),
     );
     setThumbPosition(position);
   };
 
-  const finishPointer = (event) => {
+  const finishPointer = (event, cancelled = false) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     dragRef.current = null;
+    setIsDragging(false);
     setThumbPosition(null);
+    if (cancelled) return;
     const delta = event.clientX - drag.startX;
     const threshold = Math.max(36, (trackRef.current?.clientWidth || 200) * 0.2);
     if ((!online && delta >= threshold) || (online && delta <= -threshold)) {
       onToggle();
     }
   };
+
+  const cancelPointer = (event) => finishPointer(event, true);
 
   const handleKeyDown = (event) => {
     const shouldToggle =
@@ -2254,7 +2704,7 @@ const CourierAvailabilitySlider = ({
     onToggle();
   };
 
-  const isSearching = online && !busy;
+  const isSearching = online && !busy && !hasActiveDelivery;
 
   return (
     <div
@@ -2263,7 +2713,11 @@ const CourierAvailabilitySlider = ({
       aria-checked={online}
       aria-disabled={busy}
       aria-label={
-        online
+        busy
+          ? "Actualizando disponibilidad."
+          : hasActiveDelivery
+            ? "Tienes un domicilio en curso."
+            : online
           ? "Buscando pedidos. Desliza a la izquierda para desconectarte."
           : "Desliza a la derecha para conectarte."
       }
@@ -2271,13 +2725,19 @@ const CourierAvailabilitySlider = ({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={finishPointer}
-      onPointerCancel={finishPointer}
+      onPointerCancel={cancelPointer}
       onKeyDown={handleKeyDown}
       className={`relative flex h-14 w-full touch-pan-y select-none items-center overflow-hidden rounded-full border px-3 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:opacity-50 ${
         online
           ? "border-emerald-300/30 bg-emerald-400/15"
           : "border-white/10 bg-white/[0.05]"
-      } ${busy ? "cursor-wait opacity-60" : "cursor-grab active:cursor-grabbing"} ${className}`}
+      } ${
+        busy
+          ? "cursor-wait opacity-60"
+          : isDragging
+            ? "cursor-grabbing"
+            : "cursor-grab"
+      } ${className}`}
     >
       {online ? (
         <ChevronLeft
@@ -2293,18 +2753,35 @@ const CourierAvailabilitySlider = ({
         />
       )}
       <span
-        className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-xs font-bold ${
-          isSearching ? "animate-pulse text-emerald-100" : "text-neutral-300"
+        className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-2 px-14 text-center text-sm font-extrabold sm:text-base ${
+          isSearching
+            ? "motion-safe:animate-pulse text-emerald-100"
+            : online
+              ? "text-emerald-100"
+              : "text-neutral-200"
         }`}
       >
         {isSearching && (
-          <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-300" />
+          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-300" />
         )}
-        {busy ? "Conectando..." : online ? "Buscando" : "Desliza para encender"}
+        {busy ? (
+          <>
+            <LoaderCircle size={16} className="shrink-0 animate-spin" />
+            Actualizando...
+          </>
+        ) : hasActiveDelivery ? (
+          "Domicilio en curso"
+        ) : online ? (
+          "Buscando pedidos"
+        ) : (
+          "Desliza para conectarte"
+        )}
       </span>
       <span
         aria-hidden="true"
-        className={`pointer-events-none absolute top-1/2 z-10 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full shadow-lg transition-[left,background-color] duration-150 ${
+        className={`pointer-events-none absolute top-1/2 z-10 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full shadow-lg ${
+          isDragging ? "" : "transition-[left,background-color] duration-200"
+        } ${
           online
             ? "bg-emerald-300 text-emerald-950"
             : "bg-neutral-100 text-neutral-900"
@@ -2316,7 +2793,6 @@ const CourierAvailabilitySlider = ({
                 ? "calc(100% - 49px)"
                 : "5px"
               : `${thumbPosition}px`,
-          transition: thumbPosition == null ? undefined : "none",
         }}
       >
         <Power size={17} />
@@ -2374,32 +2850,32 @@ const CourierActiveDelivery = ({
   const destinationCoordinates = hasDestinationCoordinates
     ? `${order.destination_latitude},${order.destination_longitude}`
     : "";
-  const mapUrl = (() => {
-    const params = new URLSearchParams({
-      api: "1",
-      origin: pickupCoordinates || pickupAddress,
-      destination: destinationCoordinates || deliveryAddress,
-    });
-    return `https://www.google.com/maps/dir/?${params.toString()}`;
-  })();
-  const pickupMapUrl = (() => {
-    const params = new URLSearchParams({ api: "1" });
-    if (
-      location?.latitude != null &&
-      location?.longitude != null &&
-      Number.isFinite(Number(location.latitude)) &&
-      Number.isFinite(Number(location.longitude))
-    ) {
-      params.set("origin", `${location.latitude},${location.longitude}`);
-    }
-    params.set(
-      "destination",
-      isPickedUp
-        ? destinationCoordinates || deliveryAddress
-        : pickupCoordinates || pickupAddress,
-    );
-    return `https://www.google.com/maps/dir/?${params.toString()}`;
-  })();
+  const stopLocation = isPickedUp
+    ? destinationCoordinates || deliveryAddress
+    : pickupCoordinates || pickupAddress;
+  const stopLocationUrl = stopLocation
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stopLocation)}`
+    : "";
+  const normalizedPickupWhatsappNumber = normalizeColombianWhatsappNumber(
+    order.pickup_phone,
+  );
+  const pickupWhatsappUrl = normalizedPickupWhatsappNumber
+    ? `https://wa.me/${normalizedPickupWhatsappNumber}?text=${encodeURIComponent(
+        isPickedUp
+          ? `Hola, soy el domiciliario de Gloto. Ya recogí el pedido${order.order_number ? ` #${order.order_number}` : ""} y voy en camino a entregarlo.`
+          : "Hola, soy el domiciliario de Gloto. Voy en camino para recoger el pedido.",
+      )}`
+    : "";
+  const normalizedCustomerWhatsappNumber = normalizeColombianWhatsappNumber(
+    order.customer_phone,
+  );
+  const customerWhatsappUrl = normalizedCustomerWhatsappNumber
+    ? `https://wa.me/${normalizedCustomerWhatsappNumber}?text=${encodeURIComponent(
+        isPickedUp
+          ? `Hola${order.customer_name ? ` ${order.customer_name}` : ""}, soy el domiciliario de Gloto. Ya recogí tu pedido${order.order_number ? ` #${order.order_number}` : ""} y voy en camino para entregártelo.`
+          : `Hola${order.customer_name ? ` ${order.customer_name}` : ""}, soy el domiciliario de Gloto y te escribo por tu pedido${order.order_number ? ` #${order.order_number}` : ""}.`,
+      )}`
+    : "";
   const paymentMethod = String(order.payment_method || "No especificado")
     .replaceAll("_", " ")
     .replace(/\b\w/g, (character) => character.toUpperCase());
@@ -2413,7 +2889,18 @@ const CourierActiveDelivery = ({
         fitRouteRequest={fitRouteRequest}
       />
 
-      <article className="courier-active-delivery-card pointer-events-auto fixed inset-x-3 bottom-3 z-20 mx-auto max-h-[52dvh] max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-neutral-950/95 shadow-2xl shadow-black/40 backdrop-blur-xl sm:inset-x-6 sm:bottom-5">
+      <div className="pointer-events-none fixed inset-x-3 bottom-3 z-20 mx-auto max-w-2xl sm:inset-x-6 sm:bottom-5">
+        <button
+          type="button"
+          onClick={() => setFitRouteRequest((request) => request + 1)}
+          disabled={!canCenterRoute}
+          aria-label="Ver ruta completa en el mapa"
+          title="Ver ruta completa en el mapa"
+          className="pointer-events-auto absolute -top-14 right-3 grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-neutral-950/95 text-neutral-200 shadow-lg shadow-black/20 backdrop-blur transition hover:bg-neutral-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Route size={26} aria-hidden="true" />
+        </button>
+        <article className="courier-active-delivery-card pointer-events-auto max-h-[52dvh] overflow-y-auto rounded-2xl border border-white/10 bg-neutral-950/95 shadow-2xl shadow-black/40 backdrop-blur-xl">
         <div className="flex items-center border-b border-white/[0.08]">
           <button
             type="button"
@@ -2443,14 +2930,6 @@ const CourierActiveDelivery = ({
                   : `${nextStopDistance < 0.1 ? "<0.1" : nextStopDistance.toFixed(1)} km aprox. hasta ${isPickedUp ? "el cliente" : "la tienda"}`}
               </p>
             </div>
-            <div className="text-right">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
-                Domicilio
-              </p>
-              <p className="text-base font-black text-emerald-300">
-                {formatMoney(order.delivery_fee)}
-              </p>
-            </div>
             {isCardCollapsed ? (
               <ChevronUp
                 size={19}
@@ -2465,16 +2944,26 @@ const CourierActiveDelivery = ({
               />
             )}
           </button>
-          <button
-            type="button"
-            onClick={() => setFitRouteRequest((request) => request + 1)}
-            disabled={!canCenterRoute}
-            aria-label="Centrar la ruta en el mapa"
-            title="Centrar la ruta en el mapa"
-            className="mr-3 grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-emerald-200 transition hover:border-emerald-300/30 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Route size={19} aria-hidden="true" />
-          </button>
+          {pickupWhatsappUrl && (
+            <a
+              href={pickupWhatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Escribir a la tienda por WhatsApp"
+              title="Escribir a la tienda por WhatsApp"
+              className="mr-2 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-emerald-300 transition hover:bg-emerald-300/10 hover:text-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+            >
+              <MessageCircle size={19} aria-hidden="true" />
+            </a>
+          )}
+          <div className="mr-3 shrink-0 text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+              Domicilio
+            </p>
+            <p className="text-base font-black text-emerald-300">
+              {formatMoney(order.delivery_fee)}
+            </p>
+          </div>
         </div>
 
         {!isCardCollapsed && (
@@ -2509,12 +2998,15 @@ const CourierActiveDelivery = ({
             <p className="text-xs text-neutral-400">
               Pago: <span className="font-semibold text-neutral-200">{paymentMethod}</span>
             </p>
-            {order.customer_phone && (
+            {isPickedUp && customerWhatsappUrl && (
               <a
-                href={`tel:${order.customer_phone}`}
-                className="text-xs font-semibold text-violet-200 hover:text-violet-100"
+                href={customerWhatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300 hover:text-emerald-200"
               >
-                Llamar al cliente
+                <MessageCircle size={15} aria-hidden="true" />
+                Escribir al cliente por WhatsApp
               </a>
             )}
           </div>
@@ -2534,22 +3026,22 @@ const CourierActiveDelivery = ({
           <div className="flex gap-2">
             {!isPickedUp && (
               <a
-                href={pickupMapUrl}
+                href={stopLocationUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-emerald-300 px-3 text-xs font-bold text-neutral-950 transition hover:bg-emerald-200"
+                className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border border-white/10 px-3 text-xs font-semibold text-neutral-300 transition hover:bg-white/[0.06] hover:text-white"
               >
-                Ir a la tienda
+                Tienda
               </a>
             )}
-            {mapUrl && (
+            {isPickedUp && stopLocationUrl && (
               <a
-                href={mapUrl}
+                href={stopLocationUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border border-white/10 px-3 text-xs font-bold text-neutral-200 transition hover:bg-white/[0.06]"
               >
-                {isPickedUp ? "Ir al cliente" : "Ver ruta completa"}
+                Ir al cliente
               </a>
             )}
             <button
@@ -2558,11 +3050,7 @@ const CourierActiveDelivery = ({
                 onUpdateStatus(order, isPickedUp ? "delivered" : "picked_up")
               }
               disabled={busy}
-              className={`min-h-11 flex-1 rounded-xl px-4 text-sm font-black transition disabled:cursor-wait disabled:opacity-50 ${
-                isPickedUp
-                  ? "bg-emerald-400 text-neutral-950 hover:bg-emerald-300"
-                  : "bg-violet-400 text-neutral-950 hover:bg-violet-300"
-              }`}
+              className="min-h-11 flex-1 rounded-xl bg-emerald-400 px-4 text-sm font-black text-neutral-950 transition hover:bg-emerald-300 disabled:cursor-wait disabled:opacity-50"
             >
               {busy
                 ? "Actualizando..."
@@ -2573,7 +3061,8 @@ const CourierActiveDelivery = ({
           </div>
         </div>
         )}
-      </article>
+        </article>
+      </div>
     </section>
   );
 };
@@ -2591,7 +3080,7 @@ const CourierOfferPreview = ({
   useEffect(() => {
     const timeoutId = window.setTimeout(
       () => onExpire(orderKey),
-      15000,
+      COURIER_OFFER_PREVIEW_MS,
     );
     return () => window.clearTimeout(timeoutId);
   }, [onExpire, orderKey]);
@@ -2600,23 +3089,23 @@ const CourierOfferPreview = ({
   const distance = getOrderDistanceKm(order, location);
   const accent = isPublic
     ? {
-        border: "border-amber-300/30",
-        label: "text-amber-200",
-        badge: "bg-amber-300/15 text-amber-100",
-        action: "bg-amber-300 text-neutral-950 hover:bg-amber-200",
+        border: "border-white/10",
+        label: "text-neutral-300",
+        badge: "bg-white/[0.06] text-neutral-300",
+        action: "bg-emerald-400 text-neutral-950 hover:bg-emerald-300",
       }
     : {
         border: "border-violet-300/30",
         label: "text-violet-200",
         badge: "bg-violet-400/15 text-violet-200",
-        action: "bg-violet-400 text-neutral-950 hover:bg-violet-300",
+        action: "bg-emerald-400 text-neutral-950 hover:bg-emerald-300",
       };
 
   return (
     <article
       className={`overflow-hidden rounded-2xl border ${accent.border} bg-neutral-950/95 shadow-xl shadow-black/25 backdrop-blur-xl`}
     >
-      <div className="flex items-center gap-4 px-4 py-3">
+      <div className="flex items-center gap-3 px-4 py-3 sm:gap-4">
         <CourierBusinessLogo
           src={order.business_logo_url}
           name={order.business_name}
@@ -2631,20 +3120,40 @@ const CourierOfferPreview = ({
             </span>
             {order.business_name || "Entrega cercana"}
           </p>
-          <p className="truncate text-sm font-bold text-white">
-            {isPublic
-              ? "Zona aproximada · dirección al aceptar"
-              : order.delivery_address || "Dirección no disponible"}
-          </p>
+          {isPublic ? (
+            <div className="mt-1 space-y-1.5">
+              <div className="flex min-w-0 items-start gap-2">
+                <CourierPointBadge point="B" />
+                <p className="line-clamp-2 min-w-0 text-sm font-bold leading-5 text-white">
+                  {order.delivery_address || "Dirección no disponible"}
+                </p>
+              </div>
+              <div className="flex min-w-0 items-start gap-2">
+                <CourierPointBadge point="A" />
+                <p className="line-clamp-1 min-w-0 text-[11px] text-neutral-400">
+                  {order.pickup_address || "Dirección no disponible"}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-1 line-clamp-2 text-sm font-bold leading-5 text-white">
+              {order.delivery_address || "Dirección de entrega no disponible"}
+            </p>
+          )}
           <p className="mt-1 text-xs font-semibold text-neutral-200">
             {distance == null
               ? "Distancia no disponible"
-              : `${distance.toFixed(1)} km aprox. de la tienda`}
+              : `${distance.toFixed(1)} km`}
           </p>
         </div>
-        <p className="shrink-0 text-sm font-black text-emerald-300">
-          {formatMoney(order.delivery_fee)}
-        </p>
+        <div className="shrink-0 text-right">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-500">
+            Domicilio
+          </p>
+          <p className="mt-1 text-sm font-black text-emerald-300">
+            {formatMoney(order.delivery_fee)}
+          </p>
+        </div>
         <button
           type="button"
           onClick={() => onClaim(order)}
@@ -2693,7 +3202,7 @@ const CourierMapExperience = ({
   const [previewCapacity, setPreviewCapacity] = useState(() =>
     typeof window === "undefined"
       ? 2
-      : Math.max(1, Math.floor((window.innerHeight * 0.38) / 84)),
+      : Math.max(1, Math.floor((window.innerHeight * 0.38) / 112)),
   );
   const previewOrders = useMemo(() => {
     if (activeDelivery || activeOrderId !== null) return [];
@@ -2744,7 +3253,7 @@ const CourierMapExperience = ({
   useEffect(() => {
     const updatePreviewCapacity = () => {
       setPreviewCapacity(
-        Math.max(1, Math.floor((window.innerHeight * 0.38) / 84)),
+        Math.max(1, Math.floor((window.innerHeight * 0.38) / 112)),
       );
     };
     window.addEventListener("resize", updatePreviewCapacity);
@@ -2774,7 +3283,7 @@ const CourierMapExperience = ({
         >
           <div
             aria-label={`${previewOrders.length} ofertas pendientes`}
-            className="pointer-events-auto mx-auto flex max-h-[46dvh] max-w-3xl flex-col gap-3 overflow-hidden"
+            className="pointer-events-auto mx-auto flex             max-h-[50dvh] max-w-3xl flex-col gap-3 overflow-y-auto"
           >
             {visiblePreviewOrders.map((order) => (
               <CourierOfferPreview
@@ -2826,11 +3335,12 @@ const CourierMapExperience = ({
             </button>
           </div>
         )}
-        <div className="pointer-events-auto mx-auto max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/95 shadow-xl shadow-black/30 backdrop-blur-xl">
+        <div className="pointer-events-auto mx-auto max-w-xl overflow-hidden rounded-full border border-white/10 bg-neutral-950/95 shadow-xl shadow-black/30 backdrop-blur-xl">
           <div className="flex items-center gap-2 p-3">
             <CourierAvailabilitySlider
               online={online}
               busy={availabilityBusy}
+              hasActiveDelivery={Boolean(activeDelivery)}
               onToggle={onToggleAvailability}
               className="min-w-0 flex-1"
             />
@@ -2852,31 +3362,32 @@ const CourierMapExperience = ({
                     : "Conectando pedidos en tiempo real.")}
             </span>
           </div>
+        </div>
 
-          {activeDelivery ? (
-            <>
-              <p className="border-t border-white/[0.08] px-4 py-2.5 text-xs font-semibold text-emerald-200">
-                Solo puedes llevar un pedido a la vez
-              </p>
-              <div className="border-t border-white/[0.08] p-2.5">
-                <CourierActiveDelivery
-                  order={activeDelivery}
-                  busy={activeOrderId === activeDelivery.order_id}
-                  onUpdateStatus={onUpdateStatus}
-                />
-              </div>
-            </>
-          ) : activeOrderId !== null ? (
-            <p className="border-t border-white/[0.08] px-4 py-3 text-center text-xs text-neutral-300">
-              Confirmando tu pedido...
+        {activeDelivery ? (
+          <div className="pointer-events-auto mx-auto mt-2 max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/95 shadow-xl shadow-black/30 backdrop-blur-xl">
+            <p className="border-b border-white/[0.08] px-4 py-2.5 text-xs font-semibold text-emerald-200">
+              Solo puedes llevar un pedido a la vez
             </p>
-          ) : (visibleOrders.length > 0 || previewOrderIds.length > 0) && (
-            <>
+            <div className="p-2.5">
+              <CourierActiveDelivery
+                order={activeDelivery}
+                busy={activeOrderId === activeDelivery.order_id}
+                onUpdateStatus={onUpdateStatus}
+              />
+            </div>
+          </div>
+        ) : activeOrderId !== null ? (
+          <p className="pointer-events-auto mx-auto mt-2 max-w-xl rounded-2xl border border-white/10 bg-neutral-950/95 px-4 py-3 text-center text-xs text-neutral-300 shadow-xl shadow-black/30 backdrop-blur-xl">
+              Confirmando tu pedido...
+          </p>
+        ) : (visibleOrders.length > 0 || previewOrderIds.length > 0) && (
+          <div className="pointer-events-auto mx-auto mt-2 max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/95 shadow-xl shadow-black/30 backdrop-blur-xl">
               <button
                 type="button"
                 onClick={() => setOrdersExpanded((expanded) => !expanded)}
                 aria-expanded={ordersExpanded}
-                className="flex w-full items-center justify-between border-t border-white/[0.08] px-4 py-2.5 text-left text-xs font-semibold text-neutral-300 transition hover:bg-white/[0.04]"
+                className="flex w-full items-center justify-between px-4 py-3 text-left text-xs font-semibold text-neutral-300 transition hover:bg-white/[0.04]"
               >
                 <span>
                   {ordersExpanded
@@ -2897,6 +3408,7 @@ const CourierMapExperience = ({
                         key={getCourierOrderKey(order)}
                         order={order}
                         mode={order.courier_mode || mode}
+                        location={location}
                         busy={activeOrderId === order.order_id}
                         canClaim={activeDelivery === null && activeOrderId === null}
                         isSelected={selectedOrderId === order.order_id}
@@ -2912,9 +3424,8 @@ const CourierMapExperience = ({
                   )}
                 </div>
               )}
-            </>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </>
   );

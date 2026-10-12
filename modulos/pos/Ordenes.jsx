@@ -1521,7 +1521,11 @@ const Ordenes = () => {
       setDeleteReasonDetails("");
     } catch (error) {
       console.error("Error eliminando orden:", error);
-      setDeleteOrderError("No se pudo eliminar la orden. Inténtalo de nuevo.");
+      setDeleteOrderError(
+        error?.message
+          ? `No se pudo eliminar la orden: ${error.message}`
+          : "No se pudo eliminar la orden. Inténtalo de nuevo.",
+      );
     } finally {
       setIsDeletingOrder(false);
     }

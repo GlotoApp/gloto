@@ -388,6 +388,7 @@ Deno.serve(async (request: Request) => {
         id: userId,
         username: email,
         email,
+        full_name: employee.name,
         role: "domiciliario",
         business_id: null,
         onboarding_completed: true,

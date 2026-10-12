@@ -198,7 +198,10 @@ const PortalDomiciliarioMap = ({
     });
 
     if (!courierMarkerRef.current) {
-      courierMarkerRef.current = L.marker(point, { icon: courierIcon })
+      courierMarkerRef.current = L.marker(point, {
+        icon: courierIcon,
+        zIndexOffset: 1200,
+      })
         .addTo(map)
         .bindTooltip("Tu ubicación");
     } else {

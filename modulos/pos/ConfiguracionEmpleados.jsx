@@ -104,7 +104,7 @@ const ConfiguracionEmpleados = () => {
   const [employeePermissions, setEmployeePermissions] =
     useState(EMPTY_PERMISSIONS);
   const [employeeStoreOrderPriorityEnabled, setEmployeeStoreOrderPriorityEnabled] =
-    useState(false);
+    useState(true);
   const [newAreaName, setNewAreaName] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -312,8 +312,9 @@ const ConfiguracionEmpleados = () => {
         area,
         area_id: selectedArea.id,
         permissions: employeePermissions,
-        store_order_priority_enabled:
-          isCourierArea(area) && employeeStoreOrderPriorityEnabled,
+        store_order_priority_enabled: isCourierArea(area)
+          ? employeeStoreOrderPriorityEnabled
+          : false,
       })
       .select("id,name,area,area_id,permissions,created_at,auth_user_id,store_orders_enabled,store_order_priority_enabled")
       .single();
@@ -328,7 +329,7 @@ const ConfiguracionEmpleados = () => {
       );
       setForm(EMPTY_FORM);
       setEmployeePermissions(EMPTY_PERMISSIONS);
-      setEmployeeStoreOrderPriorityEnabled(false);
+      setEmployeeStoreOrderPriorityEnabled(true);
       setMessage("Empleado registrado.");
     }
     setSaving(false);

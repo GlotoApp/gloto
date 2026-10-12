@@ -92,7 +92,20 @@ const normalizeMetodoEntrega = (orderType, metadataMetodoEntrega) => {
   return ORDER_TYPE_TO_METODO_ENTREGA[orderType] || orderType;
 };
 
-const mapOrderStatusToTrackingStatus = (status, metodoEntrega) => {
+const mapOrderStatusToTrackingStatus = (
+  status,
+  metodoEntrega,
+  deliveryStatus,
+) => {
+  const normalizedDeliveryStatus = String(deliveryStatus || "")
+    .trim()
+    .toLowerCase();
+  if (metodoEntrega === "domicilio" && normalizedDeliveryStatus === "delivered") {
+    return "entregado";
+  }
+  if (metodoEntrega === "domicilio" && normalizedDeliveryStatus === "picked_up") {
+    return "camino";
+  }
   if (!status || status === "pending" || status === "confirmed")
     return "recibido";
   if (status === "dispatched" && metodoEntrega === "recoger") {
@@ -191,6 +204,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
           const trackingStatus = mapOrderStatusToTrackingStatus(
             data.status,
             metodoEntrega,
+            data.delivery_status,
           );
 
           let nombreTienda = data.metadata?.tiendaSlug || data.order_number;
@@ -388,6 +402,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
         const trackingStatus = mapOrderStatusToTrackingStatus(
           data.status,
           metodoEntrega,
+          data.delivery_status,
         );
         const paymentMethods = Array.isArray(data.metadata?.payment_methods)
           ? data.metadata.payment_methods.map((item, index) => ({

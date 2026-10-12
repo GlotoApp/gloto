@@ -1,7 +1,8 @@
+import { useState } from "react";
 import {
-  Bike,
   CircleDollarSign,
-  ClipboardList,
+  Eye,
+  EyeOff,
   Globe2,
   History,
   LayoutDashboard,
@@ -12,9 +13,10 @@ import {
   Wallet,
   X,
 } from "lucide-react";
+import logoPng from "/logo.png";
 
 const sections = [
-  { id: "orders", label: "Pedidos", icon: ClipboardList },
+  { id: "orders", label: "Inicio", icon: LayoutDashboard },
   { id: "history", label: "Historial", icon: History },
   { id: "wallet", label: "Mi saldo", icon: Wallet, publicOnly: true },
   { id: "profile", label: "Mi perfil", icon: UserRound },
@@ -34,10 +36,15 @@ const PortalDomiciliarioSidebar = ({
   privateOnline,
   publicOnline,
   privateBusinessName,
+  privateBusinessLogo,
   privateEnabled,
   publicEnabled,
   availabilityBusy,
   onToggleAvailability,
+  sessionEarnings,
+  activityValuesVisible,
+  onToggleActivityValues,
+  onOpenActivity,
   balance,
   onOpenBalance,
   displayName,
@@ -73,9 +80,11 @@ const PortalDomiciliarioSidebar = ({
           </button>
           {!compact && (
             <>
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300">
-                <Bike size={22} />
-              </span>
+              <img
+                src={logoPng}
+                alt="Gloto"
+                className="h-10 w-10 shrink-0 rounded-xl object-contain"
+              />
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-300">
                   Portal de domiciliarios
@@ -87,33 +96,54 @@ const PortalDomiciliarioSidebar = ({
             </>
           )}
         </div>
-        <button
-          type="button"
-          onClick={onOpenBalance}
-          aria-label={`Ver resumen y saldo disponible: ${new Intl.NumberFormat("es-CO", {
-            style: "currency",
-            currency: "COP",
-            maximumFractionDigits: 0,
-          }).format(Number(balance) || 0)}`}
-          className={`pointer-events-auto flex shrink-0 items-center gap-2 rounded-xl border border-emerald-400/20 bg-neutral-950/85 px-3 py-2 text-emerald-200 shadow-lg backdrop-blur-xl transition hover:border-emerald-300/40 hover:bg-neutral-900 ${
+        <div
+          className={`pointer-events-auto flex items-center gap-1 rounded-xl border border-emerald-400/20 bg-neutral-950/85 p-1 text-emerald-200 shadow-lg backdrop-blur-xl ${
             compact
               ? "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
               : ""
           }`}
         >
+          <button
+            type="button"
+            onClick={onOpenActivity}
+            aria-label="Abrir resumen de jornada"
+            className="flex shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 transition hover:bg-neutral-900"
+          >
             <CircleDollarSign size={17} />
-            <div>
-              <p className="hidden text-[9px] font-bold uppercase tracking-wider text-emerald-200/70 sm:block">
-                Saldo · Hoy
-              </p>
-              <p className="text-xs font-black sm:text-sm">
-                {new Intl.NumberFormat("es-CO", {
-                  style: "currency",
-                  currency: "COP",
-                  maximumFractionDigits: 0,
-                }).format(Number(balance) || 0)}
-              </p>
-            </div>
+            <span className="text-xs font-black sm:text-sm">Jornada</span>
+            <span className="text-xs font-black sm:text-sm">
+              {activityValuesVisible ? formatMoney(sessionEarnings) : "••••••"}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={onToggleActivityValues}
+            aria-label={
+              activityValuesVisible
+                ? "Ocultar ganancias de la jornada"
+                : "Mostrar ganancias de la jornada"
+            }
+            aria-pressed={activityValuesVisible}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg transition hover:bg-neutral-900"
+          >
+            {activityValuesVisible ? <Eye size={17} /> : <EyeOff size={17} />}
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={onOpenBalance}
+          aria-label={`Mi saldo disponible: ${formatMoney(balance)}`}
+          className={`pointer-events-auto flex shrink-0 items-center gap-2 rounded-xl border border-violet-400/20 bg-neutral-950/85 px-3 py-2 text-violet-200 shadow-lg backdrop-blur-xl transition hover:border-violet-300/40 hover:bg-neutral-900 ${
+            compact ? "absolute right-3 top-1/2 -translate-y-1/2" : ""
+          }`}
+        >
+          <Wallet size={17} />
+          <div>
+            <p className="hidden text-[9px] font-bold uppercase tracking-wider text-violet-200/70 sm:block">
+              Mi saldo
+            </p>
+            <p className="text-xs font-black sm:text-sm">{formatMoney(balance)}</p>
+          </div>
         </button>
       </div>
     </header>
@@ -129,11 +159,15 @@ const PortalDomiciliarioSidebar = ({
         <aside className="fixed inset-y-0 left-0 z-50 flex w-[min(20rem,88vw)] flex-col border-r border-white/10 bg-neutral-950 shadow-2xl shadow-black/50">
           <div className="flex items-center justify-between border-b border-white/[0.07] p-5">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300">
-                <Bike size={21} />
-              </span>
-              <div>
-                <p className="text-sm font-black text-white">Gloto</p>
+              <img
+                src={logoPng}
+                alt="Gloto"
+                className="h-10 w-10 shrink-0 rounded-xl object-contain"
+              />
+              <div className="min-w-0">
+                <p className="max-w-48 truncate text-sm font-black text-white">
+                  {displayName}
+                </p>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
                   Portal domiciliario
                 </p>
@@ -157,6 +191,7 @@ const PortalDomiciliarioSidebar = ({
               <div className="space-y-1">
                 {canUsePrivate && (
                   <AvailabilitySwitch
+                    key={privateBusinessLogo}
                     label={privateBusinessName || "Pedidos de mi tienda"}
                     description={
                       privateOnline
@@ -170,6 +205,7 @@ const PortalDomiciliarioSidebar = ({
                     onChange={() => onToggleAvailability("private")}
                     accent="violet"
                     icon={Store}
+                    logoUrl={privateBusinessLogo}
                   />
                 )}
                 {canUsePublic && (
@@ -245,20 +281,6 @@ const PortalDomiciliarioSidebar = ({
                   {label}
                 </button>
               ))}
-            <div className="px-3 pt-4">
-              <div className="h-px bg-white/[0.07]" />
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                onSectionChange("orders");
-                onClose();
-              }}
-              className="flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold text-neutral-400 transition hover:bg-white/[0.05] hover:text-white"
-            >
-              <LayoutDashboard size={18} />
-              Inicio
-            </button>
           </nav>
 
           <div className="border-t border-white/[0.07] p-3">
@@ -277,6 +299,13 @@ const PortalDomiciliarioSidebar = ({
   </>
 );
 
+const formatMoney = (amount) =>
+  new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(Number(amount) || 0);
+
 const AvailabilitySwitch = ({
   label,
   description,
@@ -285,7 +314,10 @@ const AvailabilitySwitch = ({
   onChange,
   accent,
   icon: Icon,
+  logoUrl,
 }) => {
+  const [logoFailed, setLogoFailed] = useState(false);
+
   const colors =
     accent === "emerald"
       ? {
@@ -321,7 +353,16 @@ const AvailabilitySwitch = ({
             : "bg-white/[0.05] text-neutral-400 group-hover:text-neutral-200"
         }`}
       >
-        <Icon size={18} strokeWidth={1.8} />
+        {logoUrl && !logoFailed ? (
+          <img
+            src={logoUrl}
+            alt=""
+            className="h-full w-full rounded-xl object-cover"
+            onError={() => setLogoFailed(true)}
+          />
+        ) : (
+          <Icon size={18} strokeWidth={1.8} />
+        )}
       </span>
       <span className="min-w-0 flex-1">
         <span
