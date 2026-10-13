@@ -77,6 +77,7 @@ const ConfiguracionInicial = lazy(
 const PortalDomiciliario = lazy(
   () => import("../modulos/empleados/PortalDomiciliario"),
 );
+const Mostrador = lazy(() => import("../modulos/mostrador/Mostrador"));
 
 // Componentes protectores
 const RequireAdmin = ({ children }) => {
@@ -591,6 +592,7 @@ function App() {
               </RequireAuth>
             }
           />
+          <Route path="/mostrador/:slug" element={<Mostrador />} />
           <Route path="/marketplace/*" element={<Marketplace />} />
           <Route path="/" element={<Navigate to="/marketplace" replace />} />
           <Route path="*" element={<Upss />} />
