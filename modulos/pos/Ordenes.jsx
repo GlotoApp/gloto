@@ -66,6 +66,20 @@ const METODO_ENTREGA_ESTILOS = {
   punto: "bg-blue-500/10 text-blue-400",
 };
 
+const DELIVERY_STATUS_LABELS = {
+  available: "Disponible",
+  assigned: "Asignado",
+  picked_up: "En camino",
+  delivered: "Entregado",
+};
+
+const DELIVERY_STATUS_STYLES = {
+  available: "bg-neutral-500/20 text-neutral-300",
+  assigned: "bg-violet-500/20 text-violet-300",
+  picked_up: "bg-sky-500/20 text-sky-300",
+  delivered: "bg-emerald-500/20 text-emerald-300",
+};
+
 const PERIODOS_FECHA = [
   { id: "hoy", label: "Hoy" },
   { id: "ayer", label: "Ayer" },
@@ -197,6 +211,13 @@ const ActionButton = ({ icon: Icon, label, color, onClick }) => (
 );
 
 // --- COMPONENTE DE TARJETA ---
+const getLocalDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const formatMoney = (value) =>
   new Intl.NumberFormat("es-CO", {
     style: "currency",
@@ -282,6 +303,24 @@ const OrderCard = memo(
     const [isOpen, setIsOpen] = useState(false);
     const config = ORIGEN_CONFIG[orden.origen || "pos"];
     const Icon = config.icon;
+    const showDeliveryStatus =
+      orden.metodoEntrega === "domicilio" &&
+      orden.status === "despachado" &&
+      Boolean(orden.deliveryStatus);
+    const statusLabel = showDeliveryStatus
+      ? DELIVERY_STATUS_LABELS[orden.deliveryStatus] || orden.deliveryStatus
+      : orden.status;
+    const formattedStatusLabel = statusLabel
+      ? `${statusLabel.charAt(0).toLocaleUpperCase("es-CO")}${statusLabel.slice(1)}`
+      : statusLabel;
+    const statusClass = showDeliveryStatus
+      ? DELIVERY_STATUS_STYLES[orden.deliveryStatus] ||
+        "bg-neutral-500/20 text-neutral-300"
+      : orden.status === "listo"
+        ? "bg-emerald-500/20 text-emerald-400"
+        : orden.status === "preparando"
+          ? "bg-amber-500/20 text-amber-400"
+          : "bg-neutral-500/20 text-neutral-400";
 
     return (
       <motion.div
@@ -308,7 +347,7 @@ const OrderCard = memo(
                 </p>
               </div>
               <p className="text-lg font-bold text-emerald-400 whitespace-nowrap">
-                {formatMoney(orden.total)}
+                {formatMoney(orden.totalWithoutTip)}
               </p>
             </div>
             <div className="flex justify-between items-center text-xs text-neutral-400 ">
@@ -317,14 +356,17 @@ const OrderCard = memo(
               >
                 {displayOrderType(orden.metodoEntrega)}
               </span>
-              <div className="flex items-center gap-2">
-                <motion.div
-                  animate={{ rotate: isOpen ? 180 : 0 }}
-                  className="rounded-full bg-white/5 p-1.5"
-                >
-                  <ChevronDown size={14} />
-                </motion.div>
-              </div>
+              <span
+                className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass}`}
+              >
+                {formattedStatusLabel}
+              </span>
+              <motion.div
+                animate={{ rotate: isOpen ? 180 : 0 }}
+                className="rounded-full bg-white/5 p-1.5"
+              >
+                <ChevronDown size={14} />
+              </motion.div>
             </div>
           </div>
 
@@ -353,24 +395,16 @@ const OrderCard = memo(
               </p>
             </div>
             <div className="col-span-2 text-right">
-              <p className="text-xs text-neutral-500">
-                {orden.tipAmount > 0 ? "Total con propina" : "Total"}
-              </p>
+              <p className="text-xs text-neutral-500">Total</p>
               <p className="text-lg font-bold text-emerald-400">
-                {formatMoney(orden.totalWithTip)}
+                {formatMoney(orden.totalWithoutTip)}
               </p>
             </div>
             <div className="col-span-2 flex justify-end items-center gap-2">
               <span
-                className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                  orden.status === "listo"
-                    ? "bg-emerald-500/20 text-emerald-400"
-                    : orden.status === "preparando"
-                      ? "bg-amber-500/20 text-amber-400"
-                      : "bg-neutral-500/20 text-neutral-400"
-                }`}
+                className={`px-2 py-1 rounded-full text-xs font-semibold ${statusClass}`}
               >
-                {orden.status}
+                {formattedStatusLabel}
               </span>
               <motion.div
                 animate={{ rotate: isOpen ? 180 : 0 }}
@@ -1164,6 +1198,7 @@ const mapDatabaseOrderToUi = (order) => {
     metodoPago: normalizePaymentMethod(order.payment_method),
     horaIngreso: formatDateTime(order.created_at),
     fecha: createdAt.toISOString().slice(0, 10),
+    fechaLocal: getLocalDateKey(createdAt),
     observaciones: order.notes || "",
     items: items.map((item) => ({
       id: item.id,
@@ -1452,7 +1487,7 @@ const Ordenes = () => {
     const groups = {};
     filteredOrdenes.forEach((orden) => {
       if (!orden.fecha) return;
-      const [year, month] = orden.fecha.split("-");
+      const [year, month] = (orden.fechaLocal || orden.fecha).split("-");
       const yearKey = year;
       const monthKey = `${year}-${month}`;
       if (!groups[yearKey]) groups[yearKey] = {};
@@ -1474,6 +1509,12 @@ const Ordenes = () => {
     const monthIndex = parseInt(month, 10) - 1;
     return `${NOMBRES_MESES[monthIndex]} ${year}`.toUpperCase();
   };
+
+  const today = new Date();
+  const todayKey = getLocalDateKey(today);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayKey = getLocalDateKey(yesterday);
 
   const handleDelete = async (orden) => {
     if (!canDelete) {
@@ -1957,6 +1998,13 @@ const Ordenes = () => {
                       const isDefaultOpen = yearIndex === 0 && monthIndex === 0;
                       const isOpen = openMonths[monthKey] ?? isDefaultOpen;
                       const monthOrders = months[monthKey];
+                      const firstOrderIndexByDate = new Map();
+                      monthOrders.forEach((orden, index) => {
+                        const dateKey = orden.fechaLocal || orden.fecha;
+                        if (!firstOrderIndexByDate.has(dateKey)) {
+                          firstOrderIndexByDate.set(dateKey, index);
+                        }
+                      });
 
                       return (
                         <div key={monthKey} className="space-y-3">
@@ -1996,22 +2044,49 @@ const Ordenes = () => {
                                 }}
                                 className="space-y-3 overflow-hidden pl-1"
                               >
-                                {monthOrders.map((orden) => (
-                                  <OrderCard
-                                    key={orden.id}
-                                    orden={orden}
-                                    onDelete={handleDelete}
-                                    onInvoice={handleInvoice}
-                                    onPrint={handlePrint}
-                                    onSavePdf={handleSavePdf}
-                                    onShare={handleShare}
-                                    onOpenTracking={handleOpenTracking}
-                                    onShareTracking={handleShareTracking}
-                                    onEdit={handleEdit}
-                                    onOpenMap={handleOpenMap}
-                                    canDelete={canDelete}
-                                  />
-                                ))}
+                                {monthOrders.map((orden, orderIndex) => {
+                                  const orderDateKey =
+                                    orden.fechaLocal || orden.fecha;
+                                  const dayLabel =
+                                    orderDateKey === todayKey
+                                      ? "Hoy"
+                                      : orderDateKey === yesterdayKey
+                                        ? "Ayer"
+                                        : "";
+                                  const isFirstOfDay =
+                                    dayLabel &&
+                                    firstOrderIndexByDate.get(orderDateKey) ===
+                                      orderIndex;
+
+                                  return (
+                                    <React.Fragment key={orden.id}>
+                                      {isDefaultOpen &&
+                                        isFirstOfDay &&
+                                        dayLabel && (
+                                          <div className="flex items-center gap-3 py-1">
+                                            <div className="h-px flex-1 bg-white/10" />
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-violet-300">
+                                              {dayLabel}
+                                            </span>
+                                            <div className="h-px flex-1 bg-white/10" />
+                                          </div>
+                                        )}
+                                      <OrderCard
+                                        orden={orden}
+                                        onDelete={handleDelete}
+                                        onInvoice={handleInvoice}
+                                        onPrint={handlePrint}
+                                        onSavePdf={handleSavePdf}
+                                        onShare={handleShare}
+                                        onOpenTracking={handleOpenTracking}
+                                        onShareTracking={handleShareTracking}
+                                        onEdit={handleEdit}
+                                        onOpenMap={handleOpenMap}
+                                        canDelete={canDelete}
+                                      />
+                                    </React.Fragment>
+                                  );
+                                })}
                               </motion.div>
                             )}
                           </AnimatePresence>

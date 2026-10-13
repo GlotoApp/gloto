@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ArrowDownToLine } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
+import { useAdminRealtime } from "./useAdminRealtime";
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat("es-CO", {
@@ -15,6 +16,13 @@ const SolicitudesCambioPlan = () => {
   const [reviewingId, setReviewingId] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const scheduleRefresh = useCallback(
+    () => setRefreshKey((current) => current + 1),
+    [],
+  );
+
+  useAdminRealtime(["business_plan_change_requests"], scheduleRefresh);
 
   useEffect(() => {
     const loadRequests = async () => {
@@ -39,7 +47,7 @@ const SolicitudesCambioPlan = () => {
     };
 
     loadRequests();
-  }, []);
+  }, [refreshKey]);
 
   const openPaymentSupport = async (request) => {
     if (!request.payment_support_path) return;

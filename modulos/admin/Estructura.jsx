@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import SuperAdminSidebar from "./MenuLateral";
+import AdminLiveNotifications from "./AdminLiveNotifications";
 
 const SuperAdminLayout = () => {
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
@@ -49,6 +50,7 @@ const SuperAdminLayout = () => {
       <main className="ml-20 min-h-screen w-[calc(100%-5rem)] flex-1 overflow-y-auto p-5 transition-all duration-300 md:p-8">
         <Outlet />
       </main>
+      <AdminLiveNotifications />
       {isSidebarExpanded && (
         <button
           type="button"

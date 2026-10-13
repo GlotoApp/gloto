@@ -620,27 +620,89 @@ function App() {
             <Route path="planes" element={<PlanesFacturacion />} />
             <Route
               path="finanzas"
-              element={<Navigate to="finanzas/suscripciones" replace />}
+              element={<Navigate to="finanzas/pagos" replace />}
+            />
+            <Route
+              path="finanzas/pagos"
+              element={
+                <Finanzas
+                  key="all-payment-types"
+                  initialTypeFilter="all"
+                  initialStatusFilter="pending"
+                  overviewOnly
+                  title="Pagos"
+                  subtitle="Resumen de solicitudes pendientes. Entra a una sección para revisarlas."
+                  badge="Resumen"
+                />
+              }
+            />
+            <Route
+              path="finanzas/pagos/suscripciones"
+              element={
+                <Finanzas
+                  key="pending-subscriptions"
+                  initialTypeFilter="subscription"
+                  initialStatusFilter="pending"
+                  title="Pagos de suscripciones"
+                  subtitle="Revisa y aprueba pagos de suscripciones."
+                  badge="Por aprobar"
+                />
+              }
+            />
+            <Route
+              path="finanzas/pagos/promociones"
+              element={
+                <Finanzas
+                  key="pending-promotions"
+                  initialTypeFilter="promotion"
+                  initialStatusFilter="pending"
+                  title="Pagos de promociones"
+                  subtitle="Revisa y aprueba pagos de promociones."
+                  badge="Por aprobar"
+                />
+              }
+            />
+            <Route
+              path="finanzas/pagos/domiciliarios"
+              element={
+                <Finanzas
+                  key="pending-courier-topups"
+                  initialTypeFilter="courier_topup"
+                  initialStatusFilter="pending"
+                  title="Recargas de domiciliarios"
+                  subtitle="Revisa y aprueba recargas de saldo de domiciliarios."
+                  badge="Por aprobar"
+                />
+              }
+            />
+            <Route
+              path="finanzas/historial"
+              element={
+                <Finanzas
+                  key="payment-history"
+                  initialTypeFilter="all"
+                  initialStatusFilter="history"
+                  title="Historial de pagos"
+                  subtitle="Consulta pagos aprobados, rechazados y fallidos."
+                  badge="Historial"
+                />
+              }
             />
             <Route
               path="finanzas/suscripciones"
               element={
-                <Finanzas
-                  initialTypeFilter="subscription"
-                  title="Suscripciones"
-                  subtitle="Pagos y renovaciones de suscripciones de todas las tiendas."
-                  badge="Suscripciones"
+                <Navigate
+                  to="/gestion/finanzas/pagos/suscripciones"
+                  replace
                 />
               }
             />
             <Route
               path="finanzas/promociones"
               element={
-                <Finanzas
-                  initialTypeFilter="promotion"
-                  title="Promociones"
-                  subtitle="Pagos y aprobaciones de promociones de todas las tiendas."
-                  badge="Promociones"
+                <Navigate
+                  to="/gestion/finanzas/pagos/promociones"
+                  replace
                 />
               }
             />

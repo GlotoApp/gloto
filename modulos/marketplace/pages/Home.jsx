@@ -964,7 +964,7 @@ const Home = ({ userLocation }) => {
 
       {/* FILTROS (STICKY SE COMPORTA COMO PARTE DEL HEADER, se oculta mientras se busca) */}
       {!buscando && !modoCategoria && !verTodasPromos && (
-        <section className="sticky top-14 z-40 bg-background px-2 pt-2 sm:top-[54px]">
+        <section className="sticky top-[52px] z-40 bg-background px-2 sm:top-[54px]">
           <div className="mb-2 flex gap-1.5 overflow-x-auto pb-2 no-scrollbar sm:gap-2">
             {FILTROS.map((f) => (
               <button
@@ -1136,7 +1136,7 @@ const Home = ({ userLocation }) => {
                         horaActual,
                       );
                       return status && !status.isOpen ? (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-black/65 px-1 text-center text-white">
+                        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-0.5 bg-black/70 px-1 text-center text-white">
                           <span className="text-[8px] font-black uppercase tracking-wider">
                             Cerrado
                           </span>
@@ -1255,7 +1255,7 @@ const Home = ({ userLocation }) => {
                         horaActual,
                       );
                       return status && !status.isOpen ? (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/65 px-2 text-center text-white">
+                        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1 bg-black/70 px-2 text-center text-white">
                           <span className="text-[10px] font-black uppercase tracking-wider">
                             Cerrado
                           </span>

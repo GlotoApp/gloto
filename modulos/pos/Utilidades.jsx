@@ -224,7 +224,7 @@ const Utilidades = () => {
     menu: storeSlug
       ? `${window.location.origin}/marketplace/tienda/${storeSlug}`
       : "",
-    employees: `${window.location.origin}/marketplace/empleados/login`,
+    employees: `${window.location.origin}/login`,
   };
 
   useEffect(() => {
@@ -481,6 +481,8 @@ const Utilidades = () => {
     letter: "letter portrait",
     a4: "A4 portrait",
     half: "5.5in 8.5in",
+    oficio: "8.5in 13in",
+    legal: "legal portrait",
   };
   const menuPreviewHtml = (() => {
     const categories = printMenuCategories
@@ -540,7 +542,11 @@ const Utilidades = () => {
         ? "1123px"
         : menuFormat === "half"
           ? "816px"
-          : "1056px";
+          : menuFormat === "oficio"
+            ? "1248px"
+            : menuFormat === "legal"
+              ? "1344px"
+              : "1056px";
 
     return `<!doctype html>
       <html lang="es">
@@ -557,14 +563,15 @@ const Utilidades = () => {
             .brand-logo, .brand-mark { width: 58px; height: 58px; flex: 0 0 58px; border-radius: 16px; object-fit: contain; }
             .brand-mark { display: grid; place-items: center; color: white; background: #6d28d9; font: 800 28px Arial, Helvetica, sans-serif; }
             .brand-copy { flex: 1; }
-            .eyebrow { margin: 0 0 4px; color: #b995f5; font-size: 9px; font-weight: 800; letter-spacing: .22em; text-transform: uppercase; }
+            .eyebrow { margin: 0 0 4px; color: #a39bab; font-size: 9px; font-weight: 800; letter-spacing: .22em; text-transform: uppercase; }
             h1 { margin: 0; color: #fff; font: 800 29px/1.05 Arial, Helvetica, sans-serif; letter-spacing: .025em; text-transform: uppercase; }
+            .brand-tagline { margin: 5px 0 0; color: #a39bab; font-size: 8px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
             .subtitle { margin: 6px 0 0; color: #76717d; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-            .brand-stamp { align-self: flex-start; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: auto; }
+            .brand-stamp { align-self: center; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: auto; }
             .brand-stamp img { display: block; width: 100%; height: 100%; object-fit: contain; }
             .menu-intro { margin: 18px 0 22px; padding: 11px 14px; border-left: 3px solid #8b5cf6; color: #5e5865; background: #f6f3fa; font: italic 12px Arial, Helvetica, sans-serif; }
             .category { margin: 18px 0 23px; break-inside: avoid; page-break-inside: avoid; }
-            .category h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 11px; color: #c8a8ff; font: 800 15px Arial, Helvetica, sans-serif; letter-spacing: .06em; text-transform: uppercase; break-after: avoid; page-break-after: avoid; }
+            .category h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 11px; color: #fff; font: 800 15px Arial, Helvetica, sans-serif; letter-spacing: .06em; text-transform: uppercase; break-after: avoid; page-break-after: avoid; }
             .category-mark { width: 16px; height: 16px; flex: 0 0 16px; object-fit: contain; }
             .category h2:after { height: 1px; flex: 1; content: ''; background: #43364f; }
             .products { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -573,11 +580,9 @@ const Utilidades = () => {
             .product-copy { min-width: 0; flex: 1; }
             .product-heading { display: flex; justify-content: space-between; gap: 7px; align-items: baseline; }
             h3 { margin: 0; color: #f7f3fb; font-size: 11px; font-weight: 800; }
-            .price { flex-shrink: 0; color: #c8a8ff; font-size: 10px; font-weight: 800; white-space: nowrap; }
+            .price { flex-shrink: 0; color: #fff; font-size: 10px; font-weight: 800; white-space: nowrap; }
             .unit { margin-left: 3px; font-size: 7px; font-weight: 600; opacity: .72; }
             .product p { margin: 5px 0 0; color: #b7b0c0; font-size: 9px; line-height: 1.35; }
-            footer { display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 25px; padding-top: 12px; border-top: 1px solid #332b3b; color: #a39bab; font-size: 8px; letter-spacing: .1em; text-align: center; text-transform: uppercase; }
-            footer strong { color: #c8a8ff; }
             @media screen and (max-width: 850px) {
               body { width: calc(100% - 24px); min-height: auto; margin: 12px auto; padding: 24px 18px; box-shadow: none; }
             }
@@ -603,15 +608,13 @@ const Utilidades = () => {
             <div class="brand-copy">
               <p class="eyebrow">MENU - CATALOGO</p>
               <h1>${escapeHTML(businessName || "Menú")}</h1>
+              <p class="brand-tagline">Hecho con Gloto</p>
             </div>
             <div class="brand-stamp">
               <img src="${escapeHTML(logo)}" alt="Gloto">
             </div>
           </header>
           ${menuHTML}
-          <footer>
-            <span>${escapeHTML(businessName || "Menú")} · <strong>Hecho con Gloto</strong></span>
-          </footer>
         </body>
       </html>`;
   })();
@@ -1315,6 +1318,8 @@ const Utilidades = () => {
                         { id: "letter", label: "Carta", detail: "8.5 × 11 pulgadas" },
                         { id: "a4", label: "A4", detail: "210 × 297 mm" },
                         { id: "half", label: "Media carta", detail: "5.5 × 8.5 pulgadas" },
+                        { id: "oficio", label: "Oficio", detail: "8.5 × 13 pulgadas" },
+                        { id: "legal", label: "Legal", detail: "8.5 × 14 pulgadas" },
                       ].map((format) => (
                         <button
                           key={format.id}

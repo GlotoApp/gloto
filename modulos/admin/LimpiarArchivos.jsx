@@ -4,8 +4,14 @@ import {
   removeStorageObjectIfUnused,
 } from "../../src/lib/supabaseClient";
 
-const STORAGE_BUCKETS = ["business-assets", "payment-supports", "payment-qr"];
 const PAGE_SIZE = 1000;
+const STORAGE_BUCKETS = [
+  "business-assets",
+  "system",
+  "payment-supports",
+  "payment-qr",
+  "courier-topup-proofs",
+];
 
 const getObjectPath = (bucket, value) => {
   if (!value || typeof value !== "string" || value.startsWith("data:")) {
@@ -35,34 +41,49 @@ const addReference = (references, bucket, value) => {
   if (path) references.add(`${bucket}/${path}`);
 };
 
+const loadAllRows = async (table, columns) => {
+  const rows = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .order("id", { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) throw error;
+
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) return rows;
+    offset += PAGE_SIZE;
+  }
+};
+
 const loadReferences = async () => {
   const [
-    { data: businesses, error: businessesError },
-    { data: products, error: productsError },
-    { data: promotions, error: promotionsError },
-    { data: categories, error: categoriesError },
-    { data: payments, error: paymentsError },
-    { data: qrs, error: qrsError },
+    businesses,
+    products,
+    promotions,
+    categories,
+    shopCategories,
+    payments,
+    planChangeRequests,
+    qrs,
+    courierTopups,
   ] = await Promise.all([
-    supabase.from("businesses").select("logo_url,cover_url"),
-    supabase.from("products").select("image_url"),
-    supabase
-      .from("promotions")
-      .select("cover_path,icon_url,payment_support_path"),
-    supabase.from("categories").select("icon_url"),
-    supabase.from("payment_records").select("support_path"),
-    supabase.from("payment_qr_codes").select("storage_path"),
+    loadAllRows("businesses", "id,logo_url,cover_url"),
+    loadAllRows("products", "id,image_url"),
+    loadAllRows(
+      "promotions",
+      "id,cover_path,icon_url,payment_support_path",
+    ),
+    loadAllRows("categories", "id,icon_url"),
+    loadAllRows("categories_shop", "id,icon_url"),
+    loadAllRows("payment_records", "id,support_path"),
+    loadAllRows("business_plan_change_requests", "id,payment_support_path"),
+    loadAllRows("payment_qr_codes", "id,storage_path"),
+    loadAllRows("public_courier_topups", "id,proof_path"),
   ]);
-
-  const failedQuery = [
-    businessesError,
-    productsError,
-    promotionsError,
-    categoriesError,
-    paymentsError,
-    qrsError,
-  ].find(Boolean);
-  if (failedQuery) throw failedQuery;
 
   const references = new Set();
   (businesses || []).forEach((business) => {
@@ -81,14 +102,34 @@ const loadReferences = async () => {
       promotion.payment_support_path,
     );
   });
-  (categories || []).forEach((category) =>
-    addReference(references, "business-assets", category.icon_url),
-  );
+  [...(categories || []), ...(shopCategories || [])].forEach((category) => {
+    const isSystemIcon =
+      typeof category.icon_url === "string" &&
+      (category.icon_url.startsWith("sistema/categories generales iconos/") ||
+        /\/storage\/v1\/object\/(?:public|sign|authenticated)\/system\//.test(
+          category.icon_url,
+        ));
+    addReference(
+      references,
+      isSystemIcon ? "system" : "business-assets",
+      category.icon_url,
+    );
+  });
   (payments || []).forEach((payment) =>
     addReference(references, "payment-supports", payment.support_path),
   );
+  (planChangeRequests || []).forEach((request) =>
+    addReference(
+      references,
+      "payment-supports",
+      request.payment_support_path,
+    ),
+  );
   (qrs || []).forEach((qr) =>
     addReference(references, "payment-qr", qr.storage_path),
+  );
+  (courierTopups || []).forEach((topup) =>
+    addReference(references, "courier-topup-proofs", topup.proof_path),
   );
 
   return references;
@@ -144,6 +185,7 @@ export default function SuperAdminStorageCleanup() {
   const scanStorage = async () => {
     setScanning(true);
     setMessage("");
+    setOrphans([]);
     setSelected(new Set());
     try {
       const references = await loadReferences();
@@ -226,9 +268,10 @@ export default function SuperAdminStorageCleanup() {
         <div>
           <h2 className="text-sm font-black text-white">Limpieza de Storage</h2>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-neutral-400">
-            Busca archivos sin referencias en negocios, productos, promociones,
-            pagos y QR. Antes de borrar cada objeto, se comprueba otra vez que
-            siga sin usarse.
+            Busca imágenes, iconos y comprobantes sin referencias en negocios,
+            productos, categorías, promociones, pagos, QR y recargas de
+            domiciliarios. Antes de borrar cada objeto, se comprueba otra vez
+            que siga sin usarse.
           </p>
         </div>
         <div className="flex gap-2">

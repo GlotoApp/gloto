@@ -190,11 +190,24 @@ const Marketplace = () => {
                 setLocationDialogOpen(true);
                 setLocationError("");
               }}
-              className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-xs font-bold transition-colors hover:bg-surface/80"
+              disabled={isLocating}
+              className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-xs font-bold transition-colors hover:bg-surface/80 disabled:cursor-wait disabled:opacity-70"
               aria-label="Cambiar ubicación"
+              aria-busy={isLocating}
             >
-              <MapPin size={14} className="text-primary-container" />
-              <span>{userLocation?.city || "Elegir ubicación"}</span>
+              {isLocating ? (
+                <LoaderCircle
+                  size={14}
+                  className="animate-spin text-primary-container"
+                />
+              ) : (
+                <MapPin size={14} className="text-primary-container" />
+              )}
+              <span>
+                {isLocating
+                  ? "Buscando ubicación..."
+                  : userLocation?.city || "Elegir ubicación"}
+              </span>
             </button>
           </div>
         </header>

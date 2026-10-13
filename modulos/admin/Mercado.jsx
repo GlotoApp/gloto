@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
+  GripVertical,
+  Eye,
   ImagePlus,
   Megaphone,
   Plus,
@@ -7,6 +9,7 @@ import {
   Tag,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import {
   removeStorageObjectIfUnused,
@@ -16,6 +19,9 @@ import {
 import { compressCanvasToImage } from "../../src/lib/imageCompression";
 import ImageCropEditor from "../pos/ImageCropEditor";
 import SuperAdminSectionShell from "./ContenedorSeccion";
+import { useAdminRealtime } from "./useAdminRealtime";
+
+const MARKETPLACE_REALTIME_TABLES = ["frases", "categories"];
 
 const crearWebPCuadrado = async (imageEditor) => {
   const image = new Image();
@@ -51,17 +57,20 @@ const SuperAdminMarketplacePanel = () => {
   const [cargandoFrases, setCargandoFrases] = useState(true);
   const [errorFrases, setErrorFrases] = useState(false);
   const [guardandoCambios, setGuardandoCambios] = useState(false);
+  const [fraseArrastradaId, setFraseArrastradaId] = useState(null);
   const [mensajeFrases, setMensajeFrases] = useState({ tipo: "", texto: "" });
   const [categorias, setCategorias] = useState([]);
   const [cargandoCategorias, setCargandoCategorias] = useState(true);
   const [errorCategorias, setErrorCategorias] = useState(false);
   const [guardandoCategoria, setGuardandoCategoria] = useState(null);
+  const [categoriaArrastradaId, setCategoriaArrastradaId] = useState(null);
   const [imageEditor, setImageEditor] = useState(null);
   const [recortandoCategoria, setRecortandoCategoria] = useState(false);
   const [mensajeCategorias, setMensajeCategorias] = useState({
     tipo: "",
     texto: "",
   });
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -87,7 +96,7 @@ const SuperAdminMarketplacePanel = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [refreshKey]);
 
   useEffect(() => {
     let isMounted = true;
@@ -141,7 +150,7 @@ const SuperAdminMarketplacePanel = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [refreshKey]);
 
   const cambiarFrase = (id, cambios) => {
     setFrases((actuales) =>
@@ -150,6 +159,35 @@ const SuperAdminMarketplacePanel = () => {
       ),
     );
     setMensajeFrases({ tipo: "pendiente", texto: "Hay cambios sin guardar." });
+  };
+
+  const reordenarFrases = (targetId) => {
+    if (!fraseArrastradaId || fraseArrastradaId === targetId) return;
+    setFrases((actuales) => {
+      const fromIndex = actuales.findIndex(
+        (frase) => frase.id === fraseArrastradaId,
+      );
+      const toIndex = actuales.findIndex((frase) => frase.id === targetId);
+      if (fromIndex < 0 || toIndex < 0) return actuales;
+
+      const reordenadas = [...actuales];
+      const [movida] = reordenadas.splice(fromIndex, 1);
+      reordenadas.splice(toIndex, 0, movida);
+      let orderIndex = 0;
+      return reordenadas.map((frase) => {
+        if (frase._deleted) return frase;
+        const changedOrder = Number(frase.order_index) !== orderIndex;
+        return {
+          ...frase,
+          order_index: orderIndex++,
+          _dirty: frase._dirty || changedOrder,
+        };
+      });
+    });
+    setMensajeFrases({
+      tipo: "pendiente",
+      texto: "Orden actualizado. Guarda para aplicar los cambios.",
+    });
   };
 
   const agregarFrase = (event) => {
@@ -332,17 +370,35 @@ const SuperAdminMarketplacePanel = () => {
     });
   };
 
-  const cambiarOrdenCategoria = (id, orderIndex) => {
-    setCategorias((actuales) =>
-      actuales.map((categoria) =>
-        categoria.id === id
-          ? { ...categoria, order_index: orderIndex, _dirty: true }
-          : categoria,
-      ),
-    );
+  const reordenarCategorias = (targetId) => {
+    if (!categoriaArrastradaId || categoriaArrastradaId === targetId) return;
+    setCategorias((actuales) => {
+      const fromIndex = actuales.findIndex(
+        (categoria) => categoria.id === categoriaArrastradaId,
+      );
+      const toIndex = actuales.findIndex(
+        (categoria) => categoria.id === targetId,
+      );
+      if (fromIndex < 0 || toIndex < 0) return actuales;
+
+      const reordenadas = [...actuales];
+      const [movida] = reordenadas.splice(fromIndex, 1);
+      reordenadas.splice(toIndex, 0, movida);
+      let orderIndex = 0;
+      return reordenadas.map((categoria) => {
+        if (categoria._deleted) return categoria;
+        const changedOrder =
+          Number(categoria.order_index) !== orderIndex;
+        return {
+          ...categoria,
+          order_index: orderIndex++,
+          _dirty: categoria._dirty || changedOrder,
+        };
+      });
+    });
     setMensajeCategorias({
       tipo: "pendiente",
-      texto: "Hay cambios sin guardar.",
+      texto: "Orden actualizado. Guarda para aplicar los cambios.",
     });
   };
 
@@ -682,6 +738,23 @@ const SuperAdminMarketplacePanel = () => {
   const cambiosPendientesCategorias = categorias.filter(
     (categoria) => categoria._new || categoria._dirty,
   ).length;
+  const refreshMarketplace = useCallback(() => {
+    if (
+      cambiosPendientes === 0 &&
+      cambiosPendientesCategorias === 0 &&
+      !guardandoCambios &&
+      guardandoCategoria === null
+    ) {
+      setRefreshKey((current) => current + 1);
+    }
+  }, [
+    cambiosPendientes,
+    cambiosPendientesCategorias,
+    guardandoCambios,
+    guardandoCategoria,
+  ]);
+
+  useAdminRealtime(MARKETPLACE_REALTIME_TABLES, refreshMarketplace);
 
   return (
     <SuperAdminSectionShell
@@ -689,25 +762,20 @@ const SuperAdminMarketplacePanel = () => {
       subtitle="Contenido que aparece en el inicio público."
       badge="Marketplace"
     >
-      <div className="grid gap-5 xl:grid-cols-2">
-        <section className="rounded-2xl border border-white/10 bg-neutral-900/75 p-4 shadow-[0_8px_24px_rgba(0,0,0,0.18)] sm:p-5">
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="grid gap-3 xl:grid-cols-2">
+        <section className="rounded-2xl border border-white/10 bg-neutral-900/75 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.18)] sm:p-4">
+          <div className="mb-3 flex items-center gap-2">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300">
-                <Megaphone size={18} />
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 text-violet-300">
+                <Megaphone size={16} />
               </span>
-              <div>
-                <h3 className="font-bold text-white">Frases de inicio</h3>
-                <p className="text-xs text-neutral-400">
-                  Rotan en la portada pública.
-                </p>
-              </div>
+              <h3 className="text-sm font-bold text-white">Frases de inicio</h3>
             </div>
           </div>
 
           <form
             onSubmit={agregarFrase}
-            className="mb-4 flex flex-col gap-2 sm:flex-row"
+            className="mb-3 flex gap-2"
           >
             <input
               value={fraseNueva}
@@ -715,22 +783,23 @@ const SuperAdminMarketplacePanel = () => {
               maxLength={120}
               placeholder="Nueva frase para Home"
               aria-label="Nueva frase para Home"
-              className="min-w-0 flex-1 rounded-xl border border-white/10 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-violet-400"
+              className="min-w-0 flex-1 rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-violet-400"
             />
             <button
               type="submit"
               disabled={guardandoCambios}
-              className="inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-violet-500 px-3 py-2.5 text-sm font-bold text-white transition hover:bg-violet-400 disabled:opacity-50 sm:w-auto"
+              aria-label="Añadir frase"
+              title="Añadir frase"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-500 text-white transition hover:bg-violet-400 disabled:opacity-50"
             >
-              <Plus size={16} />
-              Añadir a lista
+              <Plus size={18} />
             </button>
           </form>
 
           {mensajeFrases.texto && (
             <p
               role="status"
-              className={`mb-3 text-sm ${
+              className={`mb-2 text-xs ${
                 mensajeFrases.tipo === "error"
                   ? "text-red-300"
                   : mensajeFrases.tipo === "pendiente"
@@ -755,29 +824,29 @@ const SuperAdminMarketplacePanel = () => {
             </p>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-white/10">
-              <table className="w-full min-w-[540px] table-fixed border-collapse text-left">
+              <table className="w-full min-w-[420px] table-fixed border-collapse text-left">
                 <caption className="sr-only">
                   Frases que se muestran en el inicio de Marketplace
                 </caption>
                 <colgroup>
+                  <col className="w-10" />
                   <col />
-                  <col className="w-20" />
-                  <col className="w-28" />
-                  <col className="w-14" />
+                  <col className="w-16" />
+                  <col className="w-12" />
                 </colgroup>
                 <thead className="bg-white/[0.03]">
                   <tr className="border-b border-white/10 text-[10px] font-bold uppercase text-neutral-400">
-                    <th scope="col" className="px-3 py-2.5">
+                    <th scope="col" className="px-2 py-2">
+                      <span className="sr-only">Mover</span>
+                    </th>
+                    <th scope="col" className="px-2 py-2">
                       Frase
                     </th>
-                    <th scope="col" className="px-2 py-2.5">
-                      Orden
+                    <th scope="col" className="px-2 py-2 text-center">
+                      <Eye size={14} className="mx-auto" aria-label="Visible" />
                     </th>
-                    <th scope="col" className="px-2 py-2.5">
-                      Visible
-                    </th>
-                    <th scope="col" className="px-2 py-2.5 text-center">
-                      Acción
+                    <th scope="col" className="px-2 py-2 text-center">
+                      <span className="sr-only">Visibilidad y acciones</span>
                     </th>
                   </tr>
                 </thead>
@@ -785,11 +854,41 @@ const SuperAdminMarketplacePanel = () => {
                   {frases.map((frase, index) => (
                     <tr
                       key={frase.id}
+                      onDragOver={(event) => {
+                        if (fraseArrastradaId && !frase._deleted) {
+                          event.preventDefault();
+                        }
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        if (!frase._deleted) reordenarFrases(frase.id);
+                        setFraseArrastradaId(null);
+                      }}
                       className={`border-b border-white/[0.06] last:border-b-0 ${
-                        frase._deleted ? "bg-red-500/[0.04]" : ""
+                        frase._deleted
+                          ? "bg-red-500/[0.04]"
+                          : fraseArrastradaId === frase.id
+                            ? "opacity-40"
+                            : ""
                       }`}
                     >
-                      <td className="px-3 py-2.5">
+                      <td className="px-1.5 py-1.5">
+                        {!frase._deleted && (
+                          <button
+                            type="button"
+                            draggable={!guardandoCambios}
+                            onDragStart={() => setFraseArrastradaId(frase.id)}
+                            onDragEnd={() => setFraseArrastradaId(null)}
+                            disabled={guardandoCambios}
+                            aria-label={`Arrastrar para reordenar frase ${index + 1}`}
+                            title="Arrastra para reordenar"
+                            className="inline-flex h-8 w-7 cursor-grab items-center justify-center rounded-md text-neutral-500 transition hover:bg-white/[0.06] hover:text-white active:cursor-grabbing disabled:cursor-not-allowed"
+                          >
+                            <GripVertical size={16} />
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5">
                         {frase._deleted ? (
                           <span className="break-words text-sm text-red-200 line-through">
                             {frase.texto}
@@ -805,39 +904,17 @@ const SuperAdminMarketplacePanel = () => {
                             maxLength={120}
                             aria-label={`Texto de la frase ${index + 1}`}
                             disabled={guardandoCambios}
-                            className="w-full min-w-0 rounded-md border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-400 disabled:opacity-60"
+                            className="w-full min-w-0 rounded-md border border-white/10 bg-neutral-950 px-2.5 py-1.5 text-sm text-white outline-none focus:border-violet-400 disabled:opacity-60"
                           />
                         )}
                       </td>
-                      <td className="px-2 py-2.5">
-                        {frase._deleted ? (
-                          <span className="text-sm text-neutral-500">
-                            {Number(frase.order_index) + 1}
-                          </span>
-                        ) : (
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={frase.order_index}
-                            onChange={(event) =>
-                              cambiarFrase(frase.id, {
-                                order_index: event.target.value,
-                              })
-                            }
-                            aria-label={`Orden de la frase ${index + 1}`}
-                            disabled={guardandoCambios}
-                            className="w-full rounded-md border border-white/10 bg-neutral-950 px-2 py-2 text-sm text-white outline-none focus:border-violet-400 disabled:opacity-60"
-                          />
-                        )}
-                      </td>
-                      <td className="px-2 py-2.5">
+                      <td className="px-2 py-1.5">
                         {frase._deleted ? (
                           <span className="text-xs text-red-300">
                             Pendiente
                           </span>
                         ) : (
-                          <label className="flex items-center gap-2 text-xs text-neutral-300">
+                          <label className="inline-flex cursor-pointer items-center">
                             <input
                               type="checkbox"
                               checked={frase.is_active}
@@ -848,15 +925,20 @@ const SuperAdminMarketplacePanel = () => {
                               }
                               aria-label={`Mostrar frase ${index + 1} en Home`}
                               disabled={guardandoCambios}
-                              className="h-4 w-4 accent-violet-500"
+                              className="peer sr-only"
                             />
-                            <span className="sr-only">
-                              {frase.is_active ? "Activa" : "Inactiva"}
+                            <span
+                              aria-hidden="true"
+                              className="relative h-5 w-9 rounded-full bg-neutral-700 transition-colors peer-checked:bg-violet-500 peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-violet-300 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-neutral-900 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow after:transition-transform after:content-[''] peer-checked:after:translate-x-4"
+                            >
+                              <span className="sr-only">
+                                {frase.is_active ? "Activa" : "Inactiva"}
+                              </span>
                             </span>
                           </label>
                         )}
                       </td>
-                      <td className="px-2 py-2.5 text-center">
+                      <td className="px-1.5 py-1.5 text-center">
                         {frase._deleted ? (
                           <button
                             type="button"
@@ -875,7 +957,7 @@ const SuperAdminMarketplacePanel = () => {
                             disabled={guardandoCambios}
                             title="Marcar para eliminar"
                             aria-label={`Marcar frase ${index + 1} para eliminar`}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-red-500/10 text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-red-500/10 text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
                           >
                             <Trash2 size={16} />
                           </button>
@@ -889,7 +971,7 @@ const SuperAdminMarketplacePanel = () => {
           )}
 
           {!cargandoFrases && !errorFrases && (
-            <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
               <p className="text-xs text-neutral-400">
                 {cambiosPendientes === 0
                   ? "Sin cambios pendientes."
@@ -899,56 +981,48 @@ const SuperAdminMarketplacePanel = () => {
                 type="button"
                 onClick={guardarCambiosFrases}
                 disabled={cambiosPendientes === 0 || guardandoCambios}
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={guardandoCambios ? "Guardando cambios" : "Guardar cambios"}
+                title={guardandoCambios ? "Guardando..." : "Guardar cambios"}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500 text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <Save size={16} />
-                {guardandoCambios ? "Guardando..." : "Guardar cambios"}
+                <Save size={17} />
               </button>
             </div>
           )}
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-neutral-900/75 p-4 shadow-[0_8px_24px_rgba(0,0,0,0.18)] sm:p-5">
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <section className="rounded-2xl border border-white/10 bg-neutral-900/75 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.18)] sm:p-4">
+          <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-300">
-                <Tag size={18} />
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-300">
+                <Tag size={16} />
               </span>
-              <div>
-                <h3 className="font-bold text-white">Categorías visibles</h3>
-                <p className="text-xs text-neutral-400">
-                  Edita nombres y sube imágenes; se comprimen como WebP o PNG
-                  según el soporte del navegador.
-                </p>
-              </div>
+              <h3 className="text-sm font-bold text-white">Categorías</h3>
             </div>
+            <button
+              type="button"
+              onClick={agregarCategoria}
+              disabled={guardandoCategoria !== null}
+              aria-label="Nueva categoría"
+              title="Nueva categoría"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500 text-white transition hover:bg-emerald-400 disabled:opacity-50"
+            >
+              <Plus size={18} />
+            </button>
           </div>
 
           {cargandoCategorias ? (
-            <p className="py-6 text-sm text-neutral-400">
-              Cargando categorías...
-            </p>
+            <p className="py-4 text-sm text-neutral-400">Cargando...</p>
           ) : errorCategorias ? (
             <p className="py-6 text-sm text-red-300">
               No se pudieron cargar las categorías.
             </p>
           ) : (
             <>
-              <div className="mb-4 flex justify-end">
-                <button
-                  type="button"
-                  onClick={agregarCategoria}
-                  disabled={guardandoCategoria !== null}
-                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-3.5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-400 disabled:opacity-50"
-                >
-                  <Plus size={16} />
-                  Nueva categoría
-                </button>
-              </div>
               {mensajeCategorias.texto && (
                 <p
                   role="status"
-                  className={`mb-3 text-sm ${
+                  className={`mb-2 text-xs ${
                     mensajeCategorias.tipo === "error"
                       ? "text-red-300"
                       : mensajeCategorias.tipo === "pendiente"
@@ -965,29 +1039,29 @@ const SuperAdminMarketplacePanel = () => {
                 </p>
               ) : (
                 <div className="overflow-x-auto rounded-2xl border border-white/10">
-                  <table className="w-full min-w-[620px] table-fixed border-collapse text-left">
+                  <table className="w-full min-w-[420px] table-fixed border-collapse text-left">
                     <caption className="sr-only">
                       Categorías globales de Marketplace
                     </caption>
                     <colgroup>
+                      <col className="w-10" />
                       <col />
-                      <col className="w-24" />
-                      <col className="w-64" />
                       <col className="w-28" />
+                      <col className="w-16" />
                     </colgroup>
                     <thead className="bg-white/[0.03]">
                       <tr className="border-b border-white/10 text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-400">
-                        <th scope="col" className="px-3 py-2.5">
+                        <th scope="col" className="px-1.5 py-2">
+                          <span className="sr-only">Mover</span>
+                        </th>
+                        <th scope="col" className="px-2 py-2">
                           Nombre
                         </th>
-                        <th scope="col" className="px-3 py-2.5">
-                          Índice orden
-                        </th>
-                        <th scope="col" className="px-3 py-2.5">
+                        <th scope="col" className="px-2 py-2">
                           Icono
                         </th>
-                        <th scope="col" className="px-3 py-2.5 text-center">
-                          Acciones
+                        <th scope="col" className="px-1.5 py-2 text-center">
+                          <span className="sr-only">Acciones</span>
                         </th>
                       </tr>
                     </thead>
@@ -995,9 +1069,45 @@ const SuperAdminMarketplacePanel = () => {
                       {categorias.map((categoria, index) => (
                         <tr
                           key={categoria.id}
-                          className="border-b border-white/[0.06] align-top last:border-b-0"
+                          onDragOver={(event) => {
+                            if (categoriaArrastradaId && !categoria._deleted) {
+                              event.preventDefault();
+                            }
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            if (!categoria._deleted) {
+                              reordenarCategorias(categoria.id);
+                            }
+                            setCategoriaArrastradaId(null);
+                          }}
+                          className={`border-b border-white/[0.06] align-middle last:border-b-0 ${
+                            categoria._deleted
+                              ? "bg-red-500/[0.04]"
+                              : categoriaArrastradaId === categoria.id
+                                ? "opacity-40"
+                                : ""
+                          }`}
                         >
-                          <td className="px-3 py-2.5">
+                          <td className="px-1.5 py-1.5">
+                            {!categoria._deleted && (
+                              <button
+                                type="button"
+                                draggable={guardandoCategoria === null}
+                                onDragStart={() =>
+                                  setCategoriaArrastradaId(categoria.id)
+                                }
+                                onDragEnd={() => setCategoriaArrastradaId(null)}
+                                disabled={guardandoCategoria !== null}
+                                aria-label={`Arrastrar para reordenar categoría ${index + 1}`}
+                                title="Arrastra para reordenar"
+                                className="inline-flex h-8 w-7 cursor-grab items-center justify-center rounded-lg text-neutral-500 transition hover:bg-white/[0.06] hover:text-white active:cursor-grabbing disabled:cursor-not-allowed"
+                              >
+                                <GripVertical size={17} />
+                              </button>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5">
                             <input
                               value={categoria.name}
                               onChange={(event) =>
@@ -1009,29 +1119,12 @@ const SuperAdminMarketplacePanel = () => {
                               maxLength={80}
                               aria-label={`Nombre de la categoría ${index + 1}`}
                               disabled={guardandoCategoria !== null}
-                              className="w-full min-w-0 rounded-xl border border-white/10 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-400 disabled:opacity-60"
+                              className="w-full min-w-0 rounded-lg border border-white/10 bg-neutral-950 px-2.5 py-2 text-sm text-white outline-none focus:border-emerald-400 disabled:opacity-60"
                             />
                           </td>
-                          <td className="px-3 py-2.5">
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={categoria.order_index}
-                              onChange={(event) =>
-                                cambiarOrdenCategoria(
-                                  categoria.id,
-                                  event.target.value,
-                                )
-                              }
-                              aria-label={`Índice orden de categoría ${index + 1}`}
-                              disabled={guardandoCategoria !== null}
-                              className="w-full rounded-xl border border-white/10 bg-neutral-950 px-2 py-2.5 text-sm text-white outline-none focus:border-emerald-400 disabled:opacity-60"
-                            />
-                          </td>
-                          <td className="px-3 py-2.5">
+                          <td className="px-2 py-1.5">
                             <div className="flex min-w-0 items-center gap-2">
-                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-neutral-950 text-neutral-300">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-950 text-neutral-300">
                                 {categoria._iconDisplayUrl ||
                                 categoria.icon_url ? (
                                   <img
@@ -1040,21 +1133,21 @@ const SuperAdminMarketplacePanel = () => {
                                       categoria.icon_url
                                     }
                                     alt=""
-                                    className="h-6 w-6 object-contain"
+                                    className="h-5 w-5 object-contain"
                                   />
                                 ) : (
-                                  <ImagePlus size={17} />
+                                  <ImagePlus size={15} />
                                 )}
                               </span>
-                              <label className="inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs font-bold text-neutral-200 transition hover:bg-white/[0.06]">
+                              <label
+                                title={categoria._iconFile?.name || "Subir icono"}
+                                className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-white/10 text-neutral-300 transition hover:bg-white/[0.06] hover:text-white"
+                              >
                                 <Upload size={15} />
-                                <span className="truncate">
-                                  {categoria._iconFile?.name || "Elegir imagen"}
-                                </span>
                                 <input
                                   type="file"
                                   accept="image/*"
-                                  aria-label={`Icono para la categoría ${index + 1}`}
+                                  aria-label={`Subir icono de la categoría ${index + 1}`}
                                   disabled={guardandoCategoria !== null}
                                   onChange={(event) => {
                                     seleccionarIconoCategoria(
@@ -1068,29 +1161,32 @@ const SuperAdminMarketplacePanel = () => {
                               </label>
                             </div>
                           </td>
-                          <td className="px-3 py-2.5">
-                            <div className="flex flex-col items-center justify-center gap-2">
+                          <td className="px-1.5 py-1.5">
+                            <div className="flex items-center justify-center gap-1">
                               <button
                                 type="button"
                                 onClick={() => eliminarCategoria(categoria)}
                                 disabled={guardandoCategoria !== null}
-                                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10 text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
                                 title="Eliminar categoría"
                                 aria-label={`Eliminar categoría ${index + 1}`}
                               >
                                 <Trash2 size={16} />
                               </button>
                               {(categoria.icon_url ||
-                                categoria._iconDisplayUrl) && (
+                                categoria._iconDisplayUrl ||
+                                categoria._iconFile) && (
                                 <button
                                   type="button"
                                   onClick={() =>
                                     quitarIconoCategoria(categoria.id)
                                   }
                                   disabled={guardandoCategoria !== null}
-                                  className="text-[11px] font-semibold text-neutral-300 transition hover:text-white disabled:opacity-50"
+                                  title="Quitar icono"
+                                  aria-label={`Quitar icono de la categoría ${index + 1}`}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-neutral-400 transition hover:bg-white/[0.06] hover:text-white disabled:opacity-50"
                                 >
-                                  Quitar imagen
+                                  <X size={15} />
                                 </button>
                               )}
                             </div>
@@ -1105,8 +1201,8 @@ const SuperAdminMarketplacePanel = () => {
           )}
 
           {!cargandoCategorias && !errorCategorias && (
-            <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-neutral-400">
+            <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
+              <p className="text-xs text-neutral-400">
                 {cambiosPendientesCategorias === 0
                   ? "Sin cambios pendientes."
                   : `${cambiosPendientesCategorias} cambio${cambiosPendientesCategorias === 1 ? "" : "s"} pendiente${cambiosPendientesCategorias === 1 ? "" : "s"}.`}
@@ -1118,12 +1214,19 @@ const SuperAdminMarketplacePanel = () => {
                   cambiosPendientesCategorias === 0 ||
                   guardandoCategoria !== null
                 }
-                className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+                aria-label={
+                  guardandoCategoria !== null
+                    ? "Guardando cambios"
+                    : "Guardar cambios"
+                }
+                title={
+                  guardandoCategoria !== null
+                    ? "Guardando..."
+                    : "Guardar cambios"
+                }
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500 text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <Save size={16} />
-                {guardandoCategoria !== null
-                  ? "Guardando..."
-                  : "Guardar cambios"}
+                <Save size={17} />
               </button>
             </div>
           )}

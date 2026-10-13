@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   ArrowDownToLine,
+  Bike,
   CalendarDays,
   CreditCard,
   Megaphone,
@@ -11,6 +13,16 @@ import {
 import { supabase } from "../../src/lib/supabaseClient";
 import SuperAdminSectionShell from "./ContenedorSeccion";
 import SolicitudesCambioPlan from "./SolicitudesCambioPlan";
+import { useAdminRealtime } from "./useAdminRealtime";
+
+const FINANCE_REALTIME_TABLES = [
+  "payment_records",
+  "promotions",
+  "public_courier_topups",
+  "public_courier_applications",
+  "business_plan_change_requests",
+  "billing_plan_periods",
+];
 
 const STATUS_LABELS = {
   pending: "Pendiente",
@@ -18,6 +30,7 @@ const STATUS_LABELS = {
   rejected: "Rechazado",
   failed: "Fallido",
   refunded: "Reembolsado",
+  approved: "Aprobado",
 };
 
 const formatCurrency = (value) =>
@@ -38,7 +51,11 @@ const formatDate = (value) => {
       });
 };
 
-const normalizePaymentRows = (subscriptionPayments, promotionPayments) =>
+const normalizePaymentRows = (
+  subscriptionPayments,
+  promotionPayments,
+  courierTopups,
+) =>
   [
     ...(subscriptionPayments || []).map((payment) => ({
       id: `subscription-${payment.id}`,
@@ -81,6 +98,25 @@ const normalizePaymentRows = (subscriptionPayments, promotionPayments) =>
       createdAt: payment.created_at,
       paidAt: payment.paid_at,
     })),
+    ...(courierTopups || []).map((topup) => ({
+      id: `courier-topup-${topup.id}`,
+      sourceId: topup.id,
+      businessId: topup.user_id,
+      businessName: topup.courier?.full_name || "Domiciliario",
+      businessSlug: topup.courier?.phone || "",
+      type: "courier_topup",
+      title: "Recarga de saldo",
+      period: topup.courier?.phone || "",
+      status: topup.status,
+      amount: topup.amount,
+      method: "Manual",
+      reference: topup.review_notes,
+      supportPath: topup.proof_path,
+      proofUrl: topup.proofUrl,
+      reviewNotes: topup.review_notes,
+      createdAt: topup.created_at,
+      paidAt: topup.status === "approved" ? topup.created_at : null,
+    })),
   ].sort(
     (first, second) =>
       new Date(second.paidAt || second.createdAt || 0) -
@@ -89,26 +125,32 @@ const normalizePaymentRows = (subscriptionPayments, promotionPayments) =>
 
 const SuperAdminFinanzasPanel = ({
   initialTypeFilter = "all",
+  initialStatusFilter = "all",
+  overviewOnly = false,
   title = "Finanzas",
-  subtitle = "Pagos de suscripciones y promociones de todas las tiendas.",
+  subtitle = "Pagos de suscripciones, promociones y domiciliarios.",
   badge = "Finanzas",
 }) => {
   const [payments, setPayments] = useState([]);
+  const [pendingPlanChangeRequests, setPendingPlanChangeRequests] = useState([]);
   const [billingPeriods, setBillingPeriods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [notice, setNotice] = useState("");
   const [reviewingPaymentId, setReviewingPaymentId] = useState(null);
+  const [topupNotes, setTopupNotes] = useState({});
   const [refreshKey, setRefreshKey] = useState(0);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState(initialTypeFilter);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState(initialStatusFilter);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const scheduleRefresh = useCallback(
+    () => setRefreshKey((current) => current + 1),
+    [],
+  );
 
-  useEffect(() => {
-    setTypeFilter(initialTypeFilter);
-  }, [initialTypeFilter]);
+  useAdminRealtime(FINANCE_REALTIME_TABLES, scheduleRefresh);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,7 +159,13 @@ const SuperAdminFinanzasPanel = ({
       setLoading(true);
       setLoadError("");
 
-      const [subscriptionResult, promotionResult, periodsResult] =
+      const [
+        subscriptionResult,
+        promotionResult,
+        periodsResult,
+        topupsResult,
+        planChangeRequestsResult,
+      ] =
         await Promise.all([
           supabase
             .from("payment_records")
@@ -139,6 +187,21 @@ const SuperAdminFinanzasPanel = ({
             .eq("is_active", true)
             .eq("plan_is_active", true)
             .order("display_order", { ascending: true }),
+          initialTypeFilter === "all" ||
+          initialTypeFilter === "courier_topup"
+            ? supabase
+                .from("public_courier_topups")
+                .select(
+                  "id,user_id,amount,proof_path,status,review_notes,created_at",
+                )
+                .order("created_at", { ascending: false })
+            : Promise.resolve({ data: [], error: null }),
+          overviewOnly
+            ? supabase
+                .from("business_plan_change_requests")
+                .select("id")
+                .in("status", ["awaiting_payment", "pending_review"])
+            : Promise.resolve({ data: [], error: null }),
         ]);
 
       if (cancelled) return;
@@ -146,19 +209,66 @@ const SuperAdminFinanzasPanel = ({
       const error =
         subscriptionResult.error ||
         promotionResult.error ||
-        periodsResult.error;
+        periodsResult.error ||
+        topupsResult.error ||
+        planChangeRequestsResult.error;
       if (error) {
         console.error("No se pudo cargar el historial financiero:", error);
         setLoadError(
           "No se pudieron cargar los pagos. Revisa el acceso de Finanzas en Supabase.",
         );
         setPayments([]);
+        setPendingPlanChangeRequests([]);
       } else {
+        const topups = topupsResult.data || [];
+        let topupsWithCourier = [];
+        if (topups.length > 0) {
+          const userIds = [...new Set(topups.map((topup) => topup.user_id))];
+          const [
+            { data: couriers, error: couriersError },
+            { data: proofs, error: proofsError },
+          ] = await Promise.all([
+            supabase
+              .from("public_courier_applications")
+              .select("user_id,full_name,phone")
+              .in("user_id", userIds),
+            supabase.storage
+              .from("courier-topup-proofs")
+              .createSignedUrls(
+                topups.map((topup) => topup.proof_path),
+                600,
+              ),
+          ]);
+          if (cancelled) return;
+          const detailError = couriersError || proofsError;
+          if (detailError) {
+            console.error("No se pudieron cargar los comprobantes de recargas:", detailError);
+            setLoadError(
+              "No se pudieron cargar las recargas de domiciliarios y sus comprobantes.",
+            );
+            setPayments([]);
+            setLoading(false);
+            return;
+          }
+          const couriersById = new Map(
+            (couriers || []).map((courier) => [courier.user_id, courier]),
+          );
+          const proofUrls = new Map(
+            (proofs || []).map((proof) => [proof.path, proof.signedUrl]),
+          );
+          topupsWithCourier = topups.map((topup) => ({
+            ...topup,
+            courier: couriersById.get(topup.user_id),
+            proofUrl: proofUrls.get(topup.proof_path) || "",
+          }));
+        }
         const normalizedPayments = normalizePaymentRows(
           subscriptionResult.data,
           promotionResult.data,
+          topupsWithCourier,
         );
         setPayments(normalizedPayments);
+        setPendingPlanChangeRequests(planChangeRequestsResult.data || []);
         setBillingPeriods(periodsResult.data || []);
       }
       setLoading(false);
@@ -168,7 +278,7 @@ const SuperAdminFinanzasPanel = ({
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [refreshKey, initialTypeFilter, overviewOnly]);
 
   const filteredPayments = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("es");
@@ -190,16 +300,29 @@ const SuperAdminFinanzasPanel = ({
       return (
         matchesSearch &&
         (typeFilter === "all" || payment.type === typeFilter) &&
-        (statusFilter === "all" || payment.status === statusFilter) &&
+        (initialStatusFilter !== "history" || payment.status !== "pending") &&
+        (statusFilter === "all" ||
+          (statusFilter === "history"
+            ? payment.status !== "pending"
+            : payment.status === statusFilter)) &&
         (!fromDate || paymentDate >= fromDate) &&
         (!toDate || paymentDate <= toDate)
       );
     });
-  }, [payments, search, typeFilter, statusFilter, fromDate, toDate]);
+  }, [
+    payments,
+    search,
+    typeFilter,
+    statusFilter,
+    fromDate,
+    toDate,
+    initialStatusFilter,
+  ]);
 
   const metrics = useMemo(() => {
     const paid = filteredPayments.filter(
-      (payment) => payment.status === "paid",
+      (payment) =>
+        payment.status === "paid" || payment.status === "approved",
     );
     const pending = filteredPayments.filter(
       (payment) => payment.status === "pending",
@@ -215,6 +338,45 @@ const SuperAdminFinanzasPanel = ({
     };
   }, [filteredPayments]);
 
+  const pendingByType = useMemo(() => {
+    const types = [
+      {
+        type: "subscription",
+        label: "Suscripciones",
+        description: "Pagos y solicitudes de cambio de plan",
+        path: "/gestion/finanzas/pagos/suscripciones",
+        icon: ShieldCheck,
+      },
+      {
+        type: "promotion",
+        label: "Promociones",
+        description: "Pagos para activar promociones",
+        path: "/gestion/finanzas/pagos/promociones",
+        icon: Megaphone,
+      },
+      {
+        type: "courier_topup",
+        label: "Domiciliarios",
+        description: "Recargas de saldo por revisar",
+        path: "/gestion/finanzas/pagos/domiciliarios",
+        icon: Bike,
+      },
+    ];
+
+    return types.map((item) => {
+      const pending = payments.filter(
+        (payment) =>
+          payment.type === item.type && payment.status === "pending",
+      );
+      const planChangeRequests =
+        item.type === "subscription" ? pendingPlanChangeRequests : [];
+      return {
+        ...item,
+        count: pending.length + planChangeRequests.length,
+      };
+    });
+  }, [payments, pendingPlanChangeRequests]);
+
   const openPaymentSupport = async (path) => {
     if (!path) return;
     const { data, error } = await supabase.storage
@@ -226,6 +388,41 @@ const SuperAdminFinanzasPanel = ({
       return;
     }
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const reviewCourierTopup = async (payment, approved) => {
+    if (
+      !window.confirm(
+        `¿Confirmas ${approved ? "aprobar" : "rechazar"} la recarga de ${formatCurrency(payment.amount)} de ${payment.businessName}?`,
+      )
+    ) {
+      return;
+    }
+
+    setReviewingPaymentId(payment.id);
+    setNotice("");
+    try {
+      const { error } = await supabase.rpc(
+        "admin_review_public_courier_topup",
+        {
+          p_topup_id: payment.sourceId,
+          p_approved: approved,
+          p_notes: topupNotes[payment.id]?.trim() || null,
+        },
+      );
+      if (error) throw error;
+      setNotice(
+        approved
+          ? `Recarga aprobada. Se acreditaron ${formatCurrency(payment.amount)} a ${payment.businessName}.`
+          : `Recarga de ${payment.businessName} rechazada.`,
+      );
+      setRefreshKey((current) => current + 1);
+    } catch (error) {
+      console.error("No se pudo revisar la recarga del domiciliario:", error);
+      setNotice(error.message || "No se pudo procesar la recarga.");
+    } finally {
+      setReviewingPaymentId(null);
+    }
   };
 
   const reviewSubscriptionPayment = async (payment, approve) => {
@@ -331,58 +528,103 @@ const SuperAdminFinanzasPanel = ({
 
   const clearFilters = () => {
     setSearch("");
-    setTypeFilter("all");
-    setStatusFilter("all");
+    setTypeFilter(initialTypeFilter);
+    setStatusFilter(initialStatusFilter);
     setFromDate("");
     setToDate("");
   };
 
   const hasFilters =
     search ||
-    typeFilter !== "all" ||
-    statusFilter !== "all" ||
+    typeFilter !== initialTypeFilter ||
+    statusFilter !== initialStatusFilter ||
     fromDate ||
     toDate;
 
   return (
     <SuperAdminSectionShell title={title} subtitle={subtitle} badge={badge}>
       <div className="space-y-5">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-xl border border-white/10 bg-neutral-900/75 p-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
-              Cobrado en resultados
-            </p>
-            <p className="mt-2 text-xl font-bold text-emerald-300">
-              {formatCurrency(metrics.paidAmount)}
-            </p>
-          </article>
-          <article className="rounded-xl border border-white/10 bg-neutral-900/75 p-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
-              Pagos aprobados
-            </p>
-            <p className="mt-2 text-xl font-bold text-white">
-              {metrics.paidCount}
-            </p>
-          </article>
-          <article className="rounded-xl border border-white/10 bg-neutral-900/75 p-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
-              Pendientes
-            </p>
-            <p className="mt-2 text-xl font-bold text-amber-300">
-              {metrics.pendingCount}
-            </p>
-          </article>
-          <article className="rounded-xl border border-white/10 bg-neutral-900/75 p-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
-              Movimientos visibles
-            </p>
-            <p className="mt-2 text-xl font-bold text-white">
-              {metrics.visibleCount}
-            </p>
-          </article>
-        </div>
+        {overviewOnly ? (
+          <section aria-label="Pendientes por sección">
+            {loading ? (
+              <p className="py-8 text-center text-sm text-neutral-400">
+                Cargando pendientes...
+              </p>
+            ) : (
+              <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-neutral-900/75">
+                {pendingByType.map(
+                  ({ type, label, description, path, icon: Icon, count }) => (
+                    <Link
+                      key={type}
+                      to={path}
+                      className="group flex min-h-[76px] items-center gap-3 px-3 py-3 transition hover:bg-white/[0.04] sm:px-4"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300">
+                        <Icon size={18} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="truncate text-sm font-bold text-white">
+                          {label}
+                        </h3>
+                        <p className="mt-0.5 truncate text-xs text-neutral-400">
+                          {description}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                            count > 0
+                              ? "bg-red-500/15 text-red-300"
+                              : "bg-white/[0.05] text-neutral-400"
+                          }`}
+                        >
+                          {count > 0 ? `${count} por aprobar` : "Al día"}
+                        </span>
+                      </div>
+                    </Link>
+                  ),
+                )}
+              </div>
+            )}
+          </section>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <article className="rounded-xl border border-white/10 bg-neutral-900/75 p-4">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                Recaudo revisado
+              </p>
+              <p className="mt-2 text-xl font-bold text-emerald-300">
+                {formatCurrency(metrics.paidAmount)}
+              </p>
+            </article>
+            <article className="rounded-xl border border-white/10 bg-neutral-900/75 p-4">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                Aprobados
+              </p>
+              <p className="mt-2 text-xl font-bold text-white">
+                {metrics.paidCount}
+              </p>
+            </article>
+            <article className="rounded-xl border border-white/10 bg-neutral-900/75 p-4">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                Pendientes en esta sección
+              </p>
+              <p className="mt-2 text-xl font-bold text-amber-300">
+                {metrics.pendingCount}
+              </p>
+            </article>
+            <article className="rounded-xl border border-white/10 bg-neutral-900/75 p-4">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                Movimientos de esta sección
+              </p>
+              <p className="mt-2 text-xl font-bold text-white">
+                {metrics.visibleCount}
+              </p>
+            </article>
+          </div>
+        )}
 
-        <section className="space-y-3 rounded-2xl border border-white/10 bg-neutral-900/75 p-4">
+        {!overviewOnly && <section className="space-y-3 rounded-2xl border border-white/10 bg-neutral-900/75 p-4">
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">
             <SlidersHorizontal size={14} /> Buscar y filtrar pagos
           </div>
@@ -396,7 +638,7 @@ const SuperAdminFinanzasPanel = ({
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Negocio, plan, promoción o referencia"
+                placeholder="Negocio, plan, promoción, domiciliario o referencia"
                 className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2.5 pl-9 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-violet-400"
               />
             </label>
@@ -411,6 +653,7 @@ const SuperAdminFinanzasPanel = ({
                   <option value="all">Todos los tipos</option>
                   <option value="subscription">Suscripciones</option>
                   <option value="promotion">Promociones</option>
+                  <option value="courier_topup">Domiciliarios</option>
                 </select>
               </label>
             )}
@@ -421,9 +664,16 @@ const SuperAdminFinanzasPanel = ({
                 onChange={(event) => setStatusFilter(event.target.value)}
                 className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-400"
               >
-                <option value="all">Todos los estados</option>
-                <option value="pending">Pendientes</option>
+                {initialStatusFilter === "history" ? (
+                  <option value="history">Todos los movimientos revisados</option>
+                ) : (
+                  <option value="all">Todos los estados</option>
+                )}
+                {initialStatusFilter !== "history" && (
+                  <option value="pending">Pendientes</option>
+                )}
                 <option value="paid">Pagados</option>
+                <option value="approved">Aprobados</option>
                 <option value="rejected">Rechazados</option>
                 <option value="failed">Fallidos</option>
                 <option value="refunded">Reembolsados</option>
@@ -472,7 +722,7 @@ const SuperAdminFinanzasPanel = ({
               </button>
             )}
           </div>
-        </section>
+        </section>}
 
         {loadError && (
           <div
@@ -491,15 +741,21 @@ const SuperAdminFinanzasPanel = ({
           </div>
         )}
 
-        {initialTypeFilter !== "promotion" && <SolicitudesCambioPlan />}
+        {initialTypeFilter === "subscription" &&
+          initialStatusFilter === "pending" && <SolicitudesCambioPlan />}
 
+        {!overviewOnly && (
         <section className="overflow-hidden rounded-2xl border border-white/10 bg-neutral-900/65">
           <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
             <h3 className="text-sm font-semibold text-white">
-              Historial de pagos
+              {initialStatusFilter === "history"
+                ? "Movimientos revisados"
+                : "Pendientes de esta sección"}
             </h3>
             <span className="text-xs text-neutral-500">
-              Fechas de solicitud y confirmación
+              {initialStatusFilter === "history"
+                ? "Pagos aprobados, rechazados o fallidos"
+                : "Solo solicitudes pendientes"}
             </span>
           </div>
 
@@ -518,6 +774,7 @@ const SuperAdminFinanzasPanel = ({
             <div className="divide-y divide-white/10">
               {filteredPayments.map((payment) => {
                 const isSubscription = payment.type === "subscription";
+                const isCourierTopup = payment.type === "courier_topup";
                 const isPending = payment.status === "pending";
                 const periodsForPayment = billingPeriods.filter(
                   (period) => period.plan_code === payment.planCode,
@@ -528,7 +785,7 @@ const SuperAdminFinanzasPanel = ({
                 const statusLabel =
                   STATUS_LABELS[payment.status] || payment.status;
                 const statusClass =
-                  payment.status === "paid"
+                  payment.status === "paid" || payment.status === "approved"
                     ? "bg-emerald-500/10 text-emerald-300"
                     : payment.status === "pending"
                       ? "bg-amber-500/10 text-amber-300"
@@ -537,7 +794,7 @@ const SuperAdminFinanzasPanel = ({
                 return (
                   <article
                     key={payment.id}
-                    className="grid min-h-[78px] gap-3 px-3 py-3 transition hover:bg-white/[0.02] md:grid-cols-[minmax(180px,1.35fr)_minmax(150px,1.05fr)_minmax(90px,0.7fr)_minmax(180px,1fr)_minmax(180px,0.9fr)] md:items-center"
+                    className="grid gap-x-4 gap-y-3 px-3 py-4 transition hover:bg-white/[0.02] sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-center sm:px-4 2xl:min-h-[78px] 2xl:grid-cols-[minmax(180px,1.35fr)_minmax(150px,1.05fr)_minmax(90px,0.7fr)_minmax(180px,1fr)_minmax(180px,0.9fr)]"
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold leading-tight text-white">
@@ -548,12 +805,14 @@ const SuperAdminFinanzasPanel = ({
                       </p>
                     </div>
 
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-2 sm:col-span-2 2xl:col-span-1">
                       {isSubscription ? (
                         <ShieldCheck
                           className="shrink-0 text-violet-300"
                           size={15}
                         />
+                      ) : isCourierTopup ? (
+                        <Bike className="shrink-0 text-emerald-300" size={15} />
                       ) : (
                         <Megaphone
                           className="shrink-0 text-cyan-300"
@@ -565,23 +824,33 @@ const SuperAdminFinanzasPanel = ({
                           {payment.title}
                         </p>
                         <p className="text-[11px] text-neutral-500">
-                          {isSubscription ? "Suscripción" : "Promoción"}
+                          {isSubscription
+                            ? "Suscripción"
+                            : isCourierTopup
+                              ? "Domiciliario"
+                              : "Promoción"}
                           {payment.period ? ` · ${payment.period}` : ""}
                         </p>
                         {payment.commissionStatement && (
-                          <p className="mt-1 text-[10px] leading-relaxed text-neutral-500">
-                            {formatDate(payment.commissionStatement.cycle_starts_at)}
-                            {" – "}
-                            {formatDate(payment.commissionStatement.cycle_ends_at)}
-                            {" · "}
-                            {payment.commissionStatement.order_count} tickets
-                            {" · "}
-                            {formatCurrency(payment.commissionStatement.sales_total)} en ventas
-                            {" · comisión por ticket: "}
-                            {formatCurrency(payment.commissionStatement.commission_total)}
-                            {" · mínimo: "}
-                            {formatCurrency(payment.commissionStatement.minimum_amount)}
-                          </p>
+                          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-white/[0.06] pt-2 text-[10px] leading-relaxed text-neutral-500 sm:grid-cols-4">
+                            <span className="col-span-2 sm:col-span-4">
+                              Ciclo: {formatDate(payment.commissionStatement.cycle_starts_at)}
+                              {" – "}
+                              {formatDate(payment.commissionStatement.cycle_ends_at)}
+                            </span>
+                            <span>
+                              Tickets: {payment.commissionStatement.order_count}
+                            </span>
+                            <span>
+                              Ventas: {formatCurrency(payment.commissionStatement.sales_total)}
+                            </span>
+                            <span>
+                              Comisión: {formatCurrency(payment.commissionStatement.commission_total)}
+                            </span>
+                            <span>
+                              Mínimo: {formatCurrency(payment.commissionStatement.minimum_amount)}
+                            </span>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -599,24 +868,61 @@ const SuperAdminFinanzasPanel = ({
                         {statusLabel}
                       </span>
                       <p className="mt-1 max-w-[180px] text-left text-[11px] text-neutral-500">
-                        {payment.paidAt
+                        {payment.paidAt && !isCourierTopup
                           ? `Pagado ${formatDate(payment.paidAt)}`
                           : `Solicitado ${formatDate(payment.createdAt)}`}
                       </p>
                     </div>
 
-                    <div className="flex min-w-0 w-full max-w-[220px] items-center justify-end gap-1.5 justify-self-end">
+                    <div className="flex min-w-0 w-full flex-wrap items-center justify-start gap-1.5 sm:col-span-2 2xl:col-span-1 2xl:justify-end 2xl:justify-self-end">
+                      {isCourierTopup &&
+                        isPending &&
+                        !payment.proofUrl && (
+                          <span className="text-[10px] text-rose-300">
+                            Comprobante no disponible
+                          </span>
+                        )}
                       {payment.supportPath && (
                         <button
                           type="button"
-                          onClick={() =>
-                            openPaymentSupport(payment.supportPath)
-                          }
+                          onClick={() => {
+                            if (isCourierTopup) {
+                              if (!payment.proofUrl) {
+                                setNotice(
+                                  "No se pudo generar el enlace al comprobante. Actualiza para volver a intentarlo.",
+                                );
+                                return;
+                              }
+                              window.open(
+                                payment.proofUrl,
+                                "_blank",
+                                "noopener,noreferrer",
+                              );
+                              return;
+                            }
+                            openPaymentSupport(payment.supportPath);
+                          }}
                           className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-[10px] font-semibold text-neutral-200 transition hover:border-violet-400/40 hover:text-white"
                         >
                           <ArrowDownToLine size={12} />
                           Comprobante
                         </button>
+                      )}
+                      {isCourierTopup && isPending && (
+                        <input
+                          value={topupNotes[payment.id] ?? ""}
+                          onChange={(event) =>
+                            setTopupNotes((current) => ({
+                              ...current,
+                              [payment.id]: event.target.value,
+                            }))
+                          }
+                          maxLength={500}
+                          aria-label={`Nota de revisión para ${payment.businessName}`}
+                          placeholder="Nota opcional"
+                          disabled={reviewingPaymentId === payment.id}
+                          className="w-28 rounded-lg border border-white/10 bg-neutral-950 px-2 py-1.5 text-[10px] text-white outline-none placeholder:text-neutral-500 focus:border-violet-400"
+                        />
                       )}
                       {isPending && (
                         <>
@@ -625,7 +931,9 @@ const SuperAdminFinanzasPanel = ({
                             onClick={() =>
                               isSubscription
                                 ? reviewSubscriptionPayment(payment, false)
-                                : reviewPromotionPayment(payment, false)
+                                : isCourierTopup
+                                  ? reviewCourierTopup(payment, false)
+                                  : reviewPromotionPayment(payment, false)
                             }
                             disabled={reviewingPaymentId === payment.id}
                             className="rounded-lg border border-red-500/20 bg-red-500/5 px-2 py-1.5 text-[10px] font-semibold text-red-200 transition hover:bg-red-500/10 disabled:opacity-50"
@@ -637,11 +945,14 @@ const SuperAdminFinanzasPanel = ({
                             onClick={() =>
                               isSubscription
                                 ? reviewSubscriptionPayment(payment, true)
-                                : reviewPromotionPayment(payment, true)
+                                : isCourierTopup
+                                  ? reviewCourierTopup(payment, true)
+                                  : reviewPromotionPayment(payment, true)
                             }
                             disabled={
                               reviewingPaymentId === payment.id ||
                               !payment.supportPath ||
+                              (isCourierTopup && !payment.proofUrl) ||
                               (!isSubscription && payment.amount == null) ||
                               (isSubscription &&
                                 !selectedPeriod &&
@@ -655,7 +966,9 @@ const SuperAdminFinanzasPanel = ({
                                 ? payment.commissionStatementId
                                   ? "Confirmar comisión"
                                   : "Confirmar y renovar"
-                                : "Confirmar pago"}
+                                : isCourierTopup
+                                  ? "Aprobar recarga"
+                                  : "Confirmar pago"}
                           </button>
                         </>
                       )}
@@ -666,6 +979,7 @@ const SuperAdminFinanzasPanel = ({
             </div>
           )}
         </section>
+        )}
       </div>
     </SuperAdminSectionShell>
   );

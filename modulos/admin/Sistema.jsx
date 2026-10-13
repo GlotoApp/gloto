@@ -1,6 +1,6 @@
 import SuperAdminSectionShell from "./ContenedorSeccion";
 import SuperAdminStorageCleanup from "./LimpiarArchivos";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CheckCircle2,
   Loader2,
@@ -8,13 +8,24 @@ import {
   Save,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
+import { useAdminRealtime } from "./useAdminRealtime";
 
 const SuperAdminSistemaPanel = () => {
   const [phoneInput, setPhoneInput] = useState("");
+  const [savedPhoneInput, setSavedPhoneInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const refreshSupportPhone = useCallback(() => {
+    if (!saving && phoneInput === savedPhoneInput) {
+      setRefreshKey((current) => current + 1);
+    }
+  }, [phoneInput, savedPhoneInput, saving]);
+
+  useAdminRealtime(["support_settings"], refreshSupportPhone);
 
   useEffect(() => {
     const loadSupportPhone = async () => {
@@ -30,13 +41,15 @@ const SuperAdminSistemaPanel = () => {
           "No se pudo cargar el contacto. Verifica que el SQL de configuración esté aplicado.",
         );
       } else {
-        setPhoneInput(data.whatsapp_phone || "");
+        const phone = data.whatsapp_phone || "";
+        setPhoneInput(phone);
+        setSavedPhoneInput(phone);
       }
       setLoading(false);
     };
 
     loadSupportPhone();
-  }, []);
+  }, [refreshKey]);
 
   const handleSave = async (event) => {
     event.preventDefault();
@@ -62,6 +75,7 @@ const SuperAdminSistemaPanel = () => {
 
       if (error) throw error;
       setPhoneInput(data.whatsapp_phone);
+      setSavedPhoneInput(data.whatsapp_phone);
       setSuccessMessage(
         phone
           ? "El contacto de soporte se actualizó correctamente."

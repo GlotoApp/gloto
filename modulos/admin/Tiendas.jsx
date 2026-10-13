@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
@@ -12,6 +12,14 @@ import {
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import SuperAdminSectionShell from "./ContenedorSeccion";
+import { useAdminRealtime } from "./useAdminRealtime";
+
+const STORE_REALTIME_TABLES = [
+  "businesses",
+  "business_info",
+  "subscriptions",
+  "business_notifications",
+];
 
 const formatMoney = (value) => {
   if (value === null || value === undefined || value === "") return "—";
@@ -67,6 +75,13 @@ const SuperAdminTiendasPanel = ({}) => {
   const [filtroPlan, setFiltroPlan] = useState("todos");
   const [filtroCategoria, setFiltroCategoria] = useState("todas");
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const scheduleRefresh = useCallback(
+    () => setRefreshKey((current) => current + 1),
+    [],
+  );
+
+  useAdminRealtime(STORE_REALTIME_TABLES, scheduleRefresh);
 
   useEffect(() => {
     const cargarTiendas = async () => {
@@ -147,7 +162,7 @@ const SuperAdminTiendasPanel = ({}) => {
     };
 
     cargarTiendas();
-  }, []);
+  }, [refreshKey]);
 
   const tiendasFiltradas = useMemo(() => {
     const query = busqueda.trim().toLowerCase();

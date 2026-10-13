@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import SuperAdminSectionShell from "./ContenedorSeccion";
+import { useAdminRealtime } from "./useAdminRealtime";
 
 const statusLabels = {
   pending: "Pendiente",
@@ -269,6 +270,19 @@ const DomiciliariosPublicos = () => {
       setActiveTopupId("");
     }
   };
+
+  const refreshActiveCourierData = useCallback(async () => {
+    if (activeTab === "applications") {
+      await loadApplications();
+    } else if (activeTab === "topups") {
+      await fetchTopups();
+    }
+  }, [activeTab, fetchTopups, loadApplications]);
+
+  useAdminRealtime(
+    ["public_courier_applications", "public_courier_topups"],
+    refreshActiveCourierData,
+  );
 
   useEffect(() => {
     let mounted = true;

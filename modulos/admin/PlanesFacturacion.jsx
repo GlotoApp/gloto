@@ -1,15 +1,27 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   BadgeCheck,
+  CalendarDays,
   CreditCard,
+  DollarSign,
+  Eye,
+  EyeOff,
+  GripVertical,
+  Heading,
+  Percent,
   Plus,
   RefreshCw,
   Save,
   ShieldAlert,
-  Trash2,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import SuperAdminSectionShell from "./ContenedorSeccion";
+import { useAdminRealtime } from "./useAdminRealtime";
+
+const PLAN_REALTIME_TABLES = [
+  "billing_plan_periods",
+  "billing_plan_features",
+];
 
 const inputClass =
   "w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400";
@@ -25,7 +37,19 @@ const PlanesFacturacion = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [savingId, setSavingId] = useState(null);
+  const [draggedFeatureId, setDraggedFeatureId] = useState(null);
   const [message, setMessage] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const scheduleRefresh = useCallback(() => {
+    const hasUnsubmittedFeatures = Object.values(newFeatureText).some((text) =>
+      text.trim(),
+    );
+    if (savingId === null && !hasUnsubmittedFeatures) {
+      setRefreshKey((current) => current + 1);
+    }
+  }, [newFeatureText, savingId]);
+
+  useAdminRealtime(PLAN_REALTIME_TABLES, scheduleRefresh);
 
   const fetchCatalog = useCallback(
     () =>
@@ -104,7 +128,7 @@ const PlanesFacturacion = () => {
     return () => {
       isMounted = false;
     };
-  }, [applyCatalogResults, fetchCatalog]);
+  }, [applyCatalogResults, fetchCatalog, refreshKey]);
 
   const loadCatalog = async () => {
     setLoading(true);
@@ -121,10 +145,71 @@ const PlanesFacturacion = () => {
     }
   };
 
-  const activePlans = useMemo(
-    () => plans.filter((plan) => plan.is_active).length,
-    [plans],
-  );
+  const reorderFeatures = async (planCode, targetFeatureId) => {
+    const sourceFeatureId = draggedFeatureId;
+    setDraggedFeatureId(null);
+    if (!sourceFeatureId || sourceFeatureId === targetFeatureId) return;
+
+    const planFeatures = features
+      .filter((feature) => feature.plan_code === planCode)
+      .sort(
+        (first, second) =>
+          Number(first.display_order) - Number(second.display_order),
+      );
+    const sourceIndex = planFeatures.findIndex(
+      (feature) => feature.id === sourceFeatureId,
+    );
+    const targetIndex = planFeatures.findIndex(
+      (feature) => feature.id === targetFeatureId,
+    );
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    const [movedFeature] = planFeatures.splice(sourceIndex, 1);
+    planFeatures.splice(targetIndex, 0, movedFeature);
+    const reorderedFeatures = planFeatures.map((feature, index) => ({
+      ...feature,
+      display_order: index,
+    }));
+    const orderById = new Map(
+      reorderedFeatures.map((feature) => [feature.id, feature.display_order]),
+    );
+
+    setFeatures((current) =>
+      current.map((feature) =>
+        orderById.has(feature.id)
+          ? { ...feature, display_order: orderById.get(feature.id) }
+          : feature,
+      ),
+    );
+    setSavingId(`feature-reorder-${planCode}`);
+    setMessage(null);
+
+    const results = await Promise.all(
+      reorderedFeatures.map((feature) =>
+        supabase
+          .from("billing_plan_features")
+          .update({ display_order: feature.display_order })
+          .eq("id", feature.id),
+      ),
+    );
+    const failedResult = results.find((result) => result.error);
+    if (failedResult) {
+      console.error("No se pudo guardar el orden de los ítems del plan:", failedResult.error);
+      setMessage({
+        type: "error",
+        text:
+          failedResult.error.message ||
+          "No se pudo guardar el nuevo orden de los ítems.",
+      });
+      await loadCatalog();
+    } else {
+      setMessage({
+        type: "success",
+        text: "Orden de los ítems actualizado.",
+      });
+    }
+    setSavingId(null);
+  };
 
   const updatePlanField = (planId, field, value) => {
     setPlans((current) =>
@@ -153,6 +238,70 @@ const PlanesFacturacion = () => {
     setMessage(null);
   };
 
+  const selectPlanHeader = async (planCode, featureId) => {
+    if (savingId !== null) return;
+
+    const planFeatures = features.filter(
+      (feature) => feature.plan_code === planCode,
+    );
+    const headersToClear = planFeatures.filter(
+      (feature) => feature.is_section && feature.id !== featureId,
+    );
+    const selectedFeature = planFeatures.find(
+      (feature) => feature.id === featureId,
+    );
+    if (!selectedFeature) return;
+
+    setFeatures((current) =>
+      current.map((feature) =>
+        feature.plan_code === planCode
+          ? { ...feature, is_section: feature.id === featureId }
+          : feature,
+      ),
+    );
+    setSavingId(`feature-header-${planCode}`);
+    setMessage(null);
+
+    for (const feature of headersToClear) {
+      const { error } = await supabase
+        .from("billing_plan_features")
+        .update({ is_section: false })
+        .eq("id", feature.id);
+
+      if (error) {
+        console.error("No se pudo actualizar el encabezado del plan:", error);
+        setMessage({
+          type: "error",
+          text: error.message || "No se pudo cambiar el encabezado del plan.",
+        });
+        await loadCatalog();
+        setSavingId(null);
+        return;
+      }
+    }
+
+    if (!selectedFeature.is_section) {
+      const { error } = await supabase
+        .from("billing_plan_features")
+        .update({ is_section: true })
+        .eq("id", featureId);
+
+      if (error) {
+        console.error("No se pudo guardar el encabezado del plan:", error);
+        setMessage({
+          type: "error",
+          text: error.message || "No se pudo guardar el encabezado del plan.",
+        });
+        await loadCatalog();
+        setSavingId(null);
+        return;
+      }
+    }
+
+    setMessage({ type: "success", text: "Encabezado del plan actualizado." });
+    setSavingId(null);
+  };
+
   const addFeature = async (planId) => {
     const planCode = planId;
     const featureText = String(newFeatureText[planCode] || "").trim();
@@ -177,6 +326,39 @@ const PlanesFacturacion = () => {
 
     setSavingId(`feature-new-${planCode}`);
     setMessage(null);
+
+    if (newFeatureIsSection[planCode]) {
+      const previousHeaders = features.filter(
+        (feature) => feature.plan_code === planCode && feature.is_section,
+      );
+      for (const feature of previousHeaders) {
+        const { error } = await supabase
+          .from("billing_plan_features")
+          .update({ is_section: false })
+          .eq("id", feature.id);
+
+        if (error) {
+          console.error(
+            "No se pudo actualizar el encabezado del plan antes de agregar el ítem:",
+            error,
+          );
+          setMessage({
+            type: "error",
+            text: error.message || "No se pudo cambiar el encabezado del plan.",
+          });
+          setSavingId(null);
+          return;
+        }
+      }
+      setFeatures((current) =>
+        current.map((feature) =>
+          feature.plan_code === planCode && feature.is_section
+            ? { ...feature, is_section: false }
+            : feature,
+        ),
+      );
+    }
+
     const result = existingFeature
       ? await supabase
           .from("billing_plan_features")
@@ -409,35 +591,10 @@ const PlanesFacturacion = () => {
           className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-neutral-200 transition hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
         >
           <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-          Actualizar
+          <span className="sr-only">Actualizar</span>
         </button>
       }
     >
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-white/10 bg-neutral-900/75 p-4">
-          <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-            Planes configurados
-          </p>
-          <p className="mt-2 text-2xl font-black">{plans.length}</p>
-        </div>
-        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-          <p className="text-xs font-bold uppercase tracking-wider text-emerald-200/70">
-            Planes disponibles
-          </p>
-          <p className="mt-2 text-2xl font-black text-emerald-200">
-            {activePlans}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4">
-          <p className="text-xs font-bold uppercase tracking-wider text-violet-200/70">
-            Periodos configurados
-          </p>
-          <p className="mt-2 text-2xl font-black text-violet-200">
-            {periods.length}
-          </p>
-        </div>
-      </div>
-
       {message && (
         <p
           role={message.type === "error" ? "alert" : "status"}
@@ -508,7 +665,14 @@ const PlanesFacturacion = () => {
                       </p>
                     </div>
                   </div>
-                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-neutral-300">
+                  <label
+                    className={`inline-flex cursor-pointer items-center rounded-lg border p-2 transition ${
+                      plan.is_active
+                        ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+                        : "border-white/10 bg-white/5 text-neutral-500"
+                    }`}
+                    title={plan.is_active ? "Plan disponible" : "Plan desactivado"}
+                  >
                     <input
                       type="checkbox"
                       checked={Boolean(plan.is_active)}
@@ -519,9 +683,12 @@ const PlanesFacturacion = () => {
                           event.target.checked,
                         )
                       }
-                      className="h-4 w-4 accent-violet-500"
+                      aria-label={`Plan ${plan.name}: ${
+                        plan.is_active ? "disponible" : "desactivado"
+                      }`}
+                      className="sr-only"
                     />
-                    {plan.is_active ? "Disponible" : "Desactivado"}
+                    {plan.is_active ? <Eye size={16} /> : <EyeOff size={16} />}
                   </label>
                 </header>
 
@@ -542,12 +709,160 @@ const PlanesFacturacion = () => {
                       type="button"
                       onClick={() => savePlan(plan)}
                       disabled={savingId === plan.id}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60"
+                      aria-label={`Guardar plan ${plan.name}`}
+                      title="Guardar plan"
+                      className="inline-flex items-center justify-center rounded-xl bg-violet-600 p-2.5 text-white transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60"
                     >
-                      <Save size={15} />
-                      {savingId === plan.id ? "Guardando..." : "Guardar plan"}
+                      <Save size={17} className={savingId === plan.id ? "animate-pulse" : ""} />
                     </button>
                   </div>
+                </div>
+
+                <div className="border-t border-white/10 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-bold text-white">
+                        Precios y periodos
+                      </h4>
+                      <p className="mt-1 text-xs text-neutral-500">
+                        {planPeriods.length} periodos
+                      </p>
+                      {plan.code === "premium" && isCommission && (
+                        <p className="mt-1 text-xs text-violet-300/80">
+                          Configura una comisión y un mínimo independientes
+                          para cada periodo.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {planPeriods.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-neutral-500">
+                      Este plan no tiene periodos de cobro configurados.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {planPeriods.map((period) => (
+                        <div
+                          key={period.id}
+                          className={`grid gap-3 rounded-xl border border-white/10 bg-neutral-950/50 p-3 sm:grid-cols-2 xl:items-center ${
+                            isCommission
+                              ? "xl:grid-cols-[minmax(160px,1.1fr)_minmax(160px,1fr)_minmax(160px,1fr)_auto_auto]"
+                              : "xl:grid-cols-[minmax(180px,1.2fr)_minmax(220px,1fr)_auto_auto]"
+                          }`}
+                        >
+                          <div className="flex flex-col justify-center">
+                            <p className="text-sm font-semibold text-white">
+                              {period.label}
+                            </p>
+                            <p className="flex items-center gap-1 text-xs text-neutral-500">
+                              <CalendarDays size={12} aria-hidden="true" />
+                              {period.duration_days} días
+                            </p>
+                          </div>
+                          <label className="relative block">
+                            <span className="sr-only">
+                              {isCommission
+                                ? "Comisión (%) · este periodo"
+                                : "Precio (COP)"}
+                            </span>
+                            <span
+                              aria-hidden="true"
+                              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
+                            >
+                              {isCommission ? <Percent size={15} /> : <DollarSign size={15} />}
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              max={isCommission ? "100" : undefined}
+                              step={isCommission ? "0.01" : "500"}
+                              value={
+                                isCommission
+                                  ? (period.commission_rate ?? "")
+                                  : (period.price_amount ?? "")
+                              }
+                              aria-label={isCommission
+                                ? `Comisión para ${period.label} en porcentaje`
+                                : `Precio para ${period.label} en COP`}
+                              onChange={(event) =>
+                                updatePeriodField(
+                                  period.id,
+                                  isCommission
+                                    ? "commission_rate"
+                                    : "price_amount",
+                                  event.target.value,
+                                )
+                              }
+                              className={`${inputClass} pl-9`}
+                            />
+                          </label>
+                          {isCommission && (
+                            <label className="relative block">
+                              <span className="sr-only">Mínimo (COP)</span>
+                              <DollarSign
+                                size={15}
+                                aria-hidden="true"
+                                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
+                              />
+                              <input
+                                type="number"
+                                min="0"
+                                step="500"
+                                value={period.minimum_amount ?? ""}
+                                aria-label={`Mínimo para ${period.label} en COP`}
+                                onChange={(event) =>
+                                  updatePeriodField(
+                                    period.id,
+                                    "minimum_amount",
+                                    event.target.value,
+                                  )
+                                }
+                                className={`${inputClass} pl-9`}
+                              />
+                            </label>
+                          )}
+                          <label
+                            className={`inline-flex cursor-pointer items-center rounded-lg border p-2 transition ${
+                              period.is_active
+                                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+                                : "border-white/10 bg-white/5 text-neutral-500"
+                            }`}
+                            title={period.is_active ? "Periodo disponible" : "Periodo desactivado"}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(period.is_active)}
+                              onChange={(event) =>
+                                updatePeriodField(
+                                  period.id,
+                                  "is_active",
+                                  event.target.checked,
+                                )
+                              }
+                              aria-label={`Periodo ${period.label}: ${
+                                period.is_active ? "disponible" : "desactivado"
+                              }`}
+                              className="sr-only"
+                            />
+                            {period.is_active ? <Eye size={16} /> : <EyeOff size={16} />}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => savePeriod(period, plan)}
+                            disabled={savingId === period.id}
+                            aria-label={`Guardar periodo ${period.label}`}
+                            title="Guardar periodo"
+                            className="inline-flex items-center justify-center rounded-xl border border-violet-500/30 bg-violet-500/10 p-2 text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-wait disabled:opacity-60"
+                          >
+                            <Save
+                              size={16}
+                              className={savingId === period.id ? "animate-pulse" : ""}
+                            />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t border-white/10 p-4">
@@ -571,16 +886,47 @@ const PlanesFacturacion = () => {
                     {planFeatures.map((feature) => (
                       <div
                         key={feature.id}
-                        className={`grid gap-2 rounded-xl border p-3 sm:grid-cols-[minmax(0,1fr)_100px_auto_auto] ${
+                        onDragOver={(event) => {
+                          if (
+                            draggedFeatureId &&
+                            draggedFeatureId !== feature.id
+                          ) {
+                            event.preventDefault();
+                          }
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          void reorderFeatures(plan.code, feature.id);
+                        }}
+                        className={`grid gap-2 rounded-xl border p-3 transition sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] ${
                           feature.is_active
                             ? "border-white/10 bg-neutral-950/50"
                             : "border-dashed border-white/10 opacity-60"
+                        } ${
+                          draggedFeatureId === feature.id
+                            ? "opacity-40"
+                            : draggedFeatureId
+                              ? "border-violet-400/30"
+                              : ""
                         }`}
                       >
+                        <button
+                          type="button"
+                          draggable={savingId === null}
+                          onDragStart={() => setDraggedFeatureId(feature.id)}
+                          onDragEnd={() => setDraggedFeatureId(null)}
+                          disabled={savingId !== null}
+                          aria-label={`Arrastrar para reordenar: ${feature.feature_text}`}
+                          title="Arrastra para cambiar el orden"
+                          className="inline-flex h-9 w-7 cursor-grab items-center justify-center self-end rounded-lg text-neutral-500 transition hover:bg-white/[0.06] hover:text-white active:cursor-grabbing disabled:cursor-not-allowed"
+                        >
+                          <GripVertical size={17} />
+                        </button>
                         <label>
-                          <span className={labelClass}>Texto del ítem</span>
+                          <span className="sr-only">Texto del ítem</span>
                           <input
                             value={feature.feature_text}
+                            aria-label="Texto del ítem"
                             onChange={(event) =>
                               updateFeatureField(
                                 feature.id,
@@ -592,37 +938,30 @@ const PlanesFacturacion = () => {
                             className={inputClass}
                           />
                         </label>
-                        <label>
-                          <span className={labelClass}>Orden</span>
+                        <label
+                          className={`inline-flex cursor-pointer items-center self-end rounded-lg border p-2 transition ${
+                            planFeatures.find((item) => item.is_section)?.id ===
+                            feature.id
+                              ? "border-violet-400/30 bg-violet-500/10 text-violet-200"
+                              : "border-white/10 text-neutral-500 hover:text-neutral-200"
+                          }`}
+                          title="Elegir como encabezado único del plan"
+                        >
                           <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={feature.display_order}
-                            onChange={(event) =>
-                              updateFeatureField(
-                                feature.id,
-                                "display_order",
-                                event.target.value,
-                              )
+                            type="radio"
+                            name={`plan-header-${plan.code}`}
+                            checked={
+                              planFeatures.find((item) => item.is_section)
+                                ?.id === feature.id
                             }
-                            className={inputClass}
-                          />
-                        </label>
-                        <label className="inline-flex cursor-pointer items-center gap-2 self-end pb-2 text-xs font-semibold text-neutral-300">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(feature.is_section)}
-                            onChange={(event) =>
-                              updateFeatureField(
-                                feature.id,
-                                "is_section",
-                                event.target.checked,
-                              )
+                            onChange={() =>
+                              void selectPlanHeader(plan.code, feature.id)
                             }
-                            className="h-4 w-4 accent-violet-500"
+                            aria-label={`Elegir ${feature.feature_text} como encabezado único`}
+                            disabled={savingId !== null}
+                            className="sr-only"
                           />
-                          Encabezado
+                          <Heading size={16} />
                         </label>
                         <div className="flex items-end gap-2">
                           <button
@@ -634,28 +973,27 @@ const PlanesFacturacion = () => {
                                 !feature.is_active,
                               )
                             }
-                            className={`rounded-xl border px-3 py-2 text-xs font-bold transition ${
+                            aria-label={feature.is_active
+                              ? `Ocultar ${feature.feature_text}`
+                              : `Mostrar ${feature.feature_text}`}
+                            title={feature.is_active ? "Ocultar" : "Mostrar"}
+                            className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border transition ${
                               feature.is_active
                                 ? "border-red-500/20 text-red-200 hover:bg-red-500/10"
                                 : "border-emerald-500/20 text-emerald-200 hover:bg-emerald-500/10"
                             }`}
                           >
-                            {feature.is_active ? (
-                              <span className="inline-flex items-center gap-1">
-                                <Trash2 size={13} /> Ocultar
-                              </span>
-                            ) : (
-                              "Mostrar"
-                            )}
+                            {feature.is_active ? <EyeOff size={15} /> : <Eye size={15} />}
                           </button>
                           <button
                             type="button"
                             onClick={() => saveFeature(feature)}
                             disabled={savingId === feature.id}
-                            className="inline-flex items-center gap-1 rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60"
+                            aria-label={`Guardar ${feature.feature_text}`}
+                            title="Guardar ítem"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-violet-600 text-white transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60"
                           >
-                            <Save size={13} />
-                            {savingId === feature.id ? "..." : "Guardar"}
+                            <Save size={15} className={savingId === feature.id ? "animate-pulse" : ""} />
                           </button>
                         </div>
                       </div>
@@ -689,19 +1027,28 @@ const PlanesFacturacion = () => {
                         className={inputClass}
                       />
                     </label>
-                    <label className="inline-flex cursor-pointer items-center gap-2 self-end pb-2 text-xs font-semibold text-neutral-300">
+                    <label
+                    className={`inline-flex cursor-pointer items-center self-end rounded-lg border p-2 transition ${
+                        newFeatureIsSection[plan.id]
+                          ? "border-violet-400/30 bg-violet-500/10 text-violet-200"
+                          : "border-white/10 text-neutral-500 hover:text-neutral-200"
+                      }`}
+                    title="Agregar como encabezado único"
+                    >
                       <input
-                        type="checkbox"
-                        checked={Boolean(newFeatureIsSection[plan.id])}
-                        onChange={(event) =>
-                          setNewFeatureIsSection((current) => ({
-                            ...current,
-                            [plan.id]: event.target.checked,
-                          }))
-                        }
-                        className="h-4 w-4 accent-violet-500"
-                      />
-                      Es encabezado
+                      type="radio"
+                      name={`new-plan-header-${plan.code}`}
+                      checked={Boolean(newFeatureIsSection[plan.id])}
+                      onChange={() =>
+                        setNewFeatureIsSection((current) => ({
+                          ...current,
+                          [plan.id]: true,
+                        }))
+                      }
+                      aria-label="Agregar como encabezado único"
+                      className="sr-only"
+                    />
+                      <Heading size={16} />
                     </label>
                     <button
                       type="submit"
@@ -709,142 +1056,28 @@ const PlanesFacturacion = () => {
                         savingId === `feature-new-${plan.id}` ||
                         !String(newFeatureText[plan.id] || "").trim()
                       }
-                      className="inline-flex items-center justify-center gap-2 self-end rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                      aria-label="Agregar ítem"
+                      title="Agregar ítem"
+                      className="inline-flex items-center justify-center self-end rounded-xl border border-violet-500/30 bg-violet-500/10 p-2.5 text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Plus size={15} />
-                      {savingId === `feature-new-${plan.id}`
-                        ? "Agregando..."
-                        : "Agregar"}
                     </button>
                   </form>
                 </div>
 
-                <div className="border-t border-white/10 p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <h4 className="text-sm font-bold text-white">
-                        Periodos de cobro
-                      </h4>
-                      <p className="mt-1 text-xs text-neutral-500">
-                        {planPeriods.length} configurados · el usuario paga el
-                        precio definido en cada periodo.
-                      </p>
-                      {plan.code === "premium" && isCommission && (
-                        <p className="mt-1 text-xs text-violet-300/80">
-                          Configura una comisión y un mínimo independientes
-                          para cada periodo.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  {planPeriods.length === 0 ? (
-                    <p className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-neutral-500">
-                      Este plan no tiene periodos de cobro configurados.
-                    </p>
-                  ) : (
-                    <div className="space-y-3">
-                      {planPeriods.map((period) => (
-                        <div
-                          key={period.id}
-                          className="grid gap-3 rounded-xl border border-white/10 bg-neutral-950/50 p-3 sm:grid-cols-2 xl:grid-cols-[1.1fr_1fr_1fr_auto_auto]"
-                        >
-                          <div className="flex flex-col justify-center">
-                            <p className="text-sm font-semibold text-white">
-                              {period.label}
-                            </p>
-                            <p className="text-xs text-neutral-500">
-                              {period.duration_days} días · {period.code}
-                            </p>
-                          </div>
-                          <label>
-                            <span className={labelClass}>
-                              {isCommission
-                                ? "Comisión (%) · este periodo"
-                                : "Precio (COP)"}
-                            </span>
-                            <input
-                              type="number"
-                              min="0"
-                              max={isCommission ? "100" : undefined}
-                              step={isCommission ? "0.01" : "500"}
-                              value={
-                                isCommission
-                                  ? (period.commission_rate ?? "")
-                                  : (period.price_amount ?? "")
-                              }
-                              onChange={(event) =>
-                                updatePeriodField(
-                                  period.id,
-                                  isCommission
-                                    ? "commission_rate"
-                                    : "price_amount",
-                                  event.target.value,
-                                )
-                              }
-                              className={inputClass}
-                            />
-                          </label>
-                          {isCommission && (
-                            <label>
-                              <span className={labelClass}>
-                                Mínimo (COP)
-                              </span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="500"
-                                value={period.minimum_amount ?? ""}
-                                onChange={(event) =>
-                                  updatePeriodField(
-                                    period.id,
-                                    "minimum_amount",
-                                    event.target.value,
-                                  )
-                                }
-                                className={inputClass}
-                              />
-                            </label>
-                          )}
-                          <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-neutral-300">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(period.is_active)}
-                              onChange={(event) =>
-                                updatePeriodField(
-                                  period.id,
-                                  "is_active",
-                                  event.target.checked,
-                                )
-                              }
-                              className="h-4 w-4 accent-violet-500"
-                            />
-                            {period.is_active ? "Disponible" : "Desactivado"}
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => savePeriod(period, plan)}
-                            disabled={savingId === period.id}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-wait disabled:opacity-60"
-                          >
-                            <Save size={14} />
-                            {savingId === period.id ? "Guardando..." : "Guardar"}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
               </section>
             );
           })}
         </div>
       )}
 
-      <div className="flex items-start gap-2 rounded-xl border border-amber-500/15 bg-amber-500/5 p-3 text-xs leading-5 text-amber-100/70">
-        <BadgeCheck size={15} className="mt-0.5 shrink-0" />
-        Cambiar el precio mensual actualiza también el precio principal del
-        plan; el trimestral conserva su propio costo. Los nuevos precios se
-        aplican a compras y renovaciones futuras, sin alterar cobros históricos.
+      <div
+        role="note"
+        aria-label="Cambiar el precio mensual actualiza también el precio principal del plan; el trimestral conserva su propio costo. Los nuevos precios se aplican a compras y renovaciones futuras, sin alterar cobros históricos."
+        title="El precio mensual actualiza el principal del plan; el trimestral es independiente. Los cambios aplican a compras y renovaciones futuras."
+        className="flex justify-end text-amber-200/70"
+      >
+        <BadgeCheck size={17} aria-hidden="true" />
       </div>
     </SuperAdminSectionShell>
   );

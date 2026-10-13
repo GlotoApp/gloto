@@ -85,10 +85,35 @@ export async function removeStorageObjectIfUnused(bucket, pathOrUrl) {
         .eq("icon_url", publicUrl)
         .limit(1),
       supabase.from("categories").select("id").eq("icon_url", path).limit(1),
+      supabase
+        .from("categories_shop")
+        .select("id")
+        .eq("icon_url", publicUrl)
+        .limit(1),
+      supabase
+        .from("categories_shop")
+        .select("id")
+        .eq("icon_url", path)
+        .limit(1),
     );
   } else if (bucket === "system") {
     referenceQueries.push(
+      supabase
+        .from("categories")
+        .select("id")
+        .eq("icon_url", publicUrl)
+        .limit(1),
       supabase.from("categories").select("id").eq("icon_url", path).limit(1),
+      supabase
+        .from("categories_shop")
+        .select("id")
+        .eq("icon_url", publicUrl)
+        .limit(1),
+      supabase
+        .from("categories_shop")
+        .select("id")
+        .eq("icon_url", path)
+        .limit(1),
     );
   } else if (bucket === "payment-supports") {
     referenceQueries.push(
@@ -101,6 +126,19 @@ export async function removeStorageObjectIfUnused(bucket, pathOrUrl) {
         .from("promotions")
         .select("id")
         .eq("payment_support_path", path)
+        .limit(1),
+      supabase
+        .from("business_plan_change_requests")
+        .select("id")
+        .eq("payment_support_path", path)
+        .limit(1),
+    );
+  } else if (bucket === "courier-topup-proofs") {
+    referenceQueries.push(
+      supabase
+        .from("public_courier_topups")
+        .select("id")
+        .eq("proof_path", path)
         .limit(1),
     );
   } else if (bucket === "payment-qr") {

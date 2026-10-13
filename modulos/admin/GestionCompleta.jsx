@@ -8,7 +8,7 @@
 // solo hay que reemplazar las funciones `cargarTiendas` / `guardarTiendas`
 // por llamadas a tu API — el resto del componente no debería cambiar.
 
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useState, useEffect, useMemo } from "react";
 import {
   ChevronLeft,
   Search,
@@ -22,6 +22,7 @@ import {
   Upload,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
+import { useAdminRealtime } from "./useAdminRealtime";
 import { useNavigate } from "react-router-dom";
 import CrearTiendaWizard from "./CrearTienda";
 import SuperAdminSidebar from "./MenuLateral";
@@ -321,6 +322,16 @@ const SuperAdmin = ({ onVolver }) => {
   const [cargandoPagos, setCargandoPagos] = useState(true);
   const [confirmandoPago, setConfirmandoPago] = useState(null);
   const [activeSection, setActiveSection] = useState("resumen");
+  const [pendingRefreshKey, setPendingRefreshKey] = useState(0);
+  const schedulePendingRefresh = useCallback(
+    () => setPendingRefreshKey((current) => current + 1),
+    [],
+  );
+
+  useAdminRealtime(
+    ["promotions", "payment_records"],
+    schedulePendingRefresh,
+  );
 
   const [tiendaAEliminar, setTiendaAEliminar] = useState(null);
   const navigate = useNavigate();
@@ -351,7 +362,7 @@ const SuperAdmin = ({ onVolver }) => {
     };
 
     cargarPromocionesPendientes();
-  }, []);
+  }, [pendingRefreshKey]);
 
   useEffect(() => {
     const cargarTarifasPromociones = async () => {
@@ -410,7 +421,7 @@ const SuperAdmin = ({ onVolver }) => {
     };
 
     cargarPagosPendientes();
-  }, []);
+  }, [pendingRefreshKey]);
 
   // Guardar cada vez que cambien las tiendas (después de la carga inicial)
   useEffect(() => {

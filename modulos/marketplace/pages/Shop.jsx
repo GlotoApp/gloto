@@ -9,7 +9,7 @@ import {
   Clock3,
   X,
   MapPin,
-  Home,
+  Store,
   ShoppingBag,
 } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
@@ -355,6 +355,7 @@ const Shop = () => {
     crearPedido,
     finalizarPedido,
   } = useCart();
+  const [marketplaceHintVisible, setMarketplaceHintVisible] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [shareMessage, setShareMessage] = useState("");
@@ -370,6 +371,17 @@ const Shop = () => {
   const [tiendaConProductosModal, setTiendaConProductosModal] = useState("");
   const searchInputRef = useRef(null);
   const filtrosRef = useRef(null);
+
+  useEffect(() => {
+    if (isLoadingProductos) return undefined;
+
+    setMarketplaceHintVisible(true);
+    const timer = window.setTimeout(
+      () => setMarketplaceHintVisible(false),
+      3500,
+    );
+    return () => window.clearTimeout(timer);
+  }, [isLoadingProductos, slug]);
 
   const tiendaAnteriorLabel =
     tiendaConProductosModal ||
@@ -697,17 +709,17 @@ const Shop = () => {
               nombre: producto.name,
               desc: producto.description || "",
               precio: Number(producto.price) || 0,
-              stock: inventoryEnabled
-                ? Number(producto.stock || 0)
-                : undefined,
-              unit:
-                producto.unit ||
-                { id: producto.unit_id, name: "UNIDAD", allows_fraction: false },
+              stock: inventoryEnabled ? Number(producto.stock || 0) : undefined,
+              unit: producto.unit || {
+                id: producto.unit_id,
+                name: "UNIDAD",
+                allows_fraction: false,
+              },
               isSoldOut: producto.is_sold_out || producto.is_soldout || false,
               isAvailable: inventoryEnabled
-                ? availabilityMap[producto.id] ??
+                ? (availabilityMap[producto.id] ??
                   (Number(producto.stock || 0) > 0 &&
-                    !Boolean(producto.is_sold_out || producto.is_soldout))
+                    !Boolean(producto.is_sold_out || producto.is_soldout)))
                 : !Boolean(producto.is_sold_out || producto.is_soldout),
               orderIndex: Number(producto.order_index || 0),
               categoryOrderIndex:
@@ -1077,8 +1089,12 @@ const Shop = () => {
       : productosParaBuscar.filter((p) => {
           const q = searchQuery.trim().toLowerCase();
           return (
-            String(p.nombre || "").toLowerCase().includes(q) ||
-            String(p.desc || "").toLowerCase().includes(q)
+            String(p.nombre || "")
+              .toLowerCase()
+              .includes(q) ||
+            String(p.desc || "")
+              .toLowerCase()
+              .includes(q)
           );
         });
   const displayedProductGroups =
@@ -1244,6 +1260,13 @@ const Shop = () => {
           78% { top: calc(100% - 90px); opacity: 1; transform: translate(-50%, -50%) scale(0.62) rotate(3deg); }
           100% { top: calc(100% - 54px); opacity: 0; transform: translate(-50%, -50%) scale(0.18) rotate(-2deg); }
         }
+        @keyframes marketplaceHintIn {
+          from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .marketplace-explore-shell, .marketplace-explore-button, .marketplace-explore-label { animation: none !important; transition: none !important; }
+        }
       `}</style>
       <div
         style={{
@@ -1403,25 +1426,80 @@ const Shop = () => {
               </div>
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={() => navigate("/")} // Redirige directamente al home/marketplace
+                <div
+                  className="marketplace-explore-shell"
                   style={{
-                    width: "36px",
-                    height: "36px",
-                    borderRadius: "50%",
-                    background: "rgba(0,0,0,0.55)",
-                    backdropFilter: "blur(10px)",
-                    border: "1px solid rgba(255,255,255,0.12)",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
+                    width: marketplaceHintVisible ? "140px" : "40px",
+                    height: "40px",
+                    padding: "2px",
+                    overflow: "hidden",
+                    borderRadius: "22px",
+                    background: marketplaceHintVisible
+                      ? "linear-gradient(135deg, #8b5cf6, #6d28d9)"
+                      : "rgba(0,0,0,0.55)",
+                    boxShadow: marketplaceHintVisible
+                      ? "0 8px 24px rgba(109,40,217,0.32)"
+                      : "none",
+                    transition:
+                      "width 520ms cubic-bezier(0.22,1,0.36,1), background 350ms ease, box-shadow 350ms ease",
+                    animation: marketplaceHintVisible
+                      ? "marketplaceHintIn 500ms cubic-bezier(0.22,1,0.36,1) both"
+                      : "none",
                   }}
-                  aria-label="Ir al inicio"
                 >
-                  <Home size={18} color="#fff" />
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/marketplace")}
+                    style={{
+                      width: "36px",
+                      height: "36px",
+                      flex: "0 0 36px",
+                      borderRadius: "50%",
+                      position: "relative",
+                      zIndex: 1,
+                      background: "transparent",
+                      border: "none",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      transition: "transform 250ms ease",
+                    }}
+                    className="marketplace-explore-button"
+                    aria-label="Explorar más"
+                    title="Explorar más"
+                  >
+                    <Store size={18} color="#fff" />
+                  </button>
+                  <div
+                    aria-hidden={!marketplaceHintVisible}
+                    style={{
+                      width: marketplaceHintVisible ? "100px" : "0",
+                      flex: `0 0 ${marketplaceHintVisible ? "100px" : "0px"}`,
+                      padding: marketplaceHintVisible ? "0 10px" : "0",
+                      marginLeft: 0,
+                      position: "relative",
+                      zIndex: 0,
+                      color: "#fff",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      lineHeight: "18px",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      opacity: marketplaceHintVisible ? 1 : 0,
+                      transform: marketplaceHintVisible
+                        ? "translateX(0)"
+                        : "translateX(-28px)",
+                      transition:
+                        "width 520ms cubic-bezier(0.22,1,0.36,1), flex-basis 520ms cubic-bezier(0.22,1,0.36,1), padding 520ms ease, opacity 260ms ease, transform 520ms cubic-bezier(0.22,1,0.36,1)",
+                    }}
+                    className="marketplace-explore-label"
+                  >
+                    Explorar más
+                  </div>
+                </div>
                 <div style={{ display: "flex", gap: "10px" }}>
                   <button
                     type="button"
@@ -1978,212 +2056,212 @@ const Shop = () => {
                     idx === group.products.length - 1;
                   return (
                     <div key={p.id}>
-                  <div
-                    onClick={() => abrirDetalleProducto(p)}
-                    style={{
-                      display: "flex",
-                      gap: "14px",
-                      padding: "16px 20px 24px",
-                      alignItems: "flex-start",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {/* Info */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      {p.tag && (
-                        <span
-                          style={{
-                            display: "inline-block",
-                            fontSize: "10px",
-                            fontWeight: 700,
-                            letterSpacing: "0.06em",
-                            textTransform: "uppercase",
-                            color: TAG_MAP[p.tag] || "#7c3aed",
-                            marginBottom: "5px",
-                          }}
-                        >
-                          {p.tag}
-                        </span>
-                      )}
-                      {/* badge moved to image overlay to keep product in place */}
-                      <h4
-                        style={{
-                          fontWeight: 700,
-                          fontSize: "14px",
-                          marginBottom: "4px",
-                          lineHeight: 1.3,
-                          letterSpacing: "-0.01em",
-                        }}
-                      >
-                        {p.nombre}
-                      </h4>
-                      <p
-                        style={{
-                          display: "-webkit-box",
-                          WebkitBoxOrient: "vertical",
-                          WebkitLineClamp: 3,
-                          overflow: "hidden",
-                          height: "55.8px",
-                          fontSize: "12px",
-                          color: "rgba(255,255,255,0.4)",
-                          lineHeight: 1.55,
-                          marginBottom: "12px",
-                        }}
-                      >
-                        {p.desc}
-                      </p>
                       <div
+                        onClick={() => abrirDetalleProducto(p)}
                         style={{
                           display: "flex",
-                          alignItems: "baseline",
-                          flexWrap: "wrap",
-                          columnGap: "3px",
-                          rowGap: "4px",
+                          gap: "14px",
+                          padding: "16px 20px 24px",
+                          alignItems: "flex-start",
+                          cursor: "pointer",
                         }}
                       >
-                        <span
-                          style={{
-                            fontWeight: 800,
-                            fontSize: "15px",
-                            color: "#fff",
-                          }}
-                        >
-                          {fmt(p.precio)}
-                        </span>
-                        <span
-                          style={{
-                            fontWeight: 600,
-                            fontSize: "9px",
-                            color: "rgba(255,255,255,0.45)",
-                          }}
-                        >
-                          {p.unit?.name || "UNIDAD"}
-                        </span>
-                        {precioExtraMax > 0 && (
-                          <span
+                        {/* Info */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {p.tag && (
+                            <span
+                              style={{
+                                display: "inline-block",
+                                fontSize: "10px",
+                                fontWeight: 700,
+                                letterSpacing: "0.06em",
+                                textTransform: "uppercase",
+                                color: TAG_MAP[p.tag] || "#7c3aed",
+                                marginBottom: "5px",
+                              }}
+                            >
+                              {p.tag}
+                            </span>
+                          )}
+                          {/* badge moved to image overlay to keep product in place */}
+                          <h4
                             style={{
                               fontWeight: 700,
+                              fontSize: "14px",
+                              marginBottom: "4px",
+                              lineHeight: 1.3,
+                              letterSpacing: "-0.01em",
+                            }}
+                          >
+                            {p.nombre}
+                          </h4>
+                          <p
+                            style={{
+                              display: "-webkit-box",
+                              WebkitBoxOrient: "vertical",
+                              WebkitLineClamp: 3,
+                              overflow: "hidden",
+                              height: "55.8px",
                               fontSize: "12px",
-                              color: "rgba(255,255,255,0.65)",
+                              color: "rgba(255,255,255,0.4)",
+                              lineHeight: 1.55,
+                              marginBottom: "12px",
                             }}
                           >
-                            +{fmt(precioExtraMax)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Imagen + botón superpuesto */}
-                    <div
-                      style={{
-                        position: "relative",
-                        flexShrink: 0,
-                        width: "88px",
-                      }}
-                    >
-                      {/* Imagen */}
-                      <div
-                        style={{
-                          width: "88px",
-                          height: "88px",
-                          borderRadius: "16px",
-                          background: "#131313",
-                          border: "1px solid rgba(255,255,255,0.06)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          overflow: "hidden",
-                          position: "relative",
-                        }}
-                      >
-                        {p.image ? (
-                          <img
-                            src={p.image}
-                            alt={p.nombre}
-                            onError={(event) => {
-                              event.currentTarget.onerror = null;
-                              event.currentTarget.src = "/default.png";
-                            }}
+                            {p.desc}
+                          </p>
+                          <div
                             style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                            }}
-                          />
-                        ) : (
-                          <span
-                            style={{
-                              color: "#fff",
-                              fontSize: "22px",
-                              fontWeight: 700,
+                              display: "flex",
+                              alignItems: "baseline",
+                              flexWrap: "wrap",
+                              columnGap: "3px",
+                              rowGap: "4px",
                             }}
                           >
-                            {p.nombre?.charAt(0).toUpperCase() || "?"}
-                          </span>
-                        )}
+                            <span
+                              style={{
+                                fontWeight: 800,
+                                fontSize: "15px",
+                                color: "#fff",
+                              }}
+                            >
+                              {fmt(p.precio)}
+                            </span>
+                            <span
+                              style={{
+                                fontWeight: 600,
+                                fontSize: "9px",
+                                color: "rgba(255,255,255,0.45)",
+                              }}
+                            >
+                              {p.unit?.name || "UNIDAD"}
+                            </span>
+                            {precioExtraMax > 0 && (
+                              <span
+                                style={{
+                                  fontWeight: 700,
+                                  fontSize: "12px",
+                                  color: "rgba(255,255,255,0.65)",
+                                }}
+                              >
+                                +{fmt(precioExtraMax)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
 
-                        {(p.isAvailable === false ||
-                          p.isSoldOut ||
-                          (shopInventoryEnabled &&
-                            typeof p.stock === "number" &&
-                            p.stock <= 0)) && (
+                        {/* Imagen + botón superpuesto */}
+                        <div
+                          style={{
+                            position: "relative",
+                            flexShrink: 0,
+                            width: "88px",
+                          }}
+                        >
+                          {/* Imagen */}
+                          <div
+                            style={{
+                              width: "88px",
+                              height: "88px",
+                              borderRadius: "16px",
+                              background: "#131313",
+                              border: "1px solid rgba(255,255,255,0.06)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              overflow: "hidden",
+                              position: "relative",
+                            }}
+                          >
+                            {p.image ? (
+                              <img
+                                src={p.image}
+                                alt={p.nombre}
+                                onError={(event) => {
+                                  event.currentTarget.onerror = null;
+                                  event.currentTarget.src = "/default.png";
+                                }}
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  objectFit: "cover",
+                                }}
+                              />
+                            ) : (
+                              <span
+                                style={{
+                                  color: "#fff",
+                                  fontSize: "22px",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {p.nombre?.charAt(0).toUpperCase() || "?"}
+                              </span>
+                            )}
+
+                            {(p.isAvailable === false ||
+                              p.isSoldOut ||
+                              (shopInventoryEnabled &&
+                                typeof p.stock === "number" &&
+                                p.stock <= 0)) && (
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  top: "6px",
+                                  left: "6px",
+                                  padding: "4px 8px",
+                                  borderRadius: "999px",
+                                  background: "rgba(229,62,62,0.95)",
+                                  color: "#fff",
+                                  fontSize: "11px",
+                                  fontWeight: 800,
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.04em",
+                                }}
+                              >
+                                Agotado
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Indicador superpuesto en esquina inferior derecha */}
                           <div
                             style={{
                               position: "absolute",
-                              top: "6px",
-                              left: "6px",
-                              padding: "4px 8px",
-                              borderRadius: "999px",
-                              background: "rgba(229,62,62,0.95)",
+                              bottom: "-10px",
+                              right: "-10px",
+                              minWidth: "32px",
+                              height: "32px",
+                              borderRadius: "50%",
+                              background: "#7c3aed",
                               color: "#fff",
-                              fontSize: "11px",
-                              fontWeight: 800,
-                              textTransform: "uppercase",
-                              letterSpacing: "0.04em",
+                              fontSize: "14px",
+                              fontWeight: 700,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              boxShadow: "0 4px 12px rgba(124,58,237,0.5)",
+                              lineHeight: 1,
+                              padding: "0 10px",
+                              pointerEvents: "none",
                             }}
                           >
-                            Agotado
+                            {qty === 0 ? "+" : qty}
                           </div>
-                        )}
+                        </div>
                       </div>
 
-                      {/* Indicador superpuesto en esquina inferior derecha */}
-                      <div
-                        style={{
-                          position: "absolute",
-                          bottom: "-10px",
-                          right: "-10px",
-                          minWidth: "32px",
-                          height: "32px",
-                          borderRadius: "50%",
-                          background: "#7c3aed",
-                          color: "#fff",
-                          fontSize: "14px",
-                          fontWeight: 700,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          boxShadow: "0 4px 12px rgba(124,58,237,0.5)",
-                          lineHeight: 1,
-                          padding: "0 10px",
-                          pointerEvents: "none",
-                        }}
-                      >
-                        {qty === 0 ? "+" : qty}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Divisor entre items */}
-                  {!isLast && (
-                    <div
-                      style={{
-                        height: "1px",
-                        background: "#131313",
-                        margin: "0 20px",
-                      }}
-                    />
-                  )}
+                      {/* Divisor entre items */}
+                      {!isLast && (
+                        <div
+                          style={{
+                            height: "1px",
+                            background: "#131313",
+                            margin: "0 20px",
+                          }}
+                        />
+                      )}
                     </div>
                   );
                 })}

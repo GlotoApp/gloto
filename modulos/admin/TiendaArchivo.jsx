@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -29,6 +29,21 @@ import {
 } from "../../src/lib/supabaseClient";
 import { compressCanvasToImage } from "../../src/lib/imageCompression";
 import TiendaDetalle from "./TiendaDetalle";
+import { useAdminRealtime } from "./useAdminRealtime";
+
+const STORE_DETAIL_REALTIME_TABLES = [
+  "businesses",
+  "business_info",
+  "subscriptions",
+  "business_notifications",
+  "categories",
+  "categories_shop",
+  "inventory_categories",
+  "billing_plan_periods",
+  "products",
+  "inventory_items",
+  "business_hours",
+];
 
 const WEEKDAYS = [
   { value: 1, label: "Lunes" },
@@ -155,6 +170,7 @@ const TiendaArchivo = () => {
   const [changingPlan, setChangingPlan] = useState(false);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [realtimeRefreshKey, setRealtimeRefreshKey] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [locationEditMode, setLocationEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -515,9 +531,17 @@ const TiendaArchivo = () => {
     }
   };
 
+  const scheduleStoreRefresh = useCallback(() => {
+    if (!editMode && !locationEditMode && !saving) {
+      setRealtimeRefreshKey((current) => current + 1);
+    }
+  }, [editMode, locationEditMode, saving]);
+
+  useAdminRealtime(STORE_DETAIL_REALTIME_TABLES, scheduleStoreRefresh);
+
   useEffect(() => {
     loadStoreData();
-  }, [id]);
+  }, [id, realtimeRefreshKey]);
 
   useEffect(() => {
     if (!editMode || !mapElementRef.current) return undefined;
