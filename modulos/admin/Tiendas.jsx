@@ -21,17 +21,6 @@ const STORE_REALTIME_TABLES = [
   "business_notifications",
 ];
 
-const formatMoney = (value) => {
-  if (value === null || value === undefined || value === "") return "—";
-  const amount = Number(value);
-  if (Number.isNaN(amount)) return value;
-  return new Intl.NumberFormat("es-CO", {
-    style: "currency",
-    currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(amount);
-};
-
 const getInitials = (name) =>
   (name || "T")
     .split(" ")
@@ -67,7 +56,7 @@ const normalizeBusinessData = (
     };
   });
 
-const SuperAdminTiendasPanel = ({}) => {
+const SuperAdminTiendasPanel = () => {
   const navigate = useNavigate();
   const [tiendas, setTiendas] = useState([]);
   const [busqueda, setBusqueda] = useState("");

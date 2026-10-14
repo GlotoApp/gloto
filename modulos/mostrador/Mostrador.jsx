@@ -3,17 +3,25 @@ import { useParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
+  Download,
   Expand,
   LoaderCircle,
   RefreshCw,
   Store,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
+import { toBlobURL } from "@ffmpeg/util";
+import ffmpegCoreURL from "@ffmpeg/core?url";
+import ffmpegWasmURL from "@ffmpeg/core/wasm?url";
 import { supabase } from "../../src/lib/supabaseClient";
 
 const REFRESH_INTERVAL_MS = 90_000;
 const SLIDE_DURATION_MS = 7_000;
 const CONTROLS_IDLE_MS = 3_000;
+const VIDEO_WIDTH = 1280;
+const VIDEO_HEIGHT = 720;
+const VIDEO_FPS = 15;
+const VIDEO_TRANSITION_MS = 300;
 
 const formatPrice = (price) =>
   new Intl.NumberFormat("es-CO", {
@@ -23,6 +31,155 @@ const formatPrice = (price) =>
     maximumFractionDigits: 0,
   }).format(Number(price) || 0);
 
+const wait = (duration) =>
+  new Promise((resolve) => window.setTimeout(resolve, duration));
+
+const loadVideoImage = (src) =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () =>
+      reject(
+        new Error(
+          "No se pudo cargar una imagen del menú para el video. Comprueba que sus imágenes permitan acceso desde este sitio.",
+        ),
+      );
+    image.src = src;
+  });
+
+const drawCoverImage = (context, image) => {
+  const scale = Math.max(
+    VIDEO_WIDTH / image.width,
+    VIDEO_HEIGHT / image.height,
+  );
+  const width = image.width * scale;
+  const height = image.height * scale;
+  context.drawImage(
+    image,
+    (VIDEO_WIDTH - width) / 2,
+    (VIDEO_HEIGHT - height) / 2,
+    width,
+    height,
+  );
+};
+
+const drawWrappedText = (context, text, x, y, maxWidth, lineHeight, maxLines) => {
+  const words = text.split(/\s+/);
+  const lines = [];
+  let line = "";
+
+  words.forEach((word) => {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && context.measureText(candidate).width > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  });
+  if (line) lines.push(line);
+
+  lines.slice(0, maxLines).forEach((textLine, index) => {
+    context.fillText(textLine, x, y + index * lineHeight);
+  });
+
+  return Math.min(lines.length, maxLines) * lineHeight;
+};
+
+const drawVideoSlide = (product, business, images) => {
+  const canvas = document.createElement("canvas");
+  canvas.width = VIDEO_WIDTH;
+  canvas.height = VIDEO_HEIGHT;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Este navegador no pudo crear el video.");
+
+  const productImage = images.get(product.image_url);
+  if (productImage) {
+    drawCoverImage(context, productImage);
+  } else {
+    const background = context.createLinearGradient(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+    background.addColorStop(0, "#262522");
+    background.addColorStop(1, "#10100f");
+    context.fillStyle = background;
+    context.fillRect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+  }
+
+  const bottomGradient = context.createLinearGradient(0, 220, 0, VIDEO_HEIGHT);
+  bottomGradient.addColorStop(0, "rgba(0, 0, 0, 0.08)");
+  bottomGradient.addColorStop(1, "rgba(0, 0, 0, 0.92)");
+  context.fillStyle = bottomGradient;
+  context.fillRect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+  const sideGradient = context.createLinearGradient(0, 0, VIDEO_WIDTH, 0);
+  sideGradient.addColorStop(0, "rgba(0, 0, 0, 0.58)");
+  sideGradient.addColorStop(0.65, "rgba(0, 0, 0, 0)");
+  context.fillStyle = sideGradient;
+  context.fillRect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+
+  const logo = images.get(business.logo_url);
+  if (logo) {
+    context.save();
+    context.beginPath();
+    context.arc(72, 74, 30, 0, Math.PI * 2);
+    context.clip();
+    context.drawImage(logo, 42, 44, 60, 60);
+    context.restore();
+  }
+
+  context.textBaseline = "top";
+  context.fillStyle = "#ffffff";
+  context.shadowColor = "rgba(0, 0, 0, 0.55)";
+  context.shadowBlur = 12;
+  context.font = "700 30px Manrope, sans-serif";
+  context.fillText(business.name, logo ? 120 : 56, 57, 1050);
+
+  context.shadowBlur = 0;
+  context.fillStyle = "#fbbf24";
+  context.font = "700 22px Manrope, sans-serif";
+  context.fillText(product.categoryName.toLocaleUpperCase("es-CO"), 72, 400, 1050);
+
+  context.fillStyle = "#ffffff";
+  context.shadowColor = "rgba(0, 0, 0, 0.65)";
+  context.shadowBlur = 16;
+  context.font = "800 68px Manrope, sans-serif";
+  const titleHeight = drawWrappedText(
+    context,
+    product.name,
+    72,
+    444,
+    1080,
+    74,
+    2,
+  );
+
+  context.shadowBlur = 8;
+  if (product.description) {
+    context.font = "500 24px Manrope, sans-serif";
+    context.fillStyle = "rgba(255, 255, 255, 0.86)";
+    drawWrappedText(
+      context,
+      product.description,
+      72,
+      444 + titleHeight + 6,
+      1000,
+      32,
+      2,
+    );
+  }
+
+  context.shadowBlur = 12;
+  context.fillStyle = "#fbbf24";
+  context.font = "800 50px Manrope, sans-serif";
+  context.fillText(formatPrice(product.price), 72, 640, 800);
+  if (!product.available) {
+    context.font = "700 18px Manrope, sans-serif";
+    context.fillStyle = "#ffffff";
+    context.fillText("AGOTADO", 760, 652, 300);
+  }
+
+  return canvas;
+};
+
 const Mostrador = () => {
   const { slug } = useParams();
   const [business, setBusiness] = useState(null);
@@ -30,9 +187,16 @@ const Mostrador = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [fullscreenError, setFullscreenError] = useState("");
+  const [downloadError, setDownloadError] = useState("");
+  const [downloadStatus, setDownloadStatus] = useState("");
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [cssFullscreen, setCssFullscreen] = useState(false);
   const [activeSlide, setActiveSlide] = useState({ slug: null, index: 0 });
   const [controlsVisible, setControlsVisible] = useState(false);
   const controlsTimer = useRef(null);
+  const displayRef = useRef(null);
+  const ffmpegRef = useRef(null);
+  const isDownloading = Boolean(downloadStatus);
 
   const loadMenu = useCallback(
     async (showLoading = false) => {
@@ -189,6 +353,36 @@ const Mostrador = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const updateFullscreenState = () => {
+      const fullscreenElement =
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement;
+      if (fullscreenElement) setCssFullscreen(false);
+    };
+    const exitCssFullscreen = (event) => {
+      if (event.key === "Escape") setCssFullscreen(false);
+    };
+
+    document.addEventListener("fullscreenchange", updateFullscreenState);
+    document.addEventListener("webkitfullscreenchange", updateFullscreenState);
+    document.addEventListener("mozfullscreenchange", updateFullscreenState);
+    document.addEventListener("MSFullscreenChange", updateFullscreenState);
+    window.addEventListener("keydown", exitCssFullscreen);
+    return () => {
+      document.removeEventListener("fullscreenchange", updateFullscreenState);
+      document.removeEventListener(
+        "webkitfullscreenchange",
+        updateFullscreenState,
+      );
+      document.removeEventListener("mozfullscreenchange", updateFullscreenState);
+      document.removeEventListener("MSFullscreenChange", updateFullscreenState);
+      window.removeEventListener("keydown", exitCssFullscreen);
+    };
+  }, []);
+
   const activeIndex = activeSlide.slug === slug ? activeSlide.index : 0;
   const currentProductIndex = products.length ? activeIndex % products.length : 0;
   const activeProduct = products[currentProductIndex];
@@ -203,14 +397,215 @@ const Mostrador = () => {
   const toggleFullscreen = async () => {
     setFullscreenError("");
     try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
+      const fullscreenElement =
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement;
+      const exitFullscreen =
+        document.exitFullscreen ||
+        document.webkitExitFullscreen ||
+        document.mozCancelFullScreen ||
+        document.msExitFullscreen;
+      if (fullscreenElement && exitFullscreen) {
+        await exitFullscreen.call(document);
+        setCssFullscreen(false);
       } else {
-        await document.documentElement.requestFullscreen();
+        const display = displayRef.current;
+        const requestFullscreen =
+          display?.requestFullscreen ||
+          display?.webkitRequestFullscreen ||
+          display?.mozRequestFullScreen ||
+          display?.msRequestFullscreen;
+        if (requestFullscreen) {
+          await requestFullscreen.call(display);
+        } else {
+          setCssFullscreen((current) => !current);
+        }
       }
     } catch (fullscreenRequestError) {
       console.error("No se pudo activar pantalla completa:", fullscreenRequestError);
-      setFullscreenError("No se pudo activar la pantalla completa en este navegador.");
+      setCssFullscreen(true);
+      setFullscreenError(
+        "Este navegador no permitió ocultar sus barras; el mostrador ocupará toda el área visible.",
+      );
+    }
+  };
+
+  const downloadVideo = async () => {
+    if (!products.length || isDownloading) return;
+    setDownloadError("");
+    setDownloadProgress(0);
+
+    let recorder;
+    let stream;
+    let ffmpeg;
+    let ffmpegFiles = [];
+    try {
+      setDownloadStatus("Preparando el video...");
+      await document.fonts?.ready;
+
+      const imageSources = [
+        ...new Set(
+          [business.logo_url, ...products.map((product) => product.image_url)].filter(
+            Boolean,
+          ),
+        ),
+      ];
+      const images = new Map();
+      const loadedImages = await Promise.all(
+        imageSources.map(async (src) => [src, await loadVideoImage(src)]),
+      );
+      loadedImages.forEach(([src, image]) => images.set(src, image));
+      const slides = products.map((product) =>
+        drawVideoSlide(product, business, images),
+      );
+
+      const canvas = document.createElement("canvas");
+      canvas.width = VIDEO_WIDTH;
+      canvas.height = VIDEO_HEIGHT;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Este navegador no pudo crear el video.");
+      if (!canvas.captureStream || typeof MediaRecorder === "undefined") {
+        throw new Error(
+          "Este navegador no admite la grabación de video. Prueba con una versión reciente de Chrome, Edge, Firefox o Safari.",
+        );
+      }
+
+      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+      ffmpeg = ffmpegRef.current || new FFmpeg();
+      ffmpegRef.current = ffmpeg;
+      if (!ffmpeg.loaded) {
+        setDownloadStatus("Cargando el codificador de video...");
+        await ffmpeg.load({
+          coreURL: await toBlobURL(ffmpegCoreURL, "text/javascript"),
+          wasmURL: await toBlobURL(ffmpegWasmURL, "application/wasm"),
+        });
+        ffmpeg.on("progress", ({ progress }) => {
+          setDownloadProgress(Math.max(0, Math.min(100, Math.round(progress * 100))));
+        });
+      }
+
+      const mimeType = [
+        "video/webm;codecs=vp9",
+        "video/webm;codecs=vp8",
+        "video/webm",
+        "video/mp4",
+      ].find((type) => MediaRecorder.isTypeSupported(type));
+      if (!mimeType) {
+        throw new Error(
+          "Este navegador no ofrece un formato de grabación compatible para crear el MP4.",
+        );
+      }
+
+      stream = canvas.captureStream(VIDEO_FPS);
+      recorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: 4_000_000,
+      });
+      const recordedChunks = [];
+      const recording = new Promise((resolve, reject) => {
+        recorder.addEventListener(
+          "dataavailable",
+          (event) => {
+            if (event.data.size) recordedChunks.push(event.data);
+          },
+        );
+        recorder.addEventListener(
+          "error",
+          (event) => reject(event.error || new Error("Falló la grabación del video.")),
+          { once: true },
+        );
+        recorder.addEventListener(
+          "stop",
+          () => resolve(new Blob(recordedChunks, { type: mimeType })),
+          { once: true },
+        );
+      });
+
+      recorder.start();
+      setDownloadStatus("Grabando los productos...");
+      for (let index = 0; index < slides.length; index += 1) {
+        setDownloadStatus(`Grabando producto ${index + 1} de ${slides.length}...`);
+        const nextSlide = slides[index];
+        const previousSlide = slides[index - 1];
+        const transitionStart = performance.now();
+        if (previousSlide) {
+          while (performance.now() - transitionStart < VIDEO_TRANSITION_MS) {
+            const progress = Math.min(
+              1,
+              (performance.now() - transitionStart) / VIDEO_TRANSITION_MS,
+            );
+            context.clearRect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+            context.drawImage(previousSlide, 0, 0);
+            context.globalAlpha = progress;
+            context.drawImage(nextSlide, 0, 0);
+            context.globalAlpha = 1;
+            await wait(1000 / VIDEO_FPS);
+          }
+        }
+        context.clearRect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+        context.drawImage(nextSlide, 0, 0);
+        await wait(SLIDE_DURATION_MS - (previousSlide ? VIDEO_TRANSITION_MS : 0));
+      }
+      recorder.stop();
+      const recordedVideo = await recording;
+
+      setDownloadStatus("Convirtiendo el video a MP4...");
+      const filePrefix = `mostrador-${Date.now()}`;
+      const inputFile = `${filePrefix}-input`;
+      const outputFile = `${filePrefix}-output.mp4`;
+      ffmpegFiles = [inputFile, outputFile];
+      await ffmpeg.writeFile(
+        inputFile,
+        new Uint8Array(await recordedVideo.arrayBuffer()),
+      );
+      await ffmpeg.exec([
+        "-i",
+        inputFile,
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        outputFile,
+      ]);
+      const videoData = await ffmpeg.readFile(outputFile);
+      const videoUrl = URL.createObjectURL(
+        new Blob([videoData], { type: "video/mp4" }),
+      );
+      const downloadLink = document.createElement("a");
+      downloadLink.href = videoUrl;
+      downloadLink.download = `mostrador-${business.slug || "menu"}.mp4`;
+      downloadLink.click();
+      window.setTimeout(() => URL.revokeObjectURL(videoUrl), 1000);
+    } catch (videoError) {
+      console.error("No se pudo generar el video del mostrador:", videoError);
+      setDownloadError(
+        videoError.message ||
+          "No se pudo generar el video. Inténtalo de nuevo en otro navegador.",
+      );
+    } finally {
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+      stream?.getTracks().forEach((track) => track.stop());
+      if (ffmpeg?.loaded) {
+        await Promise.all(
+          ffmpegFiles.map(async (file) => {
+            try {
+              await ffmpeg.deleteFile(file);
+            } catch (cleanupError) {
+              console.warn(`No se pudo limpiar el archivo temporal ${file}:`, cleanupError);
+            }
+          }),
+        );
+      }
+      setDownloadStatus("");
     }
   };
 
@@ -243,7 +638,12 @@ const Mostrador = () => {
   }
 
   return (
-    <main className="relative h-screen min-h-[420px] overflow-hidden bg-[#10100f] text-white">
+    <main
+      ref={displayRef}
+      className={`relative h-screen h-[100dvh] overflow-hidden bg-[#10100f] text-white ${
+        cssFullscreen ? "fixed inset-0 z-[1000]" : ""
+      }`}
+    >
       {products.length === 0 ? (
         <section className="flex h-full flex-col items-center justify-center px-6 text-center">
           <Store className="mb-4 text-neutral-600" size={44} />
@@ -339,6 +739,21 @@ const Mostrador = () => {
         </button>
         <button
           type="button"
+          onClick={downloadVideo}
+          disabled={isDownloading || products.length === 0}
+          tabIndex={controlsVisible ? 0 : -1}
+          aria-label="Descargar mostrador como video MP4"
+          title="Descargar video MP4"
+          className="rounded-full border border-white/20 bg-black/30 p-3 text-white backdrop-blur transition hover:bg-black/60 disabled:cursor-wait disabled:opacity-60"
+        >
+          {isDownloading ? (
+            <LoaderCircle className="animate-spin" size={20} />
+          ) : (
+            <Download size={20} />
+          )}
+        </button>
+        <button
+          type="button"
           onClick={toggleFullscreen}
           tabIndex={controlsVisible ? 0 : -1}
           aria-label="Activar pantalla completa"
@@ -417,6 +832,18 @@ const Mostrador = () => {
           }`}
         >
           {fullscreenError}
+        </p>
+      )}
+      {(downloadStatus || downloadError) && (
+        <p
+          role={downloadError ? "alert" : "status"}
+          aria-live="polite"
+          className={`absolute bottom-20 right-6 z-20 max-w-[min(90vw,32rem)] rounded-xl bg-black/85 px-4 py-3 text-sm transition-opacity ${
+            downloadError ? "text-rose-300" : "text-white"
+          }`}
+        >
+          {downloadError ||
+            `${downloadStatus}${downloadProgress ? ` ${downloadProgress}%` : ""}`}
         </p>
       )}
     </main>

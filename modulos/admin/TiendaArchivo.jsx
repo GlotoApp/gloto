@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Outlet, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Banknote,
@@ -9,11 +9,14 @@ import {
   CheckCircle2,
   Clock3,
   Copy,
+  Crop,
+  FileSpreadsheet,
   Image as ImageIcon,
   KeyRound,
   LocateFixed,
   LoaderCircle,
   MapPin,
+  Package,
   Percent,
   PencilLine,
   Plus,
@@ -29,6 +32,7 @@ import {
 } from "../../src/lib/supabaseClient";
 import { compressCanvasToImage } from "../../src/lib/imageCompression";
 import TiendaDetalle from "./TiendaDetalle";
+import ImageCropEditor from "../pos/ImageCropEditor";
 import { useAdminRealtime } from "./useAdminRealtime";
 
 const STORE_DETAIL_REALTIME_TABLES = [
@@ -94,6 +98,41 @@ const convertImageToCompatibleFormat = async (file) => {
   } finally {
     URL.revokeObjectURL(imageUrl);
   }
+};
+
+const loadEditorImage = async (editor) => {
+  const image = new window.Image();
+  image.src = editor.url;
+  await image.decode();
+  return image;
+};
+
+const createCroppedImage = async (editor, crop) => {
+  const image = await loadEditorImage(editor);
+  const isCover = editor.type === "cover";
+  const canvas = document.createElement("canvas");
+  canvas.width = isCover ? 1600 : 1024;
+  canvas.height = isCover ? 700 : 1024;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("No se pudo preparar el recorte de la imagen.");
+  context.drawImage(
+    image,
+    crop.x * image.naturalWidth,
+    crop.y * image.naturalHeight,
+    crop.width * image.naturalWidth,
+    crop.height * image.naturalHeight,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+  const imageBlob = await compressCanvasToImage(canvas);
+  const extension = imageBlob.type.split("/")[1];
+  return new File(
+    [imageBlob],
+    `${isCover ? "portada" : "logo"}.${extension}`,
+    { type: imageBlob.type },
+  );
 };
 
 const normalizeBusinessHours = (rows = []) =>
@@ -174,6 +213,7 @@ const TiendaArchivo = () => {
   const [editMode, setEditMode] = useState(false);
   const [locationEditMode, setLocationEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(null);
   const [suspensionDialogOpen, setSuspensionDialogOpen] = useState(false);
   const [suspensionReason, setSuspensionReason] = useState("");
   const [suspensionError, setSuspensionError] = useState("");
@@ -192,11 +232,21 @@ const TiendaArchivo = () => {
   const [passwordCopied, setPasswordCopied] = useState(false);
   const [logoUrl, setLogoUrl] = useState("");
   const [coverUrl, setCoverUrl] = useState("");
+  const [imageEditor, setImageEditor] = useState(null);
+  const [imageEditorError, setImageEditorError] = useState("");
+  const [draggingImage, setDraggingImage] = useState(null);
+  const [editingImage, setEditingImage] = useState(null);
   const logoInputRef = useRef(null);
   const coverInputRef = useRef(null);
   const mapElementRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const locationEditModeRef = useRef(false);
+  useEffect(
+    () => () => {
+      if (imageEditor?.url) URL.revokeObjectURL(imageEditor.url);
+    },
+    [imageEditor?.url],
+  );
   const [formData, setFormData] = useState({
     name: "",
     slug: "",
@@ -234,19 +284,61 @@ const TiendaArchivo = () => {
     setInventoryCategories(detail?.inventoryCategories || []);
   };
 
-  const uploadImage = async (event, type) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-
-    if (!file || !id) return;
-
+  const openImageEditor = (file, type) => {
+    if (!file || !id || saving) return;
     if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
       alert("Selecciona una imagen de máximo 5 MB.");
       return;
     }
+    setImageEditor({ file, type, url: URL.createObjectURL(file) });
+    setImageEditorError("");
+  };
+
+  const selectImage = (event, type) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    openImageEditor(file, type);
+  };
+
+  const handleImageDrop = (event, type) => {
+    event.preventDefault();
+    setDraggingImage(null);
+    openImageEditor(event.dataTransfer.files?.[0], type);
+  };
+
+  const recropImage = async (type) => {
+    const imageUrl = type === "logo" ? logoUrl : coverUrl;
+    if (!imageUrl || saving || editingImage) return;
+
+    setEditingImage(type);
+    try {
+      const response = await fetch(imageUrl);
+      if (!response.ok) {
+        throw new Error("No se pudo cargar la imagen para recortarla.");
+      }
+      const blob = await response.blob();
+      const imageType = blob.type || "image/png";
+      const extension = imageType.split("/")[1];
+      openImageEditor(
+        new File([blob], `${type === "logo" ? "logo" : "portada"}.${extension}`, {
+          type: imageType,
+        }),
+        type,
+      );
+    } catch (error) {
+      console.error("No se pudo preparar la imagen para recortarla:", error);
+      alert(error.message || "No se pudo cargar la imagen para recortarla.");
+    } finally {
+      setEditingImage(null);
+    }
+  };
+
+  const uploadImage = async (file, type) => {
+    if (!file || !id) return;
 
     let uploadedPath = null;
     try {
+      setUploadingImage(type);
       setSaving(true);
 
       const imageBlob = await convertImageToCompatibleFormat(file);
@@ -323,7 +415,22 @@ const TiendaArchivo = () => {
           : error.message || "No se pudo subir la imagen de la tienda.",
       );
     } finally {
+      setUploadingImage(null);
       setSaving(false);
+    }
+  };
+
+  const applyImageEdit = async (crop) => {
+    if (!imageEditor || saving) return;
+    try {
+      const croppedFile = await createCroppedImage(imageEditor, crop);
+      setImageEditor(null);
+      await uploadImage(croppedFile, imageEditor.type);
+    } catch (error) {
+      console.error("No se pudo preparar el recorte de la imagen:", error);
+      setImageEditorError(
+        error.message || "No se pudo preparar la imagen seleccionada.",
+      );
     }
   };
 
@@ -448,10 +555,10 @@ const TiendaArchivo = () => {
       const [productsResult, inventoryResult, hoursResult] = await Promise.all([
         supabase
           .from("products")
-          .select("name,price,stock,is_active")
+              .select("id,name,price,stock,is_active,category_id")
           .eq("business_id", id)
           .order("order_index", { ascending: true })
-          .limit(20),
+              .limit(1000),
         supabase
           .from("inventory_items")
           .select("name,stock,min_stock,unit,is_active")
@@ -663,6 +770,7 @@ const TiendaArchivo = () => {
       setLocationEditMode(false);
     } else {
       setLocationEditMode(false);
+      setImageEditor(null);
     }
 
     setEditMode((current) => !current);
@@ -1026,7 +1134,7 @@ const TiendaArchivo = () => {
         delivery_fee_per_km: parsedCosts["Tarifa por kilómetro"],
         min_delivery_fee: parsedCosts["Costo mínimo de domicilio"],
         max_delivery_fee: parsedCosts["Costo máximo de domicilio"],
-        tax_rate: parsedCosts.Impuesto,
+        tax_rate: parsedCosts.Impuesto ?? 0,
       };
 
       const scheduleRows = businessSchedule.flatMap((day) => {
@@ -1111,12 +1219,26 @@ const TiendaArchivo = () => {
           : Promise.resolve({ error: null }),
       ]);
 
-      if (businessUpdate.error) throw businessUpdate.error;
-      if (infoUpdate.error) throw infoUpdate.error;
-      if (hoursUpsert.error) throw hoursUpsert.error;
-      if (categoriesUpsert.error) throw categoriesUpsert.error;
+      if (businessUpdate.error) {
+        throw new Error(`No se pudo guardar la tienda: ${businessUpdate.error.message}`);
+      }
+      if (infoUpdate.error) {
+        throw new Error(
+          `No se pudo guardar la categoría o información del negocio: ${infoUpdate.error.message}`,
+        );
+      }
+      if (hoursUpsert.error) {
+        throw new Error(`No se pudieron guardar los horarios: ${hoursUpsert.error.message}`);
+      }
+      if (categoriesUpsert.error) {
+        throw new Error(
+          `No se pudieron guardar las categorías de la tienda: ${categoriesUpsert.error.message}`,
+        );
+      }
       if (inventoryCategoriesUpsert.error) {
-        throw inventoryCategoriesUpsert.error;
+        throw new Error(
+          `No se pudieron guardar las categorías de inventario: ${inventoryCategoriesUpsert.error.message}`,
+        );
       }
 
       if (obsoleteHourIds.length > 0) {
@@ -1440,7 +1562,11 @@ const TiendaArchivo = () => {
                   className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Check size={16} />
-                  {saving ? "Guardando..." : "Guardar"}
+                  {uploadingImage
+                    ? "Subiendo imagen..."
+                    : saving
+                      ? "Guardando..."
+                      : "Guardar"}
                 </button>
                 <button
                   type="button"
@@ -1470,7 +1596,24 @@ const TiendaArchivo = () => {
                 <p className="mb-3 text-[10px] font-black uppercase tracking-[0.14em] text-neutral-400">
                   Logo
                 </p>
-                <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-dashed border-white/10 bg-neutral-950">
+                <div
+                  className={`relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-dashed bg-neutral-950 transition ${
+                    draggingImage === "logo"
+                      ? "border-violet-400 bg-violet-500/10"
+                      : "border-white/10"
+                  }`}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setDraggingImage("logo");
+                  }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                      setDraggingImage(null);
+                    }
+                  }}
+                  onDrop={(event) => handleImageDrop(event, "logo")}
+                >
                   {logoUrl ? (
                     <img
                       src={logoUrl}
@@ -1480,25 +1623,70 @@ const TiendaArchivo = () => {
                   ) : (
                     <Store className="text-neutral-700" size={36} />
                   )}
+                  {draggingImage === "logo" && (
+                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/75 px-2 text-center text-[10px] font-bold text-violet-200">
+                      Suelta el logo aquí
+                    </div>
+                  )}
+                  {editingImage === "logo" && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/75">
+                      <LoaderCircle className="animate-spin text-violet-400" size={22} />
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => logoInputRef.current?.click()}
-                    className="absolute bottom-1 right-1 rounded-lg bg-violet-600 p-2 text-white"
+                    disabled={saving}
+                    aria-label="Cambiar logo"
+                    title="Cambiar logo"
+                    className="absolute bottom-1 right-1 rounded-lg bg-violet-600 p-2 text-white disabled:opacity-50"
                   >
                     <Camera size={14} />
                   </button>
+                  {logoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => recropImage("logo")}
+                      disabled={saving || Boolean(editingImage)}
+                      aria-label="Volver a recortar el logo"
+                      title="Volver a recortar"
+                      className="absolute bottom-1 left-1 rounded-lg bg-black/75 p-2 text-white disabled:opacity-50"
+                    >
+                      <Crop size={14} />
+                    </button>
+                  )}
                   <input
                     ref={logoInputRef}
                     type="file"
                     accept="image/*"
                     className="hidden"
-                    onChange={(event) => uploadImage(event, "logo")}
+                    onChange={(event) => selectImage(event, "logo")}
                   />
                 </div>
+                <p className="mt-2 text-center text-[10px] text-neutral-500">
+                  Arrastra una imagen o usa los botones
+                </p>
               </div>
 
               <div className="overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/60">
-                <div className="relative h-40 w-full">
+                <div
+                  className={`relative h-40 w-full transition ${
+                    draggingImage === "cover"
+                      ? "outline outline-2 outline-violet-400"
+                      : ""
+                  }`}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setDraggingImage("cover");
+                  }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                      setDraggingImage(null);
+                    }
+                  }}
+                  onDrop={(event) => handleImageDrop(event, "cover")}
+                >
                   {coverUrl ? (
                     <img
                       src={coverUrl}
@@ -1510,10 +1698,35 @@ const TiendaArchivo = () => {
                       Sin portada
                     </div>
                   )}
+                  {draggingImage === "cover" && (
+                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/70 text-xs font-bold text-violet-200">
+                      Suelta la imagen de portada aquí
+                    </div>
+                  )}
+                  {editingImage === "cover" && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/75 text-xs font-bold text-white">
+                      <LoaderCircle className="mr-2 animate-spin text-violet-400" size={20} />
+                      Preparando editor...
+                    </div>
+                  )}
+                  {coverUrl && (
+                    <button
+                      type="button"
+                      onClick={() => recropImage("cover")}
+                      disabled={saving || Boolean(editingImage)}
+                      aria-label="Volver a recortar la portada"
+                      title="Volver a recortar"
+                      className="absolute bottom-3 left-3 inline-flex items-center gap-2 rounded-xl bg-black/75 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-white disabled:opacity-50"
+                    >
+                      <Crop size={14} />
+                      Recortar
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => coverInputRef.current?.click()}
-                    className="absolute bottom-3 right-3 inline-flex items-center gap-2 rounded-xl bg-black/75 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-white"
+                    disabled={saving}
+                    className="absolute bottom-3 right-3 inline-flex items-center gap-2 rounded-xl bg-black/75 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-white disabled:opacity-50"
                   >
                     <ImageIcon size={14} />
                     Cambiar portada
@@ -1523,9 +1736,12 @@ const TiendaArchivo = () => {
                     type="file"
                     accept="image/*"
                     className="hidden"
-                    onChange={(event) => uploadImage(event, "cover")}
+                    onChange={(event) => selectImage(event, "cover")}
                   />
                 </div>
+                <p className="px-3 py-2 text-[10px] text-neutral-500">
+                  Arrastra una imagen aquí o selecciona «Cambiar portada».
+                </p>
               </div>
             </div>
 
@@ -1734,6 +1950,72 @@ const TiendaArchivo = () => {
                   })}
                 </div>
               )}
+
+              <div className="border-t border-white/10 pt-4">
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(`/gestion/tiendas/${id}/productos`, {
+                      state: { businessName: store.name },
+                    })
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2.5 text-sm font-bold text-emerald-100 transition hover:bg-emerald-400/20"
+                >
+                  <FileSpreadsheet size={16} />
+                  Carga masiva de productos
+                </button>
+                <p className="mt-2 text-xs text-neutral-500">
+                  Agrega o edita productos desde una tabla o importa una plantilla Excel.
+                </p>
+              </div>
+
+              <div className="space-y-3 border-t border-white/10 pt-4">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-neutral-400">
+                  <Package size={14} />
+                  Productos existentes
+                  <span className="text-neutral-600">
+                    {detail?.products?.length || 0}
+                  </span>
+                </div>
+                {detail?.products?.length ? (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {detail.products.map((product) => {
+                      const category = shopCategories.find(
+                        (item) => item.id === product.category_id,
+                      );
+                      return (
+                        <div
+                          key={product.id}
+                          className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-white">
+                              {product.name}
+                            </p>
+                            <p className="text-[11px] text-neutral-500">
+                              {category?.name || "Sin categoría"}
+                              {" · "}
+                              {product.is_active ? "Activo" : "Inactivo"}
+                            </p>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <p className="text-xs font-bold text-neutral-200">
+                              {formatCurrency(product.price)}
+                            </p>
+                            <p className="text-[10px] text-neutral-500">
+                              {Number(product.stock) || 0} uds
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-neutral-500">
+                    Esta tienda todavía no tiene productos.
+                  </p>
+                )}
+              </div>
             </section>
 
             <section className="space-y-4 rounded-xl border border-white/10 bg-neutral-950/50 p-3 md:p-4">
@@ -2509,6 +2791,15 @@ const TiendaArchivo = () => {
           </form>
         </div>
       )}
+      <ImageCropEditor
+        key={imageEditor?.url || "closed"}
+        imageEditor={imageEditor}
+        onConfirm={applyImageEdit}
+        onClose={() => setImageEditor(null)}
+        saving={saving}
+        error={imageEditorError}
+      />
+      <Outlet />
     </div>
   );
 };

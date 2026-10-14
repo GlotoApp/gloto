@@ -29,6 +29,7 @@ import SuperAdminSidebar from "./MenuLateral";
 import SuperAdminToggle from "./ControlEstado";
 import SuperAdminStorageCleanup from "./LimpiarArchivos";
 import SuperAdminTiendasPanel from "./Tiendas";
+import ImportarProductosTienda from "./ImportarProductosTienda";
 import SolicitudesCambioPlan from "./SolicitudesCambioPlan";
 import SuperAdminDashboardOverview from "./Resumen";
 
@@ -287,6 +288,8 @@ const SuperAdmin = ({ onVolver }) => {
   const [filtroEstado, setFiltroEstado] = useState("todas"); // todas | activas | inactivas
 
   const [modalAbierto, setModalAbierto] = useState(false);
+  const [importadorProductosAbierto, setImportadorProductosAbierto] =
+    useState(false);
   const [tiendaEditando, setTiendaEditando] = useState(null); // null = creando nueva
   const [form, setForm] = useState(tiendaVacia());
   const [slugManual, setSlugManual] = useState(false); // si el usuario editó el slug a mano
@@ -909,6 +912,7 @@ const SuperAdmin = ({ onVolver }) => {
   };
 
   const abrirCrear = () => {
+    setImportadorProductosAbierto(false);
     setTiendaEditando(null);
     setForm(tiendaVacia());
     setSlugManual(false);
@@ -920,6 +924,7 @@ const SuperAdmin = ({ onVolver }) => {
   };
 
   const abrirEditar = (tienda) => {
+    setImportadorProductosAbierto(false);
     setTiendaEditando(tienda);
     setForm(tienda);
     setSlugManual(true); // al editar, no regeneramos el slug automáticamente
@@ -2276,26 +2281,64 @@ const SuperAdmin = ({ onVolver }) => {
                 <h2 style={{ fontSize: "16px", fontWeight: 800, margin: 0 }}>
                   {tiendaEditando ? "Editar tienda" : "Nueva tienda"}
                 </h2>
-                <button
-                  type="button"
-                  onClick={cerrarModal}
-                  style={{
-                    width: "32px",
-                    height: "32px",
-                    borderRadius: "50%",
-                    background: "rgba(255,255,255,0.06)",
-                    border: "none",
-                    color: "#fff",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                  aria-label="Cerrar"
-                >
-                  <X size={16} />
-                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  {tiendaEditando && (
+                    <button
+                      type="button"
+                      onClick={() => setImportadorProductosAbierto(true)}
+                      disabled={!tiendaEditando.business_id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        padding: "8px 10px",
+                        borderRadius: "10px",
+                        border: "1px solid rgba(167,139,250,0.25)",
+                        background: "rgba(139,92,246,0.12)",
+                        color: tiendaEditando.business_id ? "#c4b5fd" : "#737373",
+                        cursor: tiendaEditando.business_id ? "pointer" : "not-allowed",
+                        fontSize: "11px",
+                        fontWeight: 800,
+                      }}
+                      title={
+                        tiendaEditando.business_id
+                          ? "Agregar y editar productos en una tabla"
+                          : "Esta tienda aún no está vinculada a un negocio en la base de datos"
+                      }
+                    >
+                      <Upload size={14} />
+                      Productos
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={cerrarModal}
+                    style={{
+                      width: "32px",
+                      height: "32px",
+                      borderRadius: "50%",
+                      background: "rgba(255,255,255,0.06)",
+                      border: "none",
+                      color: "#fff",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                    aria-label="Cerrar"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
+
+              {importadorProductosAbierto && tiendaEditando?.business_id && (
+                <ImportarProductosTienda
+                  businessId={tiendaEditando.business_id}
+                  businessName={form.nombre}
+                  onClose={() => setImportadorProductosAbierto(false)}
+                />
+              )}
 
               <div
                 style={{

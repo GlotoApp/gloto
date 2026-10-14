@@ -61,6 +61,9 @@ const CrearCuentaSuperAdmin = lazy(
   () => import("../modulos/admin/CrearCuenta"),
 );
 const TiendaArchivo = lazy(() => import("../modulos/admin/TiendaArchivo"));
+const ImportarProductosTiendaPage = lazy(
+  () => import("../modulos/admin/ImportarProductosTiendaPage"),
+);
 const PlanesFacturacion = lazy(
   () => import("../modulos/admin/PlanesFacturacion"),
 );
@@ -617,7 +620,12 @@ function App() {
               path="cuentas/nueva"
               element={<CrearCuentaSuperAdmin />}
             />
-            <Route path="tiendas/:id" element={<TiendaArchivo />} />
+            <Route path="tiendas/:id" element={<TiendaArchivo />}>
+              <Route
+                path="productos"
+                element={<ImportarProductosTiendaPage />}
+              />
+            </Route>
             <Route path="marketplace" element={<Mercado />} />
             <Route path="planes" element={<PlanesFacturacion />} />
             <Route
