@@ -16,6 +16,7 @@ import { supabase } from "../../src/lib/supabaseClient";
 const SHEETS = {
   categories: "Categorías",
   products: "Productos",
+  options: "Opciones",
 };
 const CLEAR_CELL = "BORRAR";
 const EMPTY_SHEETS = {
@@ -66,6 +67,19 @@ const productColumns = [
   { key: "is_sold_out", label: "Agotado", width: 110, type: "boolean" },
 ];
 
+const optionHeaders = [
+  "ID de producto",
+  "Producto",
+  "Grupo de opciones",
+  "Descripción del grupo",
+  "Obligatorio",
+  "Tipo de selección",
+  "Opción",
+  "Precio extra",
+  "Orden del grupo",
+  "Orden de la opción",
+];
+
 const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -110,6 +124,26 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
         if (failedQuery?.error) throw failedQuery.error;
 
         const products = productsResult.data || [];
+        const productIds = products.map((product) => product.id);
+        const [optionGroupsResult, optionItemsResult] = productIds.length
+          ? await Promise.all([
+              supabase
+                .from("product_option_groups")
+                .select("id,product_id,name,description,is_required,selection_type,order_index")
+                .in("product_id", productIds)
+                .order("order_index", { ascending: true }),
+              supabase
+                .from("products_items")
+                .select("id,product_id,option_group_id,nombre,precio_extra,order_index")
+                .in("product_id", productIds)
+                .order("order_index", { ascending: true }),
+            ])
+          : [
+              { data: [], error: null },
+              { data: [], error: null },
+            ];
+        if (optionGroupsResult.error) throw optionGroupsResult.error;
+        if (optionItemsResult.error) throw optionItemsResult.error;
         const categoryById = new Map(
           (categoriesResult.data || []).map((category) => [
             category.id,
@@ -119,9 +153,26 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
         const unitById = new Map(
           (unitsResult.data || []).map((unit) => [unit.id, unit.name]),
         );
-        const productRows = products.map((product) => ({
+        const productRefById = new Map(products.map((product) => [product.id, product.id]));
+        const groupsById = new Map(
+          (optionGroupsResult.data || []).map((group) => [
+            group.id,
+            {
+              group_id: group.id,
+              group_ref: group.id,
+              product_ref: productRefById.get(group.product_id) || "",
+              name: group.name || "",
+              description: group.description || "",
+              is_required: group.is_required === true,
+              selection_type: group.selection_type || "single",
+              order_index: group.order_index ?? 1,
+            },
+          ]),
+        );
+        const productRows = products.map((product, index) => ({
           id: product.id,
           product_ref: product.id,
+          product_code: `PROD-${String(index + 1).padStart(3, "0")}`,
           name: product.name || "",
           description: product.description || "",
           price: product.price ?? "",
@@ -140,8 +191,16 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
             name: category.name || "",
           })),
           products: productRows,
-          groups: [],
-          items: [],
+          groups: [...groupsById.values()],
+          items: (optionItemsResult.data || [])
+            .map((item) => ({
+              item_id: item.id,
+              group_ref: item.option_group_id,
+              name: item.nombre || "",
+              extra_price: item.precio_extra ?? 0,
+              order_index: item.order_index ?? 1,
+            }))
+            .filter((item) => groupsById.has(item.group_ref)),
           ingredients: [],
         };
         if (cancelled) return;
@@ -282,7 +341,10 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
     try {
       const XLSX = await import("@e965/xlsx");
       const workbook = XLSX.utils.book_new();
-      const productRows = sheets.products.map((row) => ({
+      const productRows = sheets.products.map((row, index) => ({
+        "ID de producto":
+          row.product_code ||
+          (row.id ? `PROD-${String(index + 1).padStart(3, "0")}` : ""),
         "Nombre del producto *": row.name,
         Descripción: row.description,
         "Precio *": row.price,
@@ -292,9 +354,32 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
         "Stock mínimo": row.min_stock,
         Activo: row.is_active ? "Sí" : "No",
         Agotado: row.is_sold_out ? "Sí" : "No",
-        id: row.id,
-        product_ref: row.product_ref,
       }));
+      const productNameByRef = new Map(
+        sheets.products.map((product) => [product.product_ref, product.name]),
+      );
+      const productCodeByRef = new Map(
+        sheets.products.map((product) => [product.product_ref, product.product_code]),
+      );
+      const optionsRows = sheets.groups.flatMap((group) => {
+        const items = sheets.items.filter((item) => item.group_ref === group.group_ref);
+        return items.map((item) => ({
+          "ID de producto": productCodeByRef.get(group.product_ref) || "",
+          Producto: productNameByRef.get(group.product_ref) || "",
+          "Grupo de opciones": group.name,
+          "Descripción del grupo": group.description,
+          Obligatorio: group.is_required ? "Sí" : "No",
+          "Tipo de selección":
+            group.selection_type === "multiple" ? "Varias opciones" : "Una opción",
+          Opción: item.name,
+          "Precio extra": item.extra_price,
+          "Orden del grupo": group.order_index,
+          "Orden de la opción": item.order_index,
+        }));
+      });
+      for (let index = 0; index < 10; index += 1) {
+        optionsRows.push(Object.fromEntries(optionHeaders.map((header) => [header, ""])));
+      }
       const usedProductRefs = new Set(
         sheets.products.map((product) => product.product_ref),
       );
@@ -307,6 +392,7 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
         }
         usedProductRefs.add(productRef);
         productRows.push({
+          "ID de producto": "",
           "Nombre del producto *": "",
           Descripción: "",
           "Precio *": "",
@@ -316,11 +402,10 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
           "Stock mínimo": 0,
           Activo: "Sí",
           Agotado: "No",
-          id: "",
-          product_ref: productRef,
         });
       }
       const productHeaders = [
+        "ID de producto",
         "Nombre del producto *",
         "Descripción",
         "Precio *",
@@ -330,8 +415,6 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
         "Stock mínimo",
         "Activo",
         "Agotado",
-        "id",
-        "product_ref",
       ];
       const addSheet = (name, rows, headers, hiddenHeaders = []) => {
         const worksheet = XLSX.utils.json_to_sheet(rows, { header: headers });
@@ -354,12 +437,8 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
         ["Nombre de categoría *", "category_id"],
         ["category_id"],
       );
-      addSheet(
-        SHEETS.products,
-        productRows,
-        productHeaders,
-        ["id", "product_ref"],
-      );
+      addSheet(SHEETS.products, productRows, productHeaders);
+      addSheet(SHEETS.options, optionsRows, optionHeaders);
 
       const workbookBytes = XLSX.write(workbook, {
         type: "array",
@@ -382,7 +461,7 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
       );
       const productsXml = strFromU8(archive["xl/worksheets/sheet2.xml"]);
       const validation =
-        '<dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="1" showInputMessage="1" sqref="D2:D1000"><formula1>ListaCategorias</formula1></dataValidation></dataValidations>';
+        '<dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="1" showInputMessage="1" sqref="E2:E1000"><formula1>ListaCategorias</formula1></dataValidation></dataValidations>';
       archive["xl/worksheets/sheet2.xml"] = strToU8(
         productsXml.includes("<ignoredErrors>")
           ? productsXml.replace("<ignoredErrors>", `${validation}<ignoredErrors>`)
@@ -398,7 +477,9 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
       link.download = `productos-${businessName || "tienda"}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
-      setNotice("Plantilla de primera carga con categorías y productos descargada.");
+      setNotice(
+        "Plantilla de categorías, productos y opciones opcionales descargada.",
+      );
       setError("");
     } catch (exportError) {
       console.error("No se pudo exportar la plantilla Excel:", exportError);
@@ -430,6 +511,7 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
       }
 
       const importedCategoryRows = readSheet(XLSX, workbook, SHEETS.categories);
+      const importedOptionRows = readSheet(XLSX, workbook, SHEETS.options);
       const currentCategoriesById = new Map(
         sheets.categories.filter((category) => category.id).map((category) => [category.id, category]),
       );
@@ -463,30 +545,96 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
         if (!currentProductsByName.has(key)) currentProductsByName.set(key, []);
         currentProductsByName.get(key).push(product);
       });
+      const importedCodeCounts = new Map();
+      importedProducts.forEach((row) => {
+        if (!textCell(row["Nombre del producto *"] ?? row.name).trim()) return;
+        const code = textCell(row["ID de producto"]).trim();
+        if (code) importedCodeCounts.set(code, (importedCodeCounts.get(code) || 0) + 1);
+      });
+      const importedCodeOccurrences = new Map();
+      const assignedProductRefs = new Set();
+      const usedProductCodes = new Set([
+        ...sheets.products.map((product) => product.product_code).filter(Boolean),
+        ...importedCodeCounts.keys(),
+      ]);
+      let nextProductCodeNumber =
+        Math.max(
+          0,
+          ...[...usedProductCodes].map((code) =>
+            Number(code.match(/^PROD-(\d+)$/)?.[1] || 0),
+          ),
+        ) + 1;
+      const createProductCode = () => {
+        let code = `PROD-${String(nextProductCodeNumber).padStart(3, "0")}`;
+        while (usedProductCodes.has(code)) {
+          nextProductCodeNumber += 1;
+          code = `PROD-${String(nextProductCodeNumber).padStart(3, "0")}`;
+        }
+        usedProductCodes.add(code);
+        nextProductCodeNumber += 1;
+        return code;
+      };
       const imported = {
         categories: importedCategories,
         products: importedProducts
-          .map((row, index) => {
+          .map((row) => {
             const name = textCell(
               row["Nombre del producto *"] ?? row.name,
             ).trim();
             if (!name) return null;
             const byName = currentProductsByName.get(normalise(name)) || [];
-            const matchedProduct = byName.length === 1 ? byName[0] : null;
-            const id = textCell(row.id).trim() || matchedProduct?.id || "";
-            const productRef =
-              textCell(row.product_ref).trim() ||
-              id ||
-              matchedProduct?.product_ref ||
-              `NUEVO-${index + 1}`;
-            if (id && productRef !== id) {
-              throw new Error(
-                `El producto con ID "${id}" debe conservar su referencia de hoja igual al ID.`,
-              );
+            const productCode = textCell(row["ID de producto"]).trim();
+            const codeOccurrence = productCode
+              ? (importedCodeOccurrences.get(productCode) || 0) + 1
+              : 0;
+            if (productCode) importedCodeOccurrences.set(productCode, codeOccurrence);
+            const repeatedCode =
+              productCode &&
+              importedCodeCounts.get(productCode) > 1 &&
+              codeOccurrence > 1;
+            const codeMatch = productCode
+              ? sheets.products.find(
+                  (product) => product.product_code === productCode,
+                )
+              : null;
+            const importedId = repeatedCode ? "" : textCell(row.id).trim();
+            const idMatch = importedId
+              ? sheets.products.find((product) => product.id === importedId)
+              : null;
+            const legacyProductRef = repeatedCode
+              ? ""
+              : textCell(row.product_ref).trim();
+            const refMatch = legacyProductRef
+              ? sheets.products.find(
+                  (product) => product.product_ref === legacyProductRef,
+                )
+              : null;
+            const matchedProduct =
+              [codeMatch, idMatch, refMatch].find(
+                (product) =>
+                  product && !assignedProductRefs.has(product.product_ref),
+              ) ||
+              (!productCode &&
+              !importedId &&
+              !legacyProductRef &&
+              !Object.hasOwn(row, "ID de producto") &&
+              byName.length === 1 &&
+              !assignedProductRefs.has(byName[0].product_ref)
+                ? byName[0]
+                : null);
+            const id = matchedProduct?.id || importedId;
+            let productRef = matchedProduct?.product_ref || legacyProductRef;
+            if (!productRef || assignedProductRefs.has(productRef)) {
+              productRef = makeRef("NUEVO");
             }
+            assignedProductRefs.add(productRef);
             return {
               id,
               product_ref: productRef,
+              product_code:
+                repeatedCode
+                  ? createProductCode()
+                  : productCode || matchedProduct?.product_code || "",
               name,
               description: textCell(row["Descripción"] ?? row.description).trim(),
               price: textCell(row["Precio *"] ?? row.price).trim(),
@@ -501,21 +649,114 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
           })
           .filter(Boolean),
       };
+      if (importedOptionRows) {
+        const importedProductsByName = new Map();
+        imported.products.forEach((product) => {
+          const key = normalise(product.name);
+          if (!importedProductsByName.has(key)) importedProductsByName.set(key, []);
+          importedProductsByName.get(key).push(product);
+        });
+        const groupsByKey = new Map();
+        const items = [];
+        importedOptionRows.forEach((row, index) => {
+          const optionName = textCell(row["Opción"]).trim();
+          if (!optionName) return;
+          const productCode = textCell(row["ID de producto"]).trim();
+          const productName = textCell(row.Producto).trim();
+          const groupName = textCell(row["Grupo de opciones"]).trim();
+          if (!productName || !groupName) {
+            throw new Error(
+              `Opciones, fila ${index + 2}: completa el producto y el grupo para la opción "${optionName}".`,
+            );
+          }
+          const matchingProducts = productCode
+            ? imported.products.filter(
+                (product) => product.product_code === productCode,
+              )
+            : importedProductsByName.get(normalise(productName)) || [];
+          if (matchingProducts.length !== 1) {
+            throw new Error(
+              matchingProducts.length
+                ? `Opciones, fila ${index + 2}: el producto "${productCode || productName}" aparece más de una vez y no se puede identificar.`
+                : `Opciones, fila ${index + 2}: el producto "${productName}" no aparece en la hoja Productos.`,
+            );
+          }
+          const product = matchingProducts[0];
+          const groupKey = `${product.product_ref}|${normalise(groupName)}`;
+          let group = groupsByKey.get(groupKey);
+          if (!group) {
+            const existingGroup = sheets.groups.find(
+              (candidate) =>
+                candidate.product_ref === product.product_ref &&
+                normalise(candidate.name) === normalise(groupName),
+            );
+            const groupsForProduct = [...groupsByKey.values()].filter(
+              (candidate) => candidate.product_ref === product.product_ref,
+            );
+            group = {
+              group_id: existingGroup?.group_id || "",
+              group_ref: existingGroup?.group_ref || makeRef("GRUPO"),
+              product_ref: product.product_ref,
+              name: groupName,
+              description: textCell(row["Descripción del grupo"]).trim(),
+              is_required: toBoolean(row.Obligatorio, false),
+              selection_type:
+                normalise(row["Tipo de selección"]) === "multiple" ||
+                normalise(row["Tipo de selección"]).includes("varias")
+                  ? "multiple"
+                  : "single",
+              order_index:
+                Number(row["Orden del grupo"]) || groupsForProduct.length + 1,
+            };
+            groupsByKey.set(groupKey, group);
+          }
+          const existingItems = sheets.items.filter(
+            (item) => item.group_ref === group.group_ref,
+          );
+          items.push({
+            item_id:
+              existingItems.find(
+                (item) => normalise(item.name) === normalise(optionName),
+              )?.item_id || "",
+            group_ref: group.group_ref,
+            name: optionName,
+            extra_price: textCell(row["Precio extra"]).trim() || "0",
+            order_index:
+              Number(row["Orden de la opción"]) ||
+              items.filter((item) => item.group_ref === group.group_ref).length + 1,
+          });
+        });
+        imported.groups = [...groupsByKey.values()];
+        imported.items = items;
+      }
       const existingIds = new Set(sheets.products.map((product) => product.id));
-      const duplicateRefs = new Set();
-      const importRefs = new Set();
-      for (const product of imported.products) {
+      const importRefs = new Map();
+      for (const [index, product] of imported.products.entries()) {
         if (product.id && !existingIds.has(product.id)) {
           throw new Error(
             `El ID "${product.id}" no pertenece a esta tienda. No se importaron cambios.`,
           );
         }
-        if (importRefs.has(product.product_ref)) duplicateRefs.add(product.product_ref);
-        importRefs.add(product.product_ref);
+        const rows = importRefs.get(product.product_ref) || [];
+        rows.push({ product, rowNumber: index + 2 });
+        importRefs.set(product.product_ref, rows);
       }
-      if (duplicateRefs.size) {
+      const duplicateRefs = [...importRefs.values()].filter(
+        (rows) => rows.length > 1,
+      );
+      if (duplicateRefs.length) {
         throw new Error(
-          `Hay referencias de producto repetidas: ${[...duplicateRefs].join(", ")}.`,
+          `Hay productos repetidos en la hoja Productos: ${duplicateRefs
+            .map((rows) => {
+              const { product } = rows[0];
+              const label = product.product_code
+                ? `${product.product_code} (${product.name})`
+                : product.name;
+              return `${label}, filas ${rows
+                .map(({ rowNumber }) => rowNumber)
+                .join(" y ")}`;
+            })
+            .join("; ")}. Deja una sola fila por producto.`,
         );
       }
 
@@ -584,29 +825,24 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
       let mergedItems = sheets.items;
       let mergedIngredients = sheets.ingredients;
       if (imported.groups) {
+        const optionProductRefs = new Set(
+          imported.groups.map((group) => group.product_ref),
+        );
         mergedGroups = [
           ...sheets.groups.filter(
-            (row) => !changedProductRefs.has(row.product_ref),
+            (row) => !optionProductRefs.has(row.product_ref),
           ),
-          ...imported.groups.filter(
-            (row) => changedProductRefs.has(row.product_ref) && row.name,
-          ),
+          ...imported.groups.filter((row) => row.name),
         ];
-      }
-      if (imported.items) {
         const replacedGroupRefs = new Set(
           sheets.groups
-            .filter((group) => changedProductRefs.has(group.product_ref))
+            .filter((group) => optionProductRefs.has(group.product_ref))
             .map((group) => group.group_ref),
         );
-        const importedGroupRefs = new Set(
-          (imported.groups || [])
-            .filter((group) => changedProductRefs.has(group.product_ref))
-            .map((group) => group.group_ref),
-        );
+        const importedGroupRefs = new Set(imported.groups.map((group) => group.group_ref));
         mergedItems = [
           ...sheets.items.filter((row) => !replacedGroupRefs.has(row.group_ref)),
-          ...imported.items.filter(
+          ...(imported.items || []).filter(
             (row) => importedGroupRefs.has(row.group_ref) && row.name,
           ),
         ];
@@ -809,16 +1045,27 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
       };
       let groupId = group.group_id;
       if (groupId && originalGroups.some((original) => original.group_id === groupId)) {
-        const { data: updatedGroup, error: groupError } = await supabase
-          .from("product_option_groups")
-          .update(payload)
-          .eq("id", groupId)
-          .eq("product_id", productId)
-          .select("id")
-          .maybeSingle();
-        if (groupError) throw groupError;
-        if (!updatedGroup)
-          throw new Error("No se encontró el grupo de opciones para actualizar.");
+        const originalGroup = originalGroups.find(
+          (original) => original.group_id === groupId,
+        );
+        if (
+          !sameRows(
+            [group],
+            [originalGroup],
+            ["name", "description", "is_required", "selection_type", "order_index"],
+          )
+        ) {
+          const { data: updatedGroup, error: groupError } = await supabase
+            .from("product_option_groups")
+            .update(payload)
+            .eq("id", groupId)
+            .eq("product_id", productId)
+            .select("id")
+            .maybeSingle();
+          if (groupError) throw groupError;
+          if (!updatedGroup)
+            throw new Error("No se encontró el grupo de opciones para actualizar.");
+        }
       } else {
         const { data: savedGroup, error: groupError } = await supabase
           .from("product_option_groups")
@@ -877,6 +1124,16 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
         .eq("product_id", productId)
         .in("id", removedItemIds);
       if (deleteItemsError) throw deleteItemsError;
+      const { data: remainingItems, error: verifyItemsError } = await supabase
+        .from("products_items")
+        .select("id")
+        .eq("product_id", productId)
+        .in("id", removedItemIds);
+      if (verifyItemsError) throw verifyItemsError;
+      if (remainingItems?.length)
+        throw new Error(
+          "No se pudieron eliminar algunas opciones. Verifica los permisos de Supabase.",
+        );
     }
 
     const currentGroupIds = relatedGroups
@@ -892,6 +1149,16 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
         .eq("product_id", productId)
         .in("id", removedGroupIds);
       if (deleteGroupsError) throw deleteGroupsError;
+      const { data: remainingGroups, error: verifyGroupsError } = await supabase
+        .from("product_option_groups")
+        .select("id")
+        .eq("product_id", productId)
+        .in("id", removedGroupIds);
+      if (verifyGroupsError) throw verifyGroupsError;
+      if (remainingGroups?.length)
+        throw new Error(
+          "No se pudieron eliminar algunos grupos de opciones. Verifica los permisos de Supabase.",
+        );
     }
 
     const inventoryIdByName = new Map(
@@ -1798,6 +2065,8 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
   const activeSheetData = {
     categories: ["Categorías", sheets.categories.length],
     products: ["Productos", sheets.products.length],
+    groups: ["Grupos de opciones", sheets.groups.length],
+    items: ["Opciones", sheets.items.length],
   };
   const changedProducts = sheets.products.filter((row) => row.name.trim()).length;
   const changedCategories = sheets.categories.filter((row) => row.name.trim()).length;
@@ -1825,7 +2094,7 @@ const ImportarProductosTienda = ({ businessId, businessName, onClose }) => {
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-6">
           <p className="max-w-3xl text-xs leading-5 text-neutral-400">
-            Este flujo es para la primera carga: agrega las categorías y los productos de la tienda. El Excel solo incluye las pestañas Categorías y Productos.
+            Este flujo permite cargar categorías y productos. La pestaña Opciones del Excel es opcional; las filas vacías se ignoran.
           </p>
           <div className="flex flex-wrap gap-2">
             <input
