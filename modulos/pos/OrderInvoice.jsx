@@ -86,14 +86,41 @@ const displayPaymentMethod = (value) => {
   return labels[normalized] || value || "";
 };
 
+const getOptionTotal = (item) =>
+  (Array.isArray(item.options) ? item.options : []).reduce(
+    (sum, option) =>
+      sum +
+      (typeof option === "object" && option
+        ? Number(
+            option.precio_extra ??
+              option.price ??
+              option.price_extra ??
+              option.extra_price ??
+              0,
+          ) || 0
+        : 0),
+    0,
+  );
+
+const getProductUnitPrice = (item) => {
+  const unitPrice = Number(item.unit_price || 0);
+  const initialPrice = item.init_price ?? item.initPrice;
+
+  return initialPrice != null
+    ? Number(initialPrice)
+    : Math.max(0, unitPrice - getOptionTotal(item));
+};
+
+const getTotalUnitPrice = (item) =>
+  Math.max(
+    Number(item.unit_price || 0),
+    getProductUnitPrice(item) + getOptionTotal(item),
+  );
+
 const getItemsSubtotal = (order) =>
   (order.items || []).reduce(
     (sum, item) =>
-      sum +
-      Number(
-        item.subtotal ||
-          Number(item.unit_price || 0) * Number(item.quantity || 0),
-      ),
+      sum + getTotalUnitPrice(item) * Number(item.quantity || 0),
     0,
   );
 
@@ -104,19 +131,39 @@ export const getInvoiceHtml = (
 ) => {
   const items = (order.items || [])
     .map((item) => {
-      const options = (item.options || [])
-        .map(getOptionLabel)
+      const itemOptions = item.options || [];
+      const options = itemOptions
+        .map((option) => {
+          const label = getOptionLabel(option);
+          if (
+            typeof option === "string" ||
+            !option ||
+            typeof option !== "object"
+          ) {
+            return label;
+          }
+          const extraPrice =
+            Number(
+              option.precio_extra ??
+                option.price ??
+                option.price_extra ??
+                option.extra_price ??
+                0,
+            ) || 0;
+          return extraPrice > 0
+            ? `${label} (+${formatMoney(extraPrice)})`
+            : label;
+        })
         .filter(Boolean)
         .join(" · ");
       const unit = getUnitName(item.unit_name);
       const quantity = `${formatQuantity(item.quantity)}${unit ? ` ${unit}` : ""}`;
-      const subtotal =
-        Number(item.subtotal) ||
-        Number(item.unit_price || 0) * Number(item.quantity || 0);
+      const totalUnitPrice = getTotalUnitPrice(item);
+      const subtotal = totalUnitPrice * Number(item.quantity || 0);
       return `<tr${item.notes ? ' class="invoice-item-with-note"' : ""}>
         <td><strong>${escapeHtml(item.product_name)}</strong>${options ? `<small>${escapeHtml(options)}</small>` : ""}</td>
         <td class="center">${escapeHtml(quantity)}</td>
-        <td class="right">${formatMoney(item.unit_price)}</td>
+        <td class="right">${formatMoney(getProductUnitPrice(item))}</td>
         <td class="right">${formatMoney(subtotal)}</td>
       </tr>${item.notes ? `<tr class="invoice-item-note-row"><td colspan="4"><strong>Nota:</strong> ${escapeHtml(item.notes)}</td></tr>` : ""}`;
     })
@@ -174,14 +221,10 @@ export const getInvoiceHtml = (
   const deliveryFee = Number(order.deliveryFee || 0);
   const storedTipAmount = Math.max(0, Number(order.tipAmount || 0));
   const tipPercent = Math.max(0, Number(order.tipPercent || 0));
-  const totalWithTip = Number(order.total || 0);
-  const marketplaceOrder = order.canal === "marketplace";
-  const totalWithoutTip = marketplaceOrder
-    ? Math.max(0, totalWithTip + deliveryFee)
-    : Math.max(0, totalWithTip - storedTipAmount);
+  const totalWithoutTip = itemsSubtotal + deliveryFee;
   const tipAmount =
     storedTipAmount > 0 && tipPercent > 0
-      ? calculateTipAmount(totalWithoutTip, 0, tipPercent)
+      ? calculateTipAmount(itemsSubtotal, deliveryFee, tipPercent)
       : storedTipAmount;
   const invoiceTotal = totalWithoutTip + tipAmount;
   const paymentDetails = (Array.isArray(order.paymentMethods)

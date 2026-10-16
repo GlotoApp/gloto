@@ -1206,7 +1206,8 @@ const mapDatabaseOrderToUi = (order) => {
       product_name: item.product_name || "Producto",
       quantity: Number(item.quantity || 0),
       unit_name: item.unit_name || "UNIDAD",
-      init_price: Number(item.init_price ?? item.unit_price ?? 0),
+      init_price:
+        item.init_price == null ? null : Number(item.init_price),
       unit_price: Number(item.unit_price || 0),
       subtotal: Number(item.subtotal || 0),
       options: Array.isArray(item.options) ? item.options : [],

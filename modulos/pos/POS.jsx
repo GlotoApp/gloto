@@ -3287,17 +3287,54 @@ const POS = () => {
       metodoPago: order.payment_method || "",
       paymentMethods: order.paymentMethods || metadata.payment_methods || [],
       observaciones: order.notes || "",
-      items: (order.items || []).map((item) => ({
-        product_name: item.name || item.nombre || "Producto",
-        quantity: Number(item.qty ?? item.cantidad ?? 0),
-        unit_price: Number(item.price ?? item.precio ?? 0),
-        subtotal:
-          Number(item.price ?? item.precio ?? 0) *
-          Number(item.qty ?? item.cantidad ?? 0),
-        unit_name: item.unit?.name || item.unit_name || "",
-        options: item.optionNames || item.opciones || item.options || [],
-        notes: item.note || item.notas || "",
-      })),
+      items: (order.items || []).map((item) => {
+        const quantity = Number(
+          item.qty ?? item.cantidad ?? item.quantity ?? 0,
+        );
+        const finalUnitPrice = Number(
+          item.price ?? item.precio ?? item.unit_price ?? 0,
+        );
+        const options =
+          item.opciones?.length > 0
+            ? item.opciones
+            : item.selectedOptions?.length > 0
+              ? item.selectedOptions
+              : item.options?.length > 0
+                ? item.options
+                : item.optionNames || [];
+        const initialUnitPrice =
+          item.init_price ?? item.initPrice ?? item.precioInicial;
+        const optionTotal = options.reduce(
+          (sum, option) =>
+            sum +
+            (typeof option === "object" && option
+              ? Number(
+                  option.precio_extra ??
+                    option.price ??
+                    option.price_extra ??
+                    option.extra_price ??
+                    0,
+                ) || 0
+              : 0),
+          0,
+        );
+        const productUnitPrice =
+          initialUnitPrice != null
+            ? Number(initialUnitPrice)
+            : Math.max(0, finalUnitPrice - optionTotal);
+        const totalUnitPrice = productUnitPrice + optionTotal;
+        return {
+          product_name:
+            item.name || item.nombre || item.product_name || "Producto",
+          quantity,
+          init_price: productUnitPrice,
+          unit_price: totalUnitPrice,
+          subtotal: totalUnitPrice * quantity,
+          unit_name: item.unit?.name || item.unit_name || "",
+          options,
+          notes: item.note || item.notas || item.notes || "",
+        };
+      }),
     };
   };
 
