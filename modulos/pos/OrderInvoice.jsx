@@ -93,9 +93,11 @@ const getOptionTotal = (item) =>
       (typeof option === "object" && option
         ? Number(
             option.precio_extra ??
+              option.precioExtra ??
               option.price ??
               option.price_extra ??
               option.extra_price ??
+              option.extraPrice ??
               0,
           ) || 0
         : 0),
@@ -145,9 +147,11 @@ export const getInvoiceHtml = (
           const extraPrice =
             Number(
               option.precio_extra ??
+                option.precioExtra ??
                 option.price ??
                 option.price_extra ??
                 option.extra_price ??
+                option.extraPrice ??
                 0,
             ) || 0;
           return extraPrice > 0

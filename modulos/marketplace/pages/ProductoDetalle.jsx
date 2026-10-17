@@ -125,6 +125,8 @@ const ProductoDetalle = ({
               group.description || group.descripcion || group.hint || "",
             obligatorio: Boolean(isRequired),
             selectionType,
+            maxSelections:
+              Number(group.max_selections ?? group.maxSelections) || null,
             order: Number(
               group.order_index ?? group.orderIndex ?? group.order ?? 0,
             ),
@@ -524,7 +526,7 @@ const ProductoDetalle = ({
                 : seleccionActual
                   ? [seleccionActual]
                   : [];
-              const helperText = `${group.selectionType === "multiple" ? "Selecciona varias" : "Elige una"}${group.descripcion ? ` · ${group.descripcion}` : ""}`;
+              const helperText = `${group.selectionType === "multiple" ? group.maxSelections ? `Selecciona hasta ${group.maxSelections}` : "Selecciona varias" : "Elige una"}${group.descripcion ? ` · ${group.descripcion}` : ""}`;
 
               return (
                 <div
@@ -584,7 +586,9 @@ const ProductoDetalle = ({
                         }}
                       >
                         {group.selectionType === "multiple"
-                          ? "Selecciona varias"
+                          ? group.maxSelections
+                            ? `Hasta ${group.maxSelections} opciones`
+                            : "Selecciona varias"
                           : "Elige una"}
                       </span>
                     </div>
@@ -610,12 +614,18 @@ const ProductoDetalle = ({
                   >
                     {group.opciones.map((opt) => {
                       const activo = selectedValues.includes(opt.id);
+                      const reachedMax =
+                        group.selectionType === "multiple" &&
+                        group.maxSelections !== null &&
+                        selectedValues.length >= group.maxSelections &&
+                        !activo;
 
                       return (
                         <button
                           key={opt.id}
                           type="button"
                           aria-pressed={activo}
+                          disabled={reachedMax}
                           onClick={() =>
                             setSelecciones((prev) => {
                               const current = prev[group.id];
@@ -655,7 +665,8 @@ const ProductoDetalle = ({
                             color: activo ? "#fff" : "rgba(255,255,255,0.92)",
                             borderRadius: "20px",
                             padding: "16px 18px",
-                            cursor: "pointer",
+                            opacity: reachedMax ? 0.45 : 1,
+                            cursor: reachedMax ? "not-allowed" : "pointer",
                             textAlign: "left",
                             display: "flex",
                             alignItems: "center",

@@ -810,6 +810,7 @@ const Productos = ({ section = "productos" }) => {
         description: formatStoredText(group.description),
         is_required: Boolean(group.is_required),
         selection_type: group.selection_type || "single",
+        max_selections: group.max_selections || null,
         order_index: index + 1,
         items: group.items.map((item, itemIndex) => ({
           nombre: formatStoredText(item.nombre),
@@ -997,6 +998,7 @@ const Productos = ({ section = "productos" }) => {
         description: formatSentenceInput(group.description || ""),
         is_required: Boolean(group.is_required),
         selection_type: group.selection_type || "single",
+        max_selections: group.max_selections ?? null,
         order_index: Number(group.order_index || 0),
         items: itemsByGroup[group.id] || [],
       }));
@@ -1166,6 +1168,7 @@ const Productos = ({ section = "productos" }) => {
       description: "",
       is_required: false,
       selection_type: "single",
+      max_selections: null,
       order_index: 0,
       items: [],
     };
@@ -1284,6 +1287,10 @@ const Productos = ({ section = "productos" }) => {
           description: formatStoredText(group.description),
           is_required: Boolean(group.is_required),
           selection_type: group.selection_type,
+          max_selections:
+            group.selection_type === "multiple"
+              ? Number(group.max_selections) || null
+              : null,
           order_index: index + 1,
         })),
       )
@@ -3623,6 +3630,10 @@ const Productos = ({ section = "productos" }) => {
                                       onChange={(event) =>
                                         updateOptionGroup(group.id, {
                                           selection_type: event.target.value,
+                                          max_selections:
+                                            event.target.value === "multiple"
+                                              ? group.max_selections
+                                              : null,
                                         })
                                       }
                                       className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none transition-colors focus:border-violet-400/50"
@@ -3636,6 +3647,41 @@ const Productos = ({ section = "productos" }) => {
                                       Una opción para elegir una; varias para
                                       combinar.
                                     </p>
+                                    {group.selection_type === "multiple" && (
+                                      <div className="mt-3 space-y-1.5">
+                                        <label
+                                          htmlFor={`max-selections-${group.id}`}
+                                          className="block text-[9px] font-black uppercase tracking-widest text-neutral-500"
+                                        >
+                                          Máximo de opciones
+                                        </label>
+                                        <input
+                                          id={`max-selections-${group.id}`}
+                                          type="number"
+                                          min="1"
+                                          step="1"
+                                          inputMode="numeric"
+                                          value={group.max_selections ?? ""}
+                                          onChange={(event) => {
+                                            const value = event.target.value;
+                                            updateOptionGroup(group.id, {
+                                              max_selections: value
+                                                ? Math.max(
+                                                    1,
+                                                    Math.floor(Number(value)),
+                                                  )
+                                                : null,
+                                            });
+                                          }}
+                                          placeholder="Sin límite"
+                                          className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none transition-colors focus:border-violet-400/50"
+                                        />
+                                        <p className="text-[9px] leading-4 text-neutral-600">
+                                          Déjalo vacío para permitir todas las
+                                          opciones.
+                                        </p>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
 

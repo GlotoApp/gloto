@@ -557,7 +557,9 @@ const OrderCard = memo(
                           {item.options?.length > 0 && (
                             <div className="text-xs text-neutral-400">
                               Opciones:{" "}
-                              {item.options.map(getOptionLabel).join(", ")}
+                              {item.options
+                                .map(getOptionLabelWithPrice)
+                                .join(", ")}
                             </div>
                           )}
                           {item.notes && (
@@ -775,7 +777,9 @@ const InvoicePreview = ({ order, business, onClose, onPrint }) => {
                     <div className="font-bold">{item.product_name}</div>
                     {item.options?.length > 0 && (
                       <div className="text-[10px]">
-                        {item.options.map(getOptionLabel).join(" · ")}
+                        {item.options
+                          .map(getOptionLabelWithPrice)
+                          .join(" · ")}
                       </div>
                     )}
                     {item.notes && (
@@ -784,12 +788,10 @@ const InvoicePreview = ({ order, business, onClose, onPrint }) => {
                   </td>
                   <td className="py-2 text-center">{item.quantity}</td>
                   <td className="py-2 text-right">
-                    {formatMoney(item.unit_price)}
+                    {formatMoney(getInvoiceItemPricing(item).basePrice)}
                   </td>
                   <td className="py-2 text-right font-bold">
-                    {formatMoney(
-                      item.subtotal || item.unit_price * item.quantity,
-                    )}
+                    {formatMoney(getInvoiceItemPricing(item).subtotal)}
                   </td>
                 </tr>
               ))}
@@ -1018,6 +1020,25 @@ const getOptionLabel = (option) => {
   );
 };
 
+const getOptionExtraPrice = (option) =>
+  typeof option === "object" && option
+    ? Number(
+        option.precio_extra ??
+          option.precioExtra ??
+          option.price ??
+          option.price_extra ??
+          option.extra_price ??
+          option.extraPrice ??
+          0,
+      ) || 0
+    : 0;
+
+const getOptionLabelWithPrice = (option) => {
+  const label = getOptionLabel(option);
+  const extraPrice = getOptionExtraPrice(option);
+  return extraPrice > 0 ? `${label} (+${formatMoney(extraPrice)})` : label;
+};
+
 const ORDER_DELETE_REASONS = [
   { value: "cancelled_by_customer", label: "Pedido cancelado por el cliente" },
   { value: "duplicate_order", label: "Orden duplicada" },
@@ -1035,14 +1056,29 @@ const escapeInvoiceHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 
+const getInvoiceItemPricing = (item) => {
+  const extraTotal = (item.options || []).reduce(
+    (sum, option) => sum + getOptionExtraPrice(option),
+    0,
+  );
+  const unitPrice = Number(item.unit_price || 0);
+  const initialPrice = item.init_price ?? item.initPrice;
+  const basePrice =
+    initialPrice != null
+      ? Number(initialPrice)
+      : Math.max(0, unitPrice - extraTotal);
+  const totalUnitPrice = Math.max(unitPrice, basePrice + extraTotal);
+  const quantity = Number(item.quantity || 0);
+
+  return {
+    basePrice,
+    subtotal: totalUnitPrice * quantity,
+  };
+};
+
 const getInvoiceItemsSubtotal = (order) =>
   (order.items || []).reduce(
-    (sum, item) =>
-      sum +
-      Number(
-        item.subtotal ||
-          Number(item.unit_price || 0) * Number(item.quantity || 0),
-      ),
+    (sum, item) => sum + getInvoiceItemPricing(item).subtotal,
     0,
   );
 
@@ -1058,18 +1094,16 @@ const buildInvoicePrintHtml = (order, business = {}) => {
   const items = (order.items || [])
     .map((item) => {
       const options = (item.options || [])
-        .map(getOptionLabel)
+        .map(getOptionLabelWithPrice)
         .filter(Boolean)
         .join(" · ");
       const unit = getSpecificUnitName(item.unit_name);
       const quantity = `${formatQuantity(item.quantity)}${unit ? ` ${unit}` : ""}`;
-      const subtotal =
-        Number(item.subtotal) ||
-        Number(item.unit_price || 0) * Number(item.quantity || 0);
+      const { basePrice, subtotal } = getInvoiceItemPricing(item);
       return `<tr>
         <td><strong>${escapeInvoiceHtml(item.product_name)}</strong>${options ? `<small>${escapeInvoiceHtml(options)}</small>` : ""}${item.notes ? `<small>Nota: ${escapeInvoiceHtml(item.notes)}</small>` : ""}</td>
         <td class="center">${escapeInvoiceHtml(quantity)}</td>
-        <td class="right">${formatMoney(item.unit_price)}</td>
+        <td class="right">${formatMoney(basePrice)}</td>
         <td class="right">${formatMoney(subtotal)}</td>
       </tr>`;
     })

@@ -296,6 +296,8 @@ const normalizeOptionGroup = (group, items = []) => {
     descripcion: group.description || group.descripcion || group.hint || "",
     obligatorio: Boolean(isRequired),
     selectionType,
+    maxSelections:
+      Number(group.max_selections ?? group.maxSelections) || null,
     order: Number(group.order_index ?? group.orderIndex ?? group.order ?? 0),
     opciones,
   };
@@ -3310,9 +3312,11 @@ const POS = () => {
             (typeof option === "object" && option
               ? Number(
                   option.precio_extra ??
+                    option.precioExtra ??
                     option.price ??
                     option.price_extra ??
                     option.extra_price ??
+                    option.extraPrice ??
                     0,
                 ) || 0
               : 0),
@@ -5297,13 +5301,21 @@ const POS = () => {
                           ) : null}
                           <span className="rounded-full bg-white/5 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-on-surface-variant">
                             {group.selectionType === "multiple"
-                              ? "Elige varias"
+                              ? group.maxSelections
+                                ? `Hasta ${group.maxSelections} opciones`
+                                : "Elige varias"
                               : "Elige una"}
                           </span>
                         </div>
                         {group.descripcion ? (
                           <p className="text-xs leading-5 text-on-surface-variant">
                             {group.descripcion}
+                          </p>
+                        ) : null}
+                        {group.selectionType === "multiple" &&
+                        group.maxSelections ? (
+                          <p className="text-xs text-on-surface-variant">
+                            Selecciona hasta {group.maxSelections} opciones.
                           </p>
                         ) : null}
                       </div>
@@ -5317,10 +5329,17 @@ const POS = () => {
                               ? Array.isArray(selected) &&
                                 selected.includes(option.id)
                               : selected === option.id;
+                          const reachedMax =
+                            group.selectionType === "multiple" &&
+                            group.maxSelections !== null &&
+                            (Array.isArray(selected) ? selected.length : 0) >=
+                              group.maxSelections &&
+                            !isSelected;
                           return (
                             <button
                               key={option.id}
                               type="button"
+                              disabled={reachedMax}
                               onClick={() => {
                                 setOptionSelections((prev) => {
                                   const next = { ...prev };
@@ -5346,7 +5365,9 @@ const POS = () => {
                               className={`w-full rounded-[1.5rem] px-4 py-4 text-left transition ${
                                 isSelected
                                   ? "text-on-surface bg-primary-container/50"
-                                  : "bg-white/5 text-on-surface-variant hover:bg-white/10"
+                                  : reachedMax
+                                    ? "cursor-not-allowed bg-white/[0.02] text-on-surface-variant/40"
+                                    : "bg-white/5 text-on-surface-variant hover:bg-white/10"
                               }`}
                             >
                               <div className="flex items-center justify-between gap-4">

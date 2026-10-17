@@ -495,6 +495,7 @@ export const CartProvider = ({ children }) => {
         product_id: item.productId,
         quantity: item.cantidad,
         unit_price: item.precio,
+        init_price: item.precioBase,
         subtotal: item.precio * item.cantidad,
         product_name: item.nombre,
         product_sku: item.product_sku || null,

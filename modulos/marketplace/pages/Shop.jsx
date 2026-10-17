@@ -664,6 +664,8 @@ const Shop = () => {
             es_requerido: Boolean(isRequired),
             selection_type: selectionType,
             selectionType,
+            max_selections: Number(group.max_selections) || null,
+            maxSelections: Number(group.max_selections) || null,
             order_index: Number(
               group.order_index ?? group.orderIndex ?? group.order ?? 0,
             ),
@@ -2573,13 +2575,10 @@ const Shop = () => {
               }
             } catch (error) {
               console.error("No se pudo confirmar el pedido:", error);
-              setShareMessage(
-                error?.message?.includes("TICKET_LIMIT_REACHED") ||
-                  error?.message?.includes("ACTIVE_PLAN_REQUIRED")
-                  ? "Esta tienda no está aceptando pedidos nuevos por el momento. Inténtalo más tarde."
-                  : "No se pudo guardar el pedido. Intenta nuevamente.",
+              throw new Error(
+                "No pudimos completar tu pedido. Inténtalo de nuevo en unos momentos.",
+                { cause: error },
               );
-              window.setTimeout(() => setShareMessage(""), 3500);
             }
           }}
         />

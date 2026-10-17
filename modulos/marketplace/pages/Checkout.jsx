@@ -213,6 +213,7 @@ const Checkout = ({ onVolver, onConfirmar }) => {
   }, [availableDeliveryMethods, metodoEntrega, setMetodoEntrega]);
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
+  const [orderErrorMessage, setOrderErrorMessage] = useState("");
   const [fullscreenSummaryHeight, setFullscreenSummaryHeight] = useState(0);
   const fullscreenSummaryRef = useRef(null);
   const isConfirmingOrderRef = useRef(false);
@@ -496,33 +497,22 @@ const Checkout = ({ onVolver, onConfirmar }) => {
       deliveryPricingConfigured &&
       baseDeliveryFee !== null;
   const canConfirmOrder = puedeConfirmarEntrega && canConfirmDelivery;
-  const confirmationMessage = !metodoEntrega
-    ? "Selecciona un método de entrega"
-    : metodoEntrega === "domicilio" && !origin
-      ? "La tienda debe configurar su ubicación en el mapa"
-      : metodoEntrega === "domicilio" && !destination
-        ? "Selecciona tu ubicación en el mapa para continuar"
-        : metodoEntrega === "domicilio" && !deliveryPricingConfigured
-          ? "La tienda debe configurar el costo del domicilio"
-          : metodoEntrega === "domicilio" && isCalculatingRoute
-            ? "Calculando ruta, espera un momento"
-            : metodoEntrega === "domicilio" && routeError
-              ? "No se pudo calcular la ruta; vuelve a seleccionar el punto"
-              : metodoEntrega === "domicilio" &&
-                  deliveryDistanceMeters === null
-                ? "Espera a que se calcule la distancia del domicilio"
-                : !puedeConfirmarEntrega
-                  ? "Completa tus datos para continuar"
-                  : "";
+  const confirmationMessage =
+    "Completa la información requerida para continuar.";
 
   const handleConfirmar = async () => {
     if (!canConfirmOrder || isConfirmingOrderRef.current) return;
     isConfirmingOrderRef.current = true;
     setIsConfirmingOrder(true);
+    setOrderErrorMessage("");
 
     try {
       actualizarDatoCliente("deliveryFee", deliveryFee);
       await onConfirmar?.(deliveryFee);
+    } catch {
+      setOrderErrorMessage(
+        "No pudimos completar tu pedido. Inténtalo de nuevo en unos momentos.",
+      );
     } finally {
       isConfirmingOrderRef.current = false;
       setIsConfirmingOrder(false);
@@ -1648,8 +1638,23 @@ const Checkout = ({ onVolver, onConfirmar }) => {
           flexShrink: 0,
         }}
       >
+        {orderErrorMessage && (
+          <p
+            role="alert"
+            style={{
+              fontSize: "12px",
+              color: "#fca5a5",
+              marginBottom: "10px",
+              textAlign: "center",
+            }}
+          >
+            {orderErrorMessage}
+          </p>
+        )}
         {!canConfirmOrder && (
           <p
+            role="status"
+            aria-live="polite"
             style={{
               fontSize: "11.5px",
               color: "rgba(255,209,102,0.85)",
