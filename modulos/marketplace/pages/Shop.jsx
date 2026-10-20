@@ -341,6 +341,7 @@ const Shop = () => {
     totalItems,
     totalPrecio,
     setProductos,
+    sincronizarProductosTienda,
     nombreTienda: nombreTiendaEnCarrito,
     setNombreTienda,
     setLogoTienda,
@@ -797,7 +798,7 @@ const Shop = () => {
             const productosConOpciones = mapearProductos();
             setProductosState(productosConOpciones);
             if (!hayCarritoOtraTienda) {
-              setProductos(productosConOpciones);
+              sincronizarProductosTienda(productosConOpciones);
             }
           });
         }
@@ -848,7 +849,7 @@ const Shop = () => {
           tiendaSlug && tiendaSlug !== slug && totalItemsRef.current > 0;
 
         if (!hayCarritoOtraTienda) {
-          setProductos(productosMapeados);
+          sincronizarProductosTienda(productosMapeados);
         }
 
         const normalizeWhatsappNumber = (value) => {
@@ -887,6 +888,7 @@ const Shop = () => {
     setLogoTienda,
     setBusinessWhatsapp,
     setDeliverySettings,
+    sincronizarProductosTienda,
   ]);
 
   useEffect(() => {
@@ -2575,6 +2577,7 @@ const Shop = () => {
               }
             } catch (error) {
               console.error("No se pudo confirmar el pedido:", error);
+              if (error?.code === "PRICE_CHANGED") throw error;
               throw new Error(
                 "No pudimos completar tu pedido. Inténtalo de nuevo en unos momentos.",
                 { cause: error },

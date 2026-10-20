@@ -7,6 +7,7 @@ import {
   Crown,
   CreditCard,
   LayoutDashboard,
+  Link2,
   LogOut,
   Menu,
   ReceiptText,
@@ -81,8 +82,9 @@ const SuperAdminSidebar = ({
   const toggleSidebar =
     toggleSidebarProp ?? (() => setInternalExpanded((current) => !current));
   const isFinancesActive = location.pathname.startsWith("/gestion/finanzas");
-  const isPaymentsActive =
-    location.pathname.startsWith("/gestion/finanzas/pagos");
+  const isPaymentsActive = location.pathname.startsWith(
+    "/gestion/finanzas/pagos",
+  );
   const paymentSubmenu = [
     {
       label: "Por aprobar",
@@ -111,6 +113,11 @@ const SuperAdminSidebar = ({
       path: "/gestion/finanzas/pagos/domiciliarios",
       icon: Bike,
       count: pendingCounts?.couriers || 0,
+    },
+    {
+      label: "Links de pago y QR",
+      path: "/gestion/finanzas/pagos/suscripciones/enlaces",
+      icon: Link2,
     },
   ];
   const totalPendingCount = pendingCounts

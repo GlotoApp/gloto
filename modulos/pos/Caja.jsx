@@ -8,10 +8,13 @@ import {
   Receipt,
   ArrowUpRight,
   ArrowDownRight,
+  CalendarDays,
+  Clock3,
   PlusCircle,
   MinusCircle,
   AlertCircle,
   X,
+  UserRound,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
@@ -720,7 +723,7 @@ export default function Caja() {
       <header className="mx-auto mb-6 flex max-w-7xl flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black tracking-tight text-white">
-            Control de caja
+            Cierre de caja{" "}
           </h1>
         </div>
         <button
@@ -734,39 +737,58 @@ export default function Caja() {
       </header>
 
       {
-        <section className="mx-auto mb-6 max-w-7xl space-y-5 rounded-2xl bg-neutral-900/40 p-5 sm:p-6">
+        <motion.section
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
+          className="mx-auto mb-6 max-w-7xl space-y-5 rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-4 shadow-xl shadow-black/10 sm:p-6"
+        >
           <div>
-            <div className="flex items-center gap-2 text-violet-400 mb-2">
-              <Lock size={16} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">
-                Datos del cierre
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-              <h2 className="text-xl font-bold tracking-tight text-white">
-                {turnoIniciado ? "Cierre en curso" : "Cerrar caja"}
-              </h2>
-              <div className="flex items-center gap-3">
-                <time
-                  dateTime={new Date().toISOString()}
-                  className="font-mono text-xs font-medium text-neutral-400"
-                >
-                  {new Date().toLocaleDateString("es-CO")}
-                </time>
-                <time
-                  dateTime={new Date().toISOString()}
-                  className="font-mono text-base font-semibold tracking-wide text-violet-300"
-                >
-                  {horaActual}
-                </time>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="mb-2 flex items-center gap-2 text-violet-300">
+                  <span className="rounded-lg bg-violet-500/10 p-2">
+                    <Lock size={15} />
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.16em]">
+                    Datos del cierre
+                  </span>
+                </div>
+                <h2 className="text-xl font-bold tracking-tight text-white">
+                  {turnoIniciado ? "Cierre en curso" : "Cerrar caja"}
+                </h2>
+                <p className="mt-1 text-xs text-neutral-400">
+                  Selecciona el cajero y el momento desde el que quieres
+                  consultar los movimientos.
+                </p>
+              </div>
+              <div className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-neutral-950/60 px-3 py-2">
+                <div className="text-right">
+                  <time
+                    dateTime={new Date().toISOString()}
+                    className="block font-mono text-[10px] font-medium text-neutral-400"
+                  >
+                    {new Date().toLocaleDateString("es-CO")}
+                  </time>
+                  <time
+                    dateTime={new Date().toISOString()}
+                    className="block font-mono text-sm font-semibold tracking-wide text-violet-300"
+                  >
+                    {horaActual}
+                  </time>
+                </div>
+                <Clock3 size={17} className="text-violet-400" />
               </div>
             </div>
           </div>
 
-          <div className="space-y-4 pt-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr] gap-3">
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">
-                Cajero del cierre
+          <div className="space-y-4 border-t border-white/[0.06] pt-5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[1.25fr_1fr_1fr]">
+              <label className="group block rounded-xl border border-white/[0.06] bg-neutral-950/50 p-3 transition-colors hover:border-white/10 focus-within:border-violet-500/40">
+                <span className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                  <UserRound size={14} className="text-violet-400" />
+                  Cajero del cierre
+                </span>
                 <select
                   autoFocus
                   value={nombreCajero}
@@ -774,7 +796,7 @@ export default function Caja() {
                     setNombreCajero(e.target.value);
                     setTurnoError("");
                   }}
-                  className="mt-1 min-h-11 w-full rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-neutral-100 outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50"
+                  className="min-h-11 w-full rounded-lg border border-white/[0.06] bg-neutral-900 px-3 py-2.5 text-sm text-neutral-100 outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50"
                   required
                 >
                   <option value="" disabled>
@@ -790,8 +812,11 @@ export default function Caja() {
                 </select>
               </label>
 
-              <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
-                Desde fecha
+              <label className="group block rounded-xl border border-white/[0.06] bg-neutral-950/50 p-3 transition-colors hover:border-white/10 focus-within:border-violet-500/40">
+                <span className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                  <CalendarDays size={14} className="text-violet-400" />
+                  Fecha de inicio
+                </span>
                 <input
                   type="date"
                   value={fechaApertura}
@@ -799,11 +824,17 @@ export default function Caja() {
                     setFechaApertura(e.target.value);
                     setTurnoError("");
                   }}
-                  className="mt-1 min-h-11 w-full rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50"
+                  className="min-h-11 w-full rounded-lg border border-white/[0.06] bg-neutral-900 px-3 py-2.5 text-sm text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50"
                 />
+                <span className="mt-2 block text-[10px] text-neutral-600">
+                  Día desde el que se incluirán movimientos
+                </span>
               </label>
-              <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
-                Desde hora
+              <label className="group block rounded-xl border border-white/[0.06] bg-neutral-950/50 p-3 transition-colors hover:border-white/10 focus-within:border-violet-500/40">
+                <span className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                  <Clock3 size={14} className="text-violet-400" />
+                  Hora de inicio
+                </span>
                 <input
                   type="time"
                   value={horaApertura}
@@ -811,8 +842,11 @@ export default function Caja() {
                     setHoraApertura(e.target.value);
                     setTurnoError("");
                   }}
-                  className="mt-1 min-h-11 w-full rounded-xl bg-neutral-900 px-3 py-2.5 text-sm text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50"
+                  className="min-h-11 w-full rounded-lg border border-white/[0.06] bg-neutral-900 px-3 py-2.5 text-sm text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50"
                 />
+                <span className="mt-2 block text-[10px] text-neutral-600">
+                  Hora desde la que se incluirán movimientos
+                </span>
               </label>
             </div>
 
@@ -823,31 +857,40 @@ export default function Caja() {
             )}
 
             {loadError && (
-              <p               className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <p className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-300">
                 Error al cargar caja: {loadError}
               </p>
             )}
 
-            <button
-              onClick={
-                turnoIniciado ? handleActualizarApertura : handleIniciarTurno
-              }
-              disabled={
-                !nombreCajero.trim() ||
-                !fechaApertura ||
-                !horaApertura ||
-                (turnoIniciado && !aperturaModificada)
-              }
-              className={`min-h-11 w-full rounded-xl py-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:pointer-events-none disabled:opacity-30 ${
-                aperturaModificada
-                  ? "bg-amber-500/15 text-amber-300 hover:bg-amber-500 hover:text-black focus-visible:ring-amber-400/60"
-                  : "bg-violet-600 text-white hover:bg-violet-500"
-              }`}
-            >
-              {aperturaModificada ? "ACTUALIZAR DATOS" : "CONSULTAR CAJA"}
-            </button>
+            <div className="flex flex-col gap-2 border-t border-white/[0.06] pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-neutral-500">
+                {aperturaModificada
+                  ? "Cambiaste el inicio del turno. Actualiza para volver a calcular el cierre."
+                  : "Verifica los datos antes de consultar la caja."}
+              </p>
+              <motion.button
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={
+                  turnoIniciado ? handleActualizarApertura : handleIniciarTurno
+                }
+                disabled={
+                  !nombreCajero.trim() ||
+                  !fechaApertura ||
+                  !horaApertura ||
+                  (turnoIniciado && !aperturaModificada)
+                }
+                className={`min-h-12 w-full rounded-xl px-6 py-3 text-sm font-bold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:pointer-events-none disabled:opacity-30 sm:w-auto ${
+                  aperturaModificada
+                    ? "bg-amber-500/15 text-amber-300 hover:bg-amber-500 hover:text-black focus-visible:ring-amber-400/60"
+                    : "bg-violet-600 text-white shadow-lg shadow-violet-950/30 hover:bg-violet-500"
+                }`}
+              >
+                {aperturaModificada ? "ACTUALIZAR DATOS" : "CONSULTAR CAJA"}
+              </motion.button>
+            </div>
           </div>
-        </section>
+        </motion.section>
       }
 
       {/* ════ CONTENIDO PRINCIPAL ════ */}
@@ -1154,7 +1197,8 @@ export default function Caja() {
                             Corte actual
                           </p>
                           <p className="mt-1 text-sm font-mono font-semibold text-violet-200">
-                            {fechaLocalInput(cierreVista)} {horaFormateada(cierreVista)}
+                            {fechaLocalInput(cierreVista)}{" "}
+                            {horaFormateada(cierreVista)}
                           </p>
                         </div>
                       </div>
@@ -1175,88 +1219,91 @@ export default function Caja() {
                         </span>
                       </div>
                       <div className="grid gap-2 sm:grid-cols-3">
-                      {["efectivo", "tarjeta", "transferencia"].map(
-                        (method) => {
-                          const esperado =
-                            method === "efectivo"
-                              ? totalEfectivoVentas
-                              : method === "tarjeta"
-                                ? totalTarjeta
-                                : method === "transferencia"
-                                  ? totalTransferencia
-                                  : 0;
-                          const declarado =
-                              parseAmountInput(metodosPagoReales[method]);
-                          const diferencia = declarado - esperado;
-                          const colorClase =
-                            diferencia > 0
-                              ? "bg-emerald-500/10"
-                              : diferencia < 0
-                                ? "bg-red-500/10"
-                                : "bg-black/20";
-                          const textColor =
-                            diferencia > 0
-                              ? "text-emerald-400"
-                              : diferencia < 0
-                                ? "text-red-400"
-                                : "text-neutral-500";
+                        {["efectivo", "tarjeta", "transferencia"].map(
+                          (method) => {
+                            const esperado =
+                              method === "efectivo"
+                                ? totalEfectivoVentas
+                                : method === "tarjeta"
+                                  ? totalTarjeta
+                                  : method === "transferencia"
+                                    ? totalTransferencia
+                                    : 0;
+                            const declarado = parseAmountInput(
+                              metodosPagoReales[method],
+                            );
+                            const diferencia = declarado - esperado;
+                            const colorClase =
+                              diferencia > 0
+                                ? "bg-emerald-500/10"
+                                : diferencia < 0
+                                  ? "bg-red-500/10"
+                                  : "bg-black/20";
+                            const textColor =
+                              diferencia > 0
+                                ? "text-emerald-400"
+                                : diferencia < 0
+                                  ? "text-red-400"
+                                  : "text-neutral-500";
 
-                          return (
-                            <div
-                              key={method}
-                              className={`grid gap-3 rounded-xl p-3 transition-colors ${colorClase}`}
-                            >
-                              <div className="space-y-2">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="text-[10px] font-bold capitalize text-neutral-200">
-                                    {method}
-                                  </span>
-                                  {diferencia !== 0 && (
-                                    <span
-                                      className={`text-xs font-semibold text-right ${textColor}`}
-                                    >
-                                      {diferencia > 0 ? "Sobra" : "Falta"}{" "}
-                                      {fmt(Math.abs(diferencia))}
+                            return (
+                              <div
+                                key={method}
+                                className={`grid gap-3 rounded-xl p-3 transition-colors ${colorClase}`}
+                              >
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[10px] font-bold capitalize text-neutral-200">
+                                      {method}
                                     </span>
-                                  )}
+                                    {diferencia !== 0 && (
+                                      <span
+                                        className={`text-xs font-semibold text-right ${textColor}`}
+                                      >
+                                        {diferencia > 0 ? "Sobra" : "Falta"}{" "}
+                                        {fmt(Math.abs(diferencia))}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                                      Esperado
+                                    </p>
+                                    <p className="mt-0.5 text-sm font-mono font-semibold text-neutral-200">
+                                      {fmt(esperado)}
+                                    </p>
+                                  </div>
                                 </div>
-                                <div>
-                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
-                                    Esperado
-                                  </p>
-                                  <p className="mt-0.5 text-sm font-mono font-semibold text-neutral-200">
-                                    {fmt(esperado)}
-                                  </p>
-                                </div>
+                                <label className="space-y-1">
+                                  <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                                    Contado
+                                  </span>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="0"
+                                    value={metodosPagoReales[method]}
+                                    onChange={(e) =>
+                                      setMetodosPagoReales({
+                                        ...metodosPagoReales,
+                                        [method]: formatAmountInput(
+                                          e.target.value,
+                                        ),
+                                      })
+                                    }
+                                    className={`min-h-10 w-full rounded-lg bg-neutral-900 p-2 text-right text-sm font-mono font-semibold outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50 ${
+                                      diferencia > 0
+                                        ? "text-emerald-300"
+                                        : diferencia < 0
+                                          ? "text-red-300"
+                                          : "text-white"
+                                    }`}
+                                  />
+                                </label>
                               </div>
-                              <label className="space-y-1">
-                                <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
-                                  Contado
-                                </span>
-                                <input
-                                  type="text"
-                                  inputMode="numeric"
-                                  placeholder="0"
-                                  value={metodosPagoReales[method]}
-                                  onChange={(e) =>
-                                    setMetodosPagoReales({
-                                      ...metodosPagoReales,
-                                      [method]: formatAmountInput(e.target.value),
-                                    })
-                                  }
-                                  className={`min-h-10 w-full rounded-lg bg-neutral-900 p-2 text-right text-sm font-mono font-semibold outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/50 ${
-                                    diferencia > 0
-                                      ? "text-emerald-300"
-                                      : diferencia < 0
-                                        ? "text-red-300"
-                                        : "text-white"
-                                  }`}
-                                />
-                              </label>
-                            </div>
-                          );
-                        },
-                      )}
+                            );
+                          },
+                        )}
                       </div>
                     </div>
 
@@ -1294,7 +1341,10 @@ export default function Caja() {
           >
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
-                <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-400" size={24} />
+                <CheckCircle2
+                  className="mt-0.5 shrink-0 text-emerald-400"
+                  size={24}
+                />
                 <div>
                   <h2
                     id="cash-close-title"
@@ -1329,9 +1379,7 @@ export default function Caja() {
                 </p>
                 <p className="mt-1 text-xs text-neutral-400">
                   {cierreConfirmado.transacciones}{" "}
-                  {cierreConfirmado.transacciones === 1
-                    ? "venta"
-                    : "ventas"}
+                  {cierreConfirmado.transacciones === 1 ? "venta" : "ventas"}
                 </p>
               </div>
               <div className="rounded-xl bg-black/20 p-3">

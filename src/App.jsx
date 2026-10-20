@@ -67,6 +67,9 @@ const ImportarProductosTiendaPage = lazy(
 const PlanesFacturacion = lazy(
   () => import("../modulos/admin/PlanesFacturacion"),
 );
+const LinksPagoSuscripciones = lazy(
+  () => import("../modulos/admin/LinksPagoSuscripciones"),
+);
 const Mercado = lazy(() => import("../modulos/admin/Mercado"));
 const Finanzas = lazy(() => import("../modulos/admin/Finanzas"));
 const Sistema = lazy(() => import("../modulos/admin/Sistema"));
@@ -645,6 +648,10 @@ function App() {
                   badge="Resumen"
                 />
               }
+            />
+            <Route
+              path="finanzas/pagos/suscripciones/enlaces"
+              element={<LinksPagoSuscripciones />}
             />
             <Route
               path="finanzas/pagos/suscripciones"

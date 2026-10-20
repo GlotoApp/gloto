@@ -621,14 +621,27 @@ const SeguimientoPedido = ({ onCerrar }) => {
       (isMarketplaceOrder ? deliveryFee : 0) -
       (isMarketplaceOrder ? 0 : storedTipAmount),
   );
+  const itemsSubtotal = (pedido.items || []).reduce((sum, item) => {
+    const subtotal = Number(item.subtotal);
+    if (Number.isFinite(subtotal) && subtotal > 0) return sum + subtotal;
+
+    const unitPrice = Number(item.unit_price ?? item.precio) || 0;
+    const quantity = Number(item.quantity ?? item.cantidad) || 0;
+    return sum + unitPrice * quantity;
+  }, 0);
+  const totalMarketplaceSinPropina =
+    isMarketplaceOrder && itemsSubtotal > 0
+      ? itemsSubtotal + deliveryFee
+      : totalDue;
   const tipPercent = Math.max(
     0,
     Number(pedido.tipPercent ?? pedido.metadata?.tip_percent) || 0,
   );
   const tipAmount =
-    storedTipAmount > 0 && tipPercent > 0
-      ? calculateTipAmount(totalDue, 0, tipPercent)
-      : storedTipAmount;
+    storedTipAmount ||
+    (tipPercent > 0
+      ? calculateTipAmount(totalMarketplaceSinPropina, 0, tipPercent)
+      : 0);
   const datosEntrega =
     {
       domicilio: [
@@ -1376,25 +1389,6 @@ const SeguimientoPedido = ({ onCerrar }) => {
             </div>
           )}
 
-          {tipAmount > 0 && (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "12px",
-                marginTop: "14px",
-                padding: "10px 4px",
-                borderTop: "1px solid rgba(255,255,255,0.08)",
-                fontSize: "13px",
-                color: "rgba(255,255,255,0.62)",
-              }}
-            >
-              <span>Total antes de propina</span>
-              <span>{fmt(totalDue)}</span>
-            </div>
-          )}
-
           <div
             style={{
               display: "flex",
@@ -1419,7 +1413,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
                 color: "#c4b5fd",
               }}
             >
-              {fmt(totalDue + tipAmount)}
+              {fmt(totalMarketplaceSinPropina)}
             </span>
           </div>
         </div>

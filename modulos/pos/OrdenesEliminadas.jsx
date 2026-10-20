@@ -8,6 +8,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 import SubLoading from "./SubLoading";
@@ -36,6 +37,15 @@ const formatDateTime = (value) => {
     : date.toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" });
 };
 
+const getLocalDateString = (dayOffset = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + dayOffset);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const OrdenesEliminadas = () => {
   const { user } = useAuth();
   const [deletedOrders, setDeletedOrders] = useState([]);
@@ -44,12 +54,19 @@ const OrdenesEliminadas = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [reasonFilter, setReasonFilter] = useState("");
+  const [datePreset, setDatePreset] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [profileRole, setProfileRole] = useState("");
+  const [isPurgeModalOpen, setIsPurgeModalOpen] = useState(false);
+  const [ownerPassword, setOwnerPassword] = useState("");
+  const [isPurging, setIsPurging] = useState(false);
+  const [purgeError, setPurgeError] = useState("");
 
   const loadDeletedOrders = useCallback(async () => {
     if (!user?.id) {
       setDeletedOrders([]);
+      setProfileRole("");
       setIsLoading(false);
       setError("Inicia sesión para consultar el historial.");
       return;
@@ -76,11 +93,13 @@ const OrdenesEliminadas = () => {
       ];
       const role = String(profile?.role || "").toLowerCase();
       const isSuperAdmin = ["super_admin", "superadmin"].includes(role);
+      setProfileRole(role);
       if (
         (!profile?.business_id && !isSuperAdmin) ||
         !allowedRoles.includes(role)
       ) {
         setDeletedOrders([]);
+        setProfileRole("");
         setError("No tienes permiso para consultar las órdenes eliminadas.");
         return;
       }
@@ -107,6 +126,82 @@ const OrdenesEliminadas = () => {
       setIsRefreshing(false);
     }
   }, [user]);
+
+  const canPurgeDeletedOrders = [
+    "admin",
+    "owner",
+    "dueño",
+    "dueno",
+  ].includes(profileRole);
+
+  const handlePurgeDeletedOrders = async (event) => {
+    event.preventDefault();
+    if (
+      !canPurgeDeletedOrders ||
+      !user?.id ||
+      !user.email ||
+      !ownerPassword
+    ) {
+      setPurgeError("No se pudo verificar la cuenta del administrador.");
+      return;
+    }
+
+    setIsPurging(true);
+    setPurgeError("");
+    const ownerClient = createClient(
+      import.meta.env.VITE_SUPABASE_URL,
+      import.meta.env.VITE_SUPABASE_ANON_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+          persistSession: false,
+        },
+      },
+    );
+
+    try {
+      const { data: authData, error: authError } =
+        await ownerClient.auth.signInWithPassword({
+          email: user.email,
+          password: ownerPassword,
+        });
+      if (authError || authData.user?.id !== user.id) {
+        throw new Error("La contraseña del dueño es incorrecta.");
+      }
+
+      const { error: deleteError } = await ownerClient.rpc(
+        "delete_all_deleted_orders",
+      );
+      if (deleteError) throw deleteError;
+
+      setDeletedOrders([]);
+      setOwnerPassword("");
+      setIsPurgeModalOpen(false);
+    } catch (purgeFailure) {
+      console.error("Error eliminando el historial de órdenes:", purgeFailure);
+      setPurgeError(
+        purgeFailure?.message ||
+          "No se pudo eliminar el historial de órdenes eliminadas.",
+      );
+    } finally {
+      try {
+        const { error: signOutError } = await ownerClient.auth.signOut();
+        if (signOutError) {
+          console.error(
+            "Error cerrando la sesión temporal del dueño:",
+            signOutError,
+          );
+        }
+      } catch (signOutFailure) {
+        console.error(
+          "Error cerrando la sesión temporal del dueño:",
+          signOutFailure,
+        );
+      }
+      setIsPurging(false);
+    }
+  };
 
   useEffect(() => {
     let isCurrent = true;
@@ -148,13 +243,37 @@ const OrdenesEliminadas = () => {
   }, [dateFrom, dateTo, deletedOrders, reasonFilter, searchTerm]);
 
   const hasActiveFilters = Boolean(
-    searchTerm || reasonFilter || dateFrom || dateTo,
+    searchTerm ||
+      reasonFilter ||
+      (datePreset !== "all" &&
+        (datePreset !== "custom" || dateFrom || dateTo)) ||
+      dateFrom ||
+      dateTo,
   );
   const clearFilters = () => {
     setSearchTerm("");
     setReasonFilter("");
+    setDatePreset("all");
     setDateFrom("");
     setDateTo("");
+  };
+  const handleDatePresetChange = (preset) => {
+    setDatePreset(preset);
+    if (preset === "all") {
+      setDateFrom("");
+      setDateTo("");
+      return;
+    }
+    if (preset === "custom") {
+      setDateFrom("");
+      setDateTo("");
+      return;
+    }
+
+    const offsets = { today: 0, yesterday: -1, dayBeforeYesterday: -2 };
+    const selectedDate = getLocalDateString(offsets[preset]);
+    setDateFrom(selectedDate);
+    setDateTo(selectedDate);
   };
 
   return (
@@ -165,19 +284,34 @@ const OrdenesEliminadas = () => {
             <h1 className="font-sans text-2xl font-black tracking-tighter">
               Órdenes eliminadas
             </h1>
-            <button
-              type="button"
-              onClick={loadDeletedOrders}
-              disabled={isRefreshing}
-              title={isRefreshing ? "Actualizando órdenes eliminadas" : "Actualizar órdenes eliminadas"}
-              aria-label="Actualizar órdenes eliminadas"
-              className="inline-flex items-center justify-center rounded-xl p-2 text-violet-300 transition hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <RefreshCcw
-                size={14}
-                className={isRefreshing ? "animate-spin" : ""}
-              />
-            </button>
+            <div className="flex items-center gap-2">
+              {canPurgeDeletedOrders && deletedOrders.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPurgeError("");
+                    setIsPurgeModalOpen(true);
+                  }}
+                  className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-red-500/20 px-3 text-xs font-semibold text-red-300 transition hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
+                >
+                  <Trash2 size={14} />
+                  Vaciar historial
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={loadDeletedOrders}
+                disabled={isRefreshing}
+                title={isRefreshing ? "Actualizando órdenes eliminadas" : "Actualizar órdenes eliminadas"}
+                aria-label="Actualizar órdenes eliminadas"
+                className="inline-flex items-center justify-center rounded-xl p-2 text-violet-300 transition hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCcw
+                  size={14}
+                  className={isRefreshing ? "animate-spin" : ""}
+                />
+              </button>
+            </div>
           </div>
           <div className="relative w-full">
             <Search
@@ -218,7 +352,7 @@ const OrdenesEliminadas = () => {
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
               <label className="flex min-w-0 flex-1 flex-col gap-1.5">
                 <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
                   Motivo
@@ -246,42 +380,71 @@ const OrdenesEliminadas = () => {
               </label>
               <label className="flex min-w-0 flex-1 flex-col gap-1.5">
                 <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
-                  Desde
+                  Fecha
                 </span>
-                <span className="group relative block">
-                  <CalendarDays
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-500/50 transition-colors group-hover:text-violet-500"
-                  />
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    max={dateTo || undefined}
-                    onChange={(event) => setDateFrom(event.target.value)}
-                    aria-label="Desde la fecha"
-                    className="w-full rounded-xl border border-white/5 bg-neutral-900 py-2.5 pl-9 pr-3 text-[10px] font-mono uppercase text-neutral-300 outline-none transition-all focus:border-violet-500/40"
-                  />
-                </span>
-              </label>
-              <label className="flex min-w-0 flex-1 flex-col gap-1.5">
-                <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
-                  Hasta
-                </span>
-                <span className="group relative block">
-                  <CalendarDays
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-500/50 transition-colors group-hover:text-violet-500"
-                  />
-                  <input
-                    type="date"
-                    value={dateTo}
-                    min={dateFrom || undefined}
-                    onChange={(event) => setDateTo(event.target.value)}
-                    aria-label="Hasta la fecha"
-                    className="w-full rounded-xl border border-white/5 bg-neutral-900 py-2.5 pl-9 pr-3 text-[10px] font-mono uppercase text-neutral-300 outline-none transition-all focus:border-violet-500/40"
+                <span className="group relative">
+                  <select
+                    value={datePreset}
+                    onChange={(event) =>
+                      handleDatePresetChange(event.target.value)
+                    }
+                    aria-label="Filtrar por fecha"
+                    className="w-full cursor-pointer appearance-none rounded-xl border border-white/5 bg-neutral-900 py-2.5 pl-3 pr-10 text-[10px] font-mono uppercase text-neutral-300 outline-none transition-all focus:border-violet-500/40"
+                  >
+                    <option value="all">Todas las fechas</option>
+                    <option value="today">Hoy</option>
+                    <option value="yesterday">Ayer</option>
+                    <option value="dayBeforeYesterday">Antes de ayer</option>
+                    <option value="custom">Personalizado</option>
+                  </select>
+                  <ChevronDown
+                    size={12}
+                    className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-neutral-600"
                   />
                 </span>
               </label>
+              {datePreset === "custom" && (
+                <>
+                  <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+                    <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
+                      Desde
+                    </span>
+                    <span className="group relative block">
+                      <CalendarDays
+                        size={14}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-500/50 transition-colors group-hover:text-violet-500"
+                      />
+                      <input
+                        type="date"
+                        value={dateFrom}
+                        max={dateTo || undefined}
+                        onChange={(event) => setDateFrom(event.target.value)}
+                        aria-label="Desde la fecha"
+                        className="w-full rounded-xl border border-white/5 bg-neutral-900 py-2.5 pl-9 pr-3 text-[10px] font-mono uppercase text-neutral-300 outline-none transition-all focus:border-violet-500/40"
+                      />
+                    </span>
+                  </label>
+                  <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+                    <span className="ml-1 text-[8px] font-black uppercase tracking-widest text-neutral-600">
+                      Hasta
+                    </span>
+                    <span className="group relative block">
+                      <CalendarDays
+                        size={14}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-500/50 transition-colors group-hover:text-violet-500"
+                      />
+                      <input
+                        type="date"
+                        value={dateTo}
+                        min={dateFrom || undefined}
+                        onChange={(event) => setDateTo(event.target.value)}
+                        aria-label="Hasta la fecha"
+                        className="w-full rounded-xl border border-white/5 bg-neutral-900 py-2.5 pl-9 pr-3 text-[10px] font-mono uppercase text-neutral-300 outline-none transition-all focus:border-violet-500/40"
+                      />
+                    </span>
+                  </label>
+                </>
+              )}
             </div>
           </section>
         )}
@@ -384,6 +547,87 @@ const OrdenesEliminadas = () => {
               );
             })}
           </section>
+        )}
+
+        {isPurgeModalOpen && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget && !isPurging) {
+                setIsPurgeModalOpen(false);
+                setOwnerPassword("");
+                setPurgeError("");
+              }
+            }}
+          >
+            <form
+              onSubmit={handlePurgeDeletedOrders}
+              className="w-full max-w-md space-y-4 rounded-2xl border border-red-500/20 bg-neutral-950 p-5 shadow-2xl"
+              aria-labelledby="purge-deleted-orders-title"
+            >
+              <div className="flex items-start gap-3">
+                <span className="rounded-xl bg-red-500/10 p-2 text-red-300">
+                  <Trash2 size={18} />
+                </span>
+                <div>
+                  <h2
+                    id="purge-deleted-orders-title"
+                    className="text-lg font-bold text-white"
+                  >
+                    Vaciar órdenes eliminadas
+                  </h2>
+                  <p className="mt-1 text-sm text-neutral-400">
+                    Se borrarán permanentemente las {deletedOrders.length} órdenes
+                    del historial de este negocio. Esta acción no se puede deshacer.
+                  </p>
+                </div>
+              </div>
+
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold text-neutral-300">
+                  Confirma con la contraseña del administrador o dueño
+                </span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={ownerPassword}
+                  onChange={(event) => setOwnerPassword(event.target.value)}
+                  required
+                  autoFocus
+                  className="w-full rounded-xl border border-white/10 bg-neutral-900 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500/50"
+                />
+              </label>
+
+              {purgeError && (
+                <p role="alert" className="text-sm text-red-300">
+                  {purgeError}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isPurging}
+                  onClick={() => {
+                    setIsPurgeModalOpen(false);
+                    setOwnerPassword("");
+                    setPurgeError("");
+                  }}
+                  className="min-h-10 rounded-xl px-4 text-sm font-semibold text-neutral-300 transition hover:bg-white/5 disabled:opacity-60"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPurging || !ownerPassword}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-bold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Trash2 size={14} />
+                  {isPurging ? "Eliminando..." : "Eliminar permanentemente"}
+                </button>
+              </div>
+            </form>
+          </div>
         )}
       </main>
     </div>

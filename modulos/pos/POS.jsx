@@ -6,7 +6,7 @@ import React, {
   useEffect,
 } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Trash2, Pencil, X, Maximize2 } from "lucide-react";
+import { Trash2, Pencil, Check, X, Maximize2 } from "lucide-react";
 import SplitPaymentModal from "./SplitPaymentModal";
 import { printOrderInvoice } from "./OrderInvoice";
 import {
@@ -1155,6 +1155,8 @@ const POS = () => {
   const skipReverseGeocodeRef = useRef("");
   const [deliveryRouteDistanceMeters, setDeliveryRouteDistanceMeters] =
     useState(null);
+  const [deliveryFeeOverride, setDeliveryFeeOverride] = useState(null);
+  const [isEditingDeliveryFee, setIsEditingDeliveryFee] = useState(false);
   const [isCalculatingDeliveryRoute, setIsCalculatingDeliveryRoute] =
     useState(false);
   const [deliveryRouteError, setDeliveryRouteError] = useState("");
@@ -1271,6 +1273,7 @@ const POS = () => {
         options: item.optionNames || item.options || [],
       })),
       deliveryMethod: storedDeliveryMethod,
+      deliveryFee: Number(editMesa.deliveryFee ?? editMesa.delivery_fee ?? 0),
       address: editAddress,
       deliveryDestination:
         storedDeliveryMethod === "delivery" ? storedDeliveryDestination : null,
@@ -1294,6 +1297,13 @@ const POS = () => {
       selectedTable: storedDeliveryMethod === "table" ? nextTable : "",
     });
     setDeliveryMethod(storedDeliveryMethod);
+    setDeliveryFeeOverride(
+      storedDeliveryMethod === "delivery"
+        ? String(
+            Number(editMesa.deliveryFee ?? editMesa.delivery_fee ?? 0) || 0,
+          )
+        : null,
+    );
     skipReverseGeocodeRef.current = storedDeliveryDestination
       ? `${storedDeliveryDestination.latitude.toFixed(6)},${storedDeliveryDestination.longitude.toFixed(6)}`
       : "";
@@ -2253,6 +2263,7 @@ const POS = () => {
 
     deliveryDestinationRef.current = destination;
     setDeliveryDestination(destination);
+    setDeliveryFeeOverride(null);
     setDeliveryCoordinatesInput(
       destination ? formatMapCoordinates(destination) : "",
     );
@@ -2264,6 +2275,7 @@ const POS = () => {
   const handleDeliveryChange = (method) => {
     if (deliveryMethod === method) {
       setDeliveryMethod("");
+      setDeliveryFeeOverride(null);
       setIsDeliveryMapFullscreen(false);
       setSelectedTable("");
       setAddress("");
@@ -2275,6 +2287,7 @@ const POS = () => {
     }
 
     setDeliveryMethod(method);
+    setDeliveryFeeOverride(null);
     if (method !== "delivery") setIsDeliveryMapFullscreen(false);
 
     if (method !== "table") {
@@ -2543,10 +2556,6 @@ const POS = () => {
     deliveryRouteDistanceMeters,
     deliveryClock,
   );
-  const deliveryBaseCharge =
-    deliveryMethod === "delivery" && baseDeliveryFee !== null
-      ? baseDeliveryFee
-      : 0;
   const deliveryBaseFee =
     deliveryMethod === "delivery" ? baseDeliveryFee : null;
   const nightDeliverySurcharge =
@@ -2560,7 +2569,11 @@ const POS = () => {
     0,
   );
   const deliveryFee =
-    deliveryMethod === "delivery" ? calculatedDeliveryFee : 0;
+    deliveryMethod === "delivery"
+      ? deliveryFeeOverride === null || deliveryFeeOverride === ""
+        ? calculatedDeliveryFee
+        : Math.max(0, Number(deliveryFeeOverride) || 0)
+      : 0;
   const tipPercent = Math.max(
     0,
     Math.min(100, Number(deliverySettings?.tip_percent) || 0),
@@ -2607,6 +2620,7 @@ const POS = () => {
           options: item.optionNames || item.options || [],
         })),
         deliveryMethod,
+        deliveryFee: Number(deliveryFee) || 0,
         address,
         deliveryDestination,
         referencePoint,
@@ -2662,6 +2676,15 @@ const POS = () => {
       errors.push(
         "Configurar tarifa, mínimo y máximo de domicilio en la tienda",
       );
+    }
+    if (
+      deliveryMethod === "delivery" &&
+      deliveryFeeOverride !== null &&
+      deliveryFeeOverride !== "" &&
+      (!Number.isFinite(Number(deliveryFeeOverride)) ||
+        Number(deliveryFeeOverride) < 0)
+    ) {
+      errors.push("Ingresar un costo de domicilio válido");
     }
     if (deliveryMethod === "delivery" && !deliveryDestination) {
       errors.push("Seleccionar el destino en el mapa");
@@ -3476,6 +3499,7 @@ const POS = () => {
     setMobilePanel("products");
     setToastItems([]);
     setDeliveryMethod("");
+    setDeliveryFeeOverride(null);
     setIsDeliveryMapFullscreen(false);
     setPaymentMethod("");
     setMoneyPaid("");
@@ -3785,14 +3809,63 @@ const POS = () => {
     </>
   );
 
+  const deliveryFeeEditControl = (
+    <div className="flex items-center gap-1.5 text-sm font-bold">
+      {isEditingDeliveryFee ? (
+        <>
+          <label className="flex items-center gap-1">
+            <span>$</span>
+            <input
+              autoFocus
+              type="number"
+              min="0"
+              step="1"
+              inputMode="numeric"
+              aria-label="Costo de domicilio a cobrar"
+              value={
+                deliveryFeeOverride === null
+                  ? (calculatedDeliveryFee ?? "")
+                  : deliveryFeeOverride
+              }
+              onChange={(event) => setDeliveryFeeOverride(event.target.value)}
+              className="w-28 rounded-md border border-primary-container/40 bg-background px-2 py-1 text-right text-sm font-bold text-primary outline-none focus:border-primary"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setIsEditingDeliveryFee(false)}
+            className="rounded-md p-1 text-emerald-400 transition-colors hover:bg-emerald-400/10"
+            aria-label="Confirmar costo de domicilio"
+            title="Listo"
+          >
+            <Check className="h-4 w-4" />
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => setIsEditingDeliveryFee(true)}
+            className="rounded-md p-1 text-on-surface-variant transition-colors hover:bg-primary-container/20 hover:text-primary"
+            aria-label="Editar costo de domicilio"
+            title="Editar costo de domicilio"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <span>$ {formatPrice(deliveryFee)}</span>
+        </>
+      )}
+    </div>
+  );
+
   const deliveryCostSummary = (
     <div className="w-full space-y-1 rounded-lg border border-primary-container/30 bg-primary-container/10 p-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-bold text-on-surface-variant">
-          COSTO FINAL
+          COSTO A COBRAR
         </span>
         <span className="text-sm font-black text-primary">
-          {deliveryBaseFee === null ? "—" : `$ ${formatPrice(deliveryFee)}`}
+          $ {formatPrice(deliveryFee)}
         </span>
       </div>
       <div className="flex items-center justify-between">
@@ -4669,32 +4742,9 @@ const POS = () => {
                     <span className="text-[10px] font-bold uppercase tracking-widest">
                       Domicilio
                     </span>
-                    <span className="text-sm font-bold">
-                      $ {formatPrice(deliveryBaseCharge)}
-                    </span>
+                    {deliveryFeeEditControl}
                   </div>
-                  {nightDeliverySurcharge > 0 && (
-                    <div className="flex justify-between items-center text-amber-200">
-                      <span className="text-[10px] font-bold uppercase tracking-widest">
-                        Recargo nocturno ({nightSurchargePercent}%)
-                      </span>
-                      <span className="text-sm font-bold">
-                        + $ {formatPrice(nightDeliverySurcharge)}
-                      </span>
-                    </div>
-                  )}
                 </>
-              )}
-
-              {tipAmount > 0 && (
-                <div className="flex justify-between items-center text-emerald-300">
-                  <span className="text-[10px] font-bold uppercase tracking-widest">
-                    Propina ({tipPercent}%)
-                  </span>
-                  <span className="text-sm font-bold">
-                    + $ {formatPrice(tipAmount)}
-                  </span>
-                </div>
               )}
 
               {(paymentMethod === "efectivo" || paymentMethod === "dividir") &&
@@ -4722,9 +4772,29 @@ const POS = () => {
                   Total a pagar
                 </span>
                 <span className="text-xl font-black text-on-surface tracking-tighter">
-                  $ {formatPrice(total)}
+                  $ {formatPrice(totalWithoutTip)}
                 </span>
               </div>
+              {tipAmount > 0 && (
+                <div className="flex justify-between items-center text-emerald-300">
+                  <span className="text-[10px] font-bold uppercase tracking-widest">
+                    Propina ({tipPercent}%)
+                  </span>
+                  <span className="text-sm font-bold">
+                    + $ {formatPrice(tipAmount)}
+                  </span>
+                </div>
+              )}
+              {tipAmount > 0 && (
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
+                    Total con propina
+                  </span>
+                  <span className="text-xl font-black text-on-surface tracking-tighter">
+                    $ {formatPrice(total)}
+                  </span>
+                </div>
+              )}
               {/* Lectura de número */}
               {total > 0 && (
                 <p className="text-[9px] leading-tight text-on-surface uppercase tracking-wider">
@@ -5010,32 +5080,9 @@ const POS = () => {
                     <span className="text-[10px] font-bold uppercase tracking-widest">
                       Domicilio
                     </span>
-                    <span className="text-sm font-bold">
-                      $ {formatPrice(deliveryBaseCharge)}
-                    </span>
+                    {deliveryFeeEditControl}
                   </div>
-                  {nightDeliverySurcharge > 0 && (
-                    <div className="flex justify-between items-center text-amber-200">
-                      <span className="text-[10px] font-bold uppercase tracking-widest">
-                        Recargo nocturno ({nightSurchargePercent}%)
-                      </span>
-                      <span className="text-sm font-bold">
-                        + $ {formatPrice(nightDeliverySurcharge)}
-                      </span>
-                    </div>
-                  )}
                 </>
-              )}
-
-              {tipAmount > 0 && (
-                <div className="flex justify-between items-center text-emerald-300">
-                  <span className="text-[10px] font-bold uppercase tracking-widest">
-                    Propina ({tipPercent}%)
-                  </span>
-                  <span className="text-sm font-bold">
-                    + $ {formatPrice(tipAmount)}
-                  </span>
-                </div>
               )}
 
               {(paymentMethod === "efectivo" || paymentMethod === "dividir") &&
@@ -5063,9 +5110,29 @@ const POS = () => {
                   Total a pagar
                 </span>
                 <span className="text-xl font-black text-on-surface tracking-tighter">
-                  $ {formatPrice(total)}
+                  $ {formatPrice(totalWithoutTip)}
                 </span>
               </div>
+              {tipAmount > 0 && (
+                <div className="flex justify-between items-center text-emerald-300">
+                  <span className="text-[10px] font-bold uppercase tracking-widest">
+                    Propina ({tipPercent}%)
+                  </span>
+                  <span className="text-sm font-bold">
+                    + $ {formatPrice(tipAmount)}
+                  </span>
+                </div>
+              )}
+              {tipAmount > 0 && (
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
+                    Total con propina
+                  </span>
+                  <span className="text-xl font-black text-on-surface tracking-tighter">
+                    $ {formatPrice(total)}
+                  </span>
+                </div>
+              )}
               {/* Lectura de número */}
               {total > 0 && (
                 <p className="text-[9px] leading-tight text-on-surface uppercase tracking-wider">

@@ -69,6 +69,10 @@ const Estadisticas = () => {
 
   const [dashboard, setDashboard] = useState(null);
   const [deliveryFeesTotal, setDeliveryFeesTotal] = useState(0);
+  const [periodOrderTotals, setPeriodOrderTotals] = useState({
+    withoutTips: 0,
+    deliveryOrders: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
@@ -114,7 +118,7 @@ const Estadisticas = () => {
 
       const [
         { data: dashboardResponse, error: dashboardError },
-        deliveryOrdersResult,
+        periodOrdersResult,
       ] = await Promise.all([
         supabase.functions.invoke("gestionar-cuenta-empleado", {
           body: {
@@ -125,8 +129,9 @@ const Estadisticas = () => {
         }),
         supabase
           .from("orders")
-          .select("delivery_fee, created_at")
-          .eq("order_type", "delivery")
+          .select(
+            "total, tip_amount, delivery_fee, order_type, created_at, order_items(subtotal, quantity, unit_price)",
+          )
           .eq("is_reservation", false)
           .not("status", "in", "(cancelled,cancelado)")
           .gte("created_at", startTimestamp.toISOString())
@@ -136,17 +141,18 @@ const Estadisticas = () => {
       ]);
 
       if (cancelled) return;
-      let deliveryOrders = deliveryOrdersResult.data || [];
-      let deliveryOrdersError = deliveryOrdersResult.error;
+      let periodOrders = periodOrdersResult.data || [];
+      let periodOrdersError = periodOrdersResult.error;
       for (
         let offset = 1000;
-        !deliveryOrdersError && deliveryOrdersResult.data?.length === 1000;
+        !periodOrdersError && periodOrdersResult.data?.length === 1000;
         offset += 1000
       ) {
         const { data: nextPage, error } = await supabase
           .from("orders")
-          .select("delivery_fee, created_at")
-          .eq("order_type", "delivery")
+          .select(
+            "total, tip_amount, delivery_fee, order_type, created_at, order_items(subtotal, quantity, unit_price)",
+          )
           .eq("is_reservation", false)
           .not("status", "in", "(cancelled,cancelado)")
           .gte("created_at", startTimestamp.toISOString())
@@ -154,30 +160,71 @@ const Estadisticas = () => {
           .order("created_at", { ascending: true })
           .range(offset, offset + 999);
         if (cancelled) return;
-        deliveryOrdersError = error;
-        deliveryOrders = deliveryOrders.concat(nextPage || []);
+        periodOrdersError = error;
+        periodOrders = periodOrders.concat(nextPage || []);
         if (nextPage?.length !== 1000) break;
       }
 
-      if (dashboardError || deliveryOrdersError) {
+      if (dashboardError || periodOrdersError) {
         const errorMessage = dashboardError
           ? dashboardResponse?.error || dashboardError.message
-          : deliveryOrdersError.message;
+          : periodOrdersError.message;
         setLoadError(errorMessage);
         setDashboard(null);
         setDeliveryFeesTotal(0);
+        setPeriodOrderTotals({
+          withoutTips: 0,
+          deliveryOrders: 0,
+        });
       } else {
         const data = dashboardResponse?.data;
         const payload = Array.isArray(data)
           ? data[0]?.get_statistics_dashboard
           : data?.get_statistics_dashboard || data;
         setDashboard(payload || null);
-        setDeliveryFeesTotal(
-          deliveryOrders.reduce(
-            (total, order) => total + Number(order.delivery_fee || 0),
-            0,
-          ),
+        const totals = periodOrders.reduce(
+          (summary, order) => {
+            const deliveryFee = Math.max(0, Number(order.delivery_fee) || 0);
+            const tipAmount = Math.max(0, Number(order.tip_amount) || 0);
+            const itemsSubtotal = (order.order_items || []).reduce(
+              (subtotal, item) => {
+                const storedSubtotal = Number(item.subtotal);
+                if (Number.isFinite(storedSubtotal) && storedSubtotal > 0) {
+                  return subtotal + storedSubtotal;
+                }
+                return (
+                  subtotal +
+                  (Number(item.unit_price) || 0) *
+                    (Number(item.quantity) || 0)
+                );
+              },
+              0,
+            );
+            const totalWithoutTips =
+              itemsSubtotal > 0
+                ? itemsSubtotal + deliveryFee
+                : Math.max(0, (Number(order.total) || 0) - tipAmount);
+            const isDelivery = order.order_type === "delivery";
+
+            return {
+              withoutTips: summary.withoutTips + totalWithoutTips,
+              deliveryOrders:
+                summary.deliveryOrders + (isDelivery ? 1 : 0),
+              deliveryFees:
+                summary.deliveryFees + (isDelivery ? deliveryFee : 0),
+            };
+          },
+          {
+            withoutTips: 0,
+            deliveryOrders: 0,
+            deliveryFees: 0,
+          },
         );
+        setDeliveryFeesTotal(totals.deliveryFees);
+        setPeriodOrderTotals({
+          withoutTips: totals.withoutTips,
+          deliveryOrders: totals.deliveryOrders,
+        });
       }
       setLoading(false);
     };
@@ -219,6 +266,15 @@ const Estadisticas = () => {
       color: "bg-violet-500",
     },
     {
+      label: "Total sin Propinas",
+      value: periodOrderTotals.withoutTips,
+      formatValue: formatMoney,
+      sub: "Productos + domicilios",
+      icon: DollarSign,
+      progress: 100,
+      color: "bg-cyan-500",
+    },
+    {
       label: "Pedidos Totales",
       value: Number(summary.total_orders || 0),
       formatValue: (value) => Math.round(value).toLocaleString("es-CO"),
@@ -246,6 +302,15 @@ const Estadisticas = () => {
         ? (deliveryFeesTotal / Number(summary.total_sold)) * 100
         : 0,
       color: "bg-blue-500",
+    },
+    {
+      label: "Domicilios Totales",
+      value: periodOrderTotals.deliveryOrders,
+      formatValue: (value) => Math.round(value).toLocaleString("es-CO"),
+      sub: "Pedidos con entrega a domicilio",
+      icon: Truck,
+      progress: 100,
+      color: "bg-sky-500",
     },
   ];
 
@@ -339,7 +404,8 @@ Periodo Evaluado: ${getPeriodString()}
 - Facturación: ${formatMoney(summary.total_sold)} COP
 - Pedidos: ${Number(summary.total_orders || 0)}
 - Ticket Promedio: ${formatMoney(summary.average_ticket)} COP
-- Costos de domicilio: ${formatMoney(deliveryFeesTotal)} COP
+- Total sin propinas: ${formatMoney(periodOrderTotals.withoutTips)} COP
+- Costos de domicilio: ${formatMoney(deliveryFeesTotal)} COP (${periodOrderTotals.deliveryOrders} pedidos)
 
 2. CANALES DE VENTA
 ${channelRows.map((row) => `- ${row.channel}: ${formatMoney(row.total)} COP (${row.orders} pedidos)`).join("\n") || "- Sin ventas en el período"}
@@ -500,7 +566,7 @@ ${
             )}
 
             {/* METRICAS PRINCIPALES */}
-            <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-4">
               {mainStats.map((kpi, idx) => (
                 <motion.div
                   key={kpi.label}

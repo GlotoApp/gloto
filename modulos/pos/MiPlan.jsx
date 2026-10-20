@@ -66,7 +66,7 @@ export default function MiPlan() {
   const [renewalAmount, setRenewalAmount] = useState(null);
   const [commissionStatement, setCommissionStatement] = useState(null);
   const [latestPayment, setLatestPayment] = useState(null);
-  const [paymentQr, setPaymentQr] = useState(null);
+  const [planPaymentUrl, setPlanPaymentUrl] = useState("");
   const [paymentFile, setPaymentFile] = useState(null);
   const [paymentPreviewUrl, setPaymentPreviewUrl] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
@@ -109,6 +109,7 @@ export default function MiPlan() {
     }
 
     setBusinessId(profile.business_id);
+    setPlanPaymentUrl("");
     setRenewalAmount(null);
     setCommissionStatement(null);
     const { data: planAccessData, error: planAccessError } = await supabase.rpc(
@@ -120,39 +121,48 @@ export default function MiPlan() {
     } else {
       setPlanAccess(planAccessData);
     }
-    const [{ data, error }, { data: paymentData }, { data: qrData }] =
-      await Promise.all([
-        supabase
-          .from("subscriptions")
-          .select(
-            "id,plan_code,plan_name,status,amount,billing_period,starts_at,ends_at,payment_method,period_id,duration_days,billing_type,commission_rate,minimum_amount",
-          )
-          .eq("business_id", profile.business_id)
-          .in("status", ["active", "suspended", "expired"])
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from("payment_records")
-          .select("id,status,notes,amount,created_at,paid_at")
-          .eq("business_id", profile.business_id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from("payment_qr_codes")
-          .select("id,label,storage_path")
-          .eq("is_active", true)
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-      ]);
+    const [{ data, error }, { data: paymentData }] = await Promise.all([
+      supabase
+        .from("subscriptions")
+        .select(
+          "id,plan_code,plan_name,status,amount,billing_period,starts_at,ends_at,payment_method,period_id,duration_days,billing_type,commission_rate,minimum_amount",
+        )
+        .eq("business_id", profile.business_id)
+        .in("status", ["active", "suspended", "expired"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("payment_records")
+        .select("id,status,notes,amount,created_at,paid_at")
+        .eq("business_id", profile.business_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
     if (error) {
       console.error("No se pudo cargar la suscripción:", error);
       setMessage("No se pudo cargar la información del plan.");
     } else {
       setSubscription(data);
+      if (data?.period_id) {
+        const { data: paymentLinkData, error: paymentLinkError } =
+          await supabase
+            .from("billing_plan_payment_links")
+            .select("payment_url")
+            .eq("period_id", data.period_id)
+            .maybeSingle();
+        if (paymentLinkError) {
+          console.error(
+            "No se pudo consultar el enlace de pago del plan:",
+            paymentLinkError,
+          );
+          setMessage("No se pudo consultar el enlace de pago del periodo.");
+        } else {
+          setPlanPaymentUrl(paymentLinkData?.payment_url || "");
+        }
+      }
       if (data?.billing_type === "commission") {
         const { data: statement, error: statementError } = await supabase.rpc(
           "get_or_create_subscription_commission_statement",
@@ -211,12 +221,6 @@ export default function MiPlan() {
       }
     }
     setLatestPayment(paymentData || null);
-    if (qrData?.storage_path) {
-      const { data: publicUrlData } = supabase.storage
-        .from("payment-qr")
-        .getPublicUrl(qrData.storage_path);
-      setPaymentQr({ ...qrData, publicUrl: publicUrlData.publicUrl });
-    }
     setLoading(false);
   };
 
@@ -307,6 +311,7 @@ export default function MiPlan() {
         daysRemaining !== null &&
         daysRemaining <= 5) ||
       ["suspended", "expired"].includes(subscription?.status);
+  const paymentQrValue = planPaymentUrl;
 
   const handleUpload = async (event) => {
     event.preventDefault();
@@ -782,42 +787,59 @@ export default function MiPlan() {
                     <section className="grid gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
                       <div className="flex flex-col justify-center rounded-2xl bg-neutral-900/70 p-5 text-center">
                         <div className="flex items-center justify-center gap-2">
-                          <h2 className="text-base font-black">QR de pago</h2>
+                          <h2 className="text-base font-black">
+                            Paga en línea
+                          </h2>
                           <CreditCard className="text-violet-300" size={18} />
                         </div>
+                        <p className="mt-2 text-xs text-neutral-400">
+                          Tarjeta de crédito o débito
+                        </p>
                         <div className="mx-auto mt-4 flex aspect-square w-full max-w-[220px] items-center justify-center rounded-lg bg-white p-3">
-                          {paymentQr?.publicUrl ? (
-                            <img
-                              src={paymentQr.publicUrl}
-                              alt={paymentQr.label || "QR de pago"}
-                              className="h-full w-full object-contain"
+                          {paymentQrValue ? (
+                            <QRCodeSVG
+                              value={paymentQrValue}
+                              size={156}
+                              bgColor="#ffffff"
+                              fgColor="#111111"
+                              level="M"
                             />
                           ) : (
-                            renewalAmount === null ? (
-                              <p className="text-center text-xs text-neutral-500">
-                                No se pudo consultar el valor del cobro.
-                              </p>
-                            ) : (
-                              <QRCodeSVG
-                                value={`Entidad bancaria genérica | Referencia GLOTO-${businessId} | Monto ${renewalAmount} COP`}
-                                size={156}
-                                bgColor="#ffffff"
-                                fgColor="#111111"
-                                level="M"
-                              />
-                            )
+                            <p className="px-4 text-center text-xs text-neutral-500">
+                              No hay un link de pago configurado para este
+                              periodo.
+                            </p>
                           )}
                         </div>
+                        {planPaymentUrl && (
+                          <>
+                            <a
+                              href={planPaymentUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-xs font-black uppercase tracking-wider text-white transition hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                            >
+                              <CreditCard size={14} />
+                              Paga aquí en línea
+                            </a>
+                            <p className="mt-2 text-[11px] leading-5 text-neutral-400">
+                              {isCommissionPlan
+                                ? `Completa en el proveedor el valor indicado para tu ciclo${renewalAmount === null ? "" : ` (${formatCurrency(renewalAmount)})`} y adjunta el soporte para validación.`
+                                : `Selecciona ${formatCurrency(renewalAmount)} en el enlace y adjunta el soporte para validación.`}
+                            </p>
+                          </>
+                        )}
                         <button
                           type="button"
                           onClick={() => setShowQrModal(true)}
                           className="mx-auto mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-[10px] font-black uppercase tracking-wider text-neutral-400 transition hover:bg-white/[0.06] hover:text-white"
-                          aria-label="Ver QR en pantalla grande"
+                          aria-label="Ver QR de pago en línea en pantalla grande"
                         >
                           <Maximize2 size={14} />
-                          Ver en pantalla grande
+                          Ver QR en pantalla grande
                         </button>
                       </div>
+
                       <form
                         onSubmit={handleUpload}
                         className="min-w-0 rounded-2xl bg-neutral-900/70 p-5 sm:p-6"
@@ -962,26 +984,18 @@ export default function MiPlan() {
             >
               <X size={18} />
             </button>
-            {paymentQr?.publicUrl ? (
-              <img
-                src={paymentQr.publicUrl}
-                alt={paymentQr.label || "QR de pago ampliado"}
-                className="h-full w-full object-contain"
+            {paymentQrValue ? (
+              <QRCodeSVG
+                value={paymentQrValue}
+                className="h-full w-full"
+                bgColor="#ffffff"
+                fgColor="#111111"
+                level="M"
               />
             ) : (
-              renewalAmount === null ? (
-                <p className="text-center text-sm text-neutral-500">
-                  No se pudo consultar el precio de renovación.
-                </p>
-              ) : (
-                <QRCodeSVG
-                  value={`Entidad bancaria genérica | Referencia GLOTO-${businessId} | Monto ${renewalAmount} COP`}
-                  className="h-full w-full"
-                  bgColor="#ffffff"
-                  fgColor="#111111"
-                  level="M"
-                />
-              )
+              <p className="text-center text-sm text-neutral-500">
+                No hay un QR configurado para este método de pago.
+              </p>
             )}
           </div>
         </div>

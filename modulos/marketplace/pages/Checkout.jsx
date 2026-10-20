@@ -509,9 +509,11 @@ const Checkout = ({ onVolver, onConfirmar }) => {
     try {
       actualizarDatoCliente("deliveryFee", deliveryFee);
       await onConfirmar?.(deliveryFee);
-    } catch {
+    } catch (error) {
       setOrderErrorMessage(
-        "No pudimos completar tu pedido. Inténtalo de nuevo en unos momentos.",
+        error?.code === "PRICE_CHANGED"
+          ? error.message
+          : "No pudimos completar tu pedido. Inténtalo de nuevo en unos momentos.",
       );
     } finally {
       isConfirmingOrderRef.current = false;

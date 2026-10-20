@@ -475,32 +475,19 @@ const OrderCard = memo(
                     </>
                   ) : null}
                   <DetailBox
-                    label={
-                      orden.tipAmount > 0 ? "Total sin propina" : "Total a pagar"
-                    }
-                    value={formatMoney(
-                      orden.tipAmount > 0
-                        ? orden.totalWithoutTip
-                        : orden.totalWithTip,
-                    )}
+                    label="Total a pagar"
+                    value={formatMoney(orden.totalWithoutTip)}
                   />
                   {orden.tipAmount > 0 && (
-                    <>
-                      <DetailBox
-                        label={
-                          orden.tipPercent > 0
-                            ? `Propina (${orden.tipPercent}%)`
-                            : "Propina"
-                        }
-                        value={formatMoney(orden.tipAmount)}
-                        color="text-emerald-300"
-                      />
-                      <DetailBox
-                        label="Total con propina"
-                        value={formatMoney(orden.totalWithTip)}
-                        color="text-emerald-300"
-                      />
-                    </>
+                    <DetailBox
+                      label={
+                        orden.tipPercent > 0
+                          ? `Propina opcional (${orden.tipPercent}%)`
+                          : "Propina opcional"
+                      }
+                      value={formatMoney(orden.tipAmount)}
+                      color="text-emerald-300"
+                    />
                   )}
                 </div>
 
@@ -1181,12 +1168,20 @@ const mapDatabaseOrderToUi = (order) => {
   const deliveryFee = Number(order.delivery_fee || 0);
   const tipAmount = Number(order.tip_amount || 0);
   const isMarketplaceOrder = String(canal).toLowerCase() === "marketplace";
+  const itemsSubtotal = items.reduce((sum, item) => {
+    const subtotal = Number(item.subtotal);
+    if (Number.isFinite(subtotal) && subtotal > 0) return sum + subtotal;
+
+    return (
+      sum +
+      (Number(item.unit_price) || 0) * (Number(item.quantity) || 0)
+    );
+  }, 0);
   const totalWithoutTip = isMarketplaceOrder
-    ? total + deliveryFee
+    ? itemsSubtotal > 0
+      ? itemsSubtotal + deliveryFee
+      : Math.max(0, total - tipAmount)
     : Math.max(0, total - tipAmount);
-  const totalWithTip = isMarketplaceOrder
-    ? totalWithoutTip + tipAmount
-    : total;
 
   return {
     id: order.id,
@@ -1201,7 +1196,6 @@ const mapDatabaseOrderToUi = (order) => {
     deliveryDetails: getDeliveryDetails(order),
     total,
     totalWithoutTip,
-    totalWithTip,
     deliveryFee,
     tipAmount,
     tipPercent: Number(metadata.tip_percent || 0),
@@ -1711,6 +1705,7 @@ const Ordenes = () => {
           paymentMethod: orden.metodoPago,
           paymentMethods: orden.paymentMethods,
           total: orden.total,
+          deliveryFee: orden.deliveryFee,
           address: orden.deliveryAddress,
           deliveryMapLink: orden.deliveryMapLink,
           deliveryLocation: orden.deliveryLocation,

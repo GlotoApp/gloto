@@ -277,6 +277,70 @@ export const CartProvider = ({ children }) => {
     }));
   };
 
+  const sincronizarProductosTienda = useCallback((catalogo) => {
+    setProductos((anteriores) => {
+      const productosBase = new Map(
+        catalogo.map((producto) => [producto.id, producto]),
+      );
+      const lineasConVariante = anteriores
+        .filter((producto) => producto.productoBaseId)
+        .map((linea) => {
+          const productoBase = productosBase.get(linea.productoBaseId);
+          if (!productoBase) return linea;
+
+          const opcionesCatalogo = [
+            ...(productoBase.variantes || []),
+            ...(productoBase.product_option_groups || []).flatMap(
+              (grupo) => grupo.opciones || [],
+            ),
+          ];
+          const opcionesPorId = new Map(
+            opcionesCatalogo.map((opcion) => [opcion.id, opcion]),
+          );
+          const opciones = (linea.opciones || []).map((opcion) => {
+            const opcionActualizada = opcionesPorId.get(opcion.id);
+            return opcionActualizada
+              ? {
+                  ...opcion,
+                  nombre: opcionActualizada.nombre || opcion.nombre,
+                  precioExtra: Number(opcionActualizada.precioExtra) || 0,
+                }
+              : opcion;
+          });
+          const precioBase = Number(productoBase.precio) || 0;
+          const precioExtraTotal = opciones.reduce(
+            (total, opcion) => total + (Number(opcion.precioExtra) || 0),
+            0,
+          );
+          const varianteNombre =
+            opciones
+              .map((opcion) => opcion.nombre)
+              .filter(Boolean)
+              .join(" · ") || linea.varianteNombre;
+
+          return {
+            ...productoBase,
+            ...linea,
+            nombre: varianteNombre
+              ? `${productoBase.nombre} · ${varianteNombre}`
+              : productoBase.nombre,
+            precioBase,
+            precioExtraTotal,
+            precio: precioBase + precioExtraTotal,
+            varianteNombre: varianteNombre || null,
+            opciones,
+          };
+        });
+
+      return [
+        ...catalogo,
+        ...lineasConVariante.filter(
+          (linea) => !catalogo.some((producto) => producto.id === linea.id),
+        ),
+      ];
+    });
+  }, []);
+
   const generarUuid = () =>
     typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
@@ -315,7 +379,157 @@ export const CartProvider = ({ children }) => {
   const crearPedidoInterno = async ({
     deliveryFee: deliveryFeeOverride,
   } = {}) => {
-    const items = productos
+    const productosEnCarrito = productos.filter((p) => carrito[p.id] > 0);
+    if (productosEnCarrito.length === 0) {
+      throw new Error(
+        "No encontramos los productos del carrito. Actualiza la tienda antes de confirmar.",
+      );
+    }
+    const productoIds = [
+      ...new Set(productosEnCarrito.map((p) => p.productoBaseId || p.id)),
+    ];
+    const [productosActualesRes, opcionesActualesRes] = await Promise.all([
+      supabase
+        .from("products")
+        .select("id,price,name")
+        .in("id", productoIds),
+      productoIds.length > 0
+        ? supabase
+            .from("products_items")
+            .select("*")
+            .in("product_id", productoIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (productosActualesRes.error) throw productosActualesRes.error;
+    if (opcionesActualesRes.error) throw opcionesActualesRes.error;
+
+    const productosActuales = new Map(
+      (productosActualesRes.data || []).map((producto) => [
+        producto.id,
+        producto,
+      ]),
+    );
+    const opcionesPorProducto = new Map();
+    (opcionesActualesRes.data || []).forEach((opcion) => {
+      const opciones = opcionesPorProducto.get(opcion.product_id) || [];
+      opciones.push(opcion);
+      opcionesPorProducto.set(opcion.product_id, opciones);
+    });
+    let cambioDePrecio = false;
+    const productosVerificados = productos.map((producto) => {
+      if (!carrito[producto.id]) return producto;
+
+      const productoBaseId = producto.productoBaseId || producto.id;
+      const productoActual = productosActuales.get(productoBaseId);
+      if (!productoActual) {
+        throw new Error(
+          "No pudimos verificar el precio de un producto. Actualiza la tienda e inténtalo de nuevo.",
+        );
+      }
+
+      const precioBase = Number(productoActual.price);
+      if (!Number.isFinite(precioBase) || precioBase < 0) {
+        throw new Error("El precio actual de un producto no es válido.");
+      }
+
+      const opciones = (producto.opciones || []).map((opcion) => {
+        const opcionesProducto =
+          opcionesPorProducto.get(productoBaseId) || [];
+        const nombreOpcion = String(opcion.nombre || opcion.name || "")
+          .trim()
+          .toLowerCase();
+        const coincidencias = opcion.id
+          ? opcionesProducto.filter((actual) => actual.id === opcion.id)
+          : opcionesProducto.filter((actual) =>
+              String(
+                actual.nombre ||
+                  actual.name ||
+                  actual.title ||
+                  actual.label ||
+                  actual.option_name ||
+                  actual.option ||
+                  actual.text ||
+                  actual.value ||
+                  "",
+              )
+                .trim()
+                .toLowerCase() === nombreOpcion,
+            );
+        if (coincidencias.length !== 1) {
+          throw new Error(
+            "Una opción del carrito ya no está disponible. Elimínala y vuelve a agregar el producto.",
+          );
+        }
+        const opcionActual = coincidencias[0];
+        const precioExtra = Number(
+          opcionActual.precio_extra ??
+            opcionActual.price ??
+            opcionActual.price_extra ??
+            opcionActual.extra_price ??
+            opcionActual.monto ??
+            0,
+        );
+        if (!Number.isFinite(precioExtra) || precioExtra < 0) {
+          throw new Error("El precio actual de una opción no es válido.");
+        }
+        return {
+          ...opcion,
+          nombre:
+            opcionActual.nombre ||
+            opcionActual.name ||
+            opcionActual.title ||
+            opcion.nombre,
+          precioExtra,
+        };
+      });
+      const precioExtraTotal = opciones.reduce(
+        (total, opcion) => total + opcion.precioExtra,
+        0,
+      );
+      const precio = precioBase + precioExtraTotal;
+      const varianteNombre =
+        opciones
+          .map((opcion) => opcion.nombre)
+          .filter(Boolean)
+          .join(" · ") || producto.varianteNombre;
+      if (Number(producto.precio) !== precio) cambioDePrecio = true;
+
+      return {
+        ...producto,
+        nombre: varianteNombre
+          ? `${productoActual.name || producto.nombre} · ${varianteNombre}`
+          : productoActual.name || producto.nombre,
+        varianteNombre: varianteNombre || null,
+        precioBase,
+        precioExtraTotal,
+        precio,
+        opciones,
+      };
+    });
+
+    if (cambioDePrecio) {
+      setProductos(productosVerificados);
+      const error = new Error(
+        "El precio de uno o más productos cambió. No enviamos el pedido. Regresa al carrito para revisar el nuevo total y vuelve a confirmar.",
+      );
+      error.code = "PRICE_CHANGED";
+      throw error;
+    }
+
+    const totalPedido = productosVerificados.reduce(
+      (total, producto) =>
+        total +
+        (carrito[producto.id] || 0) *
+          (Number(producto.precio) || 0),
+      0,
+    );
+    if (Math.abs(totalPedido - totalPrecio) > 0.000001) {
+      throw new Error(
+        "El total del carrito no coincide con sus productos. Revisa el carrito antes de confirmar.",
+      );
+    }
+
+    const items = productosVerificados
       .filter((p) => carrito[p.id] > 0)
       .map((p) => {
         const baseNombre = String(p.nombre || "").split(" · ")[0];
@@ -357,7 +571,7 @@ export const CartProvider = ({ children }) => {
       Math.min(100, Number(deliverySettings?.tip_percent) || 0),
     );
     const tipAmount = calculateTipAmount(
-      totalPrecio,
+      totalPedido,
       deliveryFee,
       tipPercent,
     );
@@ -367,7 +581,7 @@ export const CartProvider = ({ children }) => {
       .map((m) => m.toLowerCase())
       .join(", ");
     const paymentStatus =
-      totalPagado >= totalPrecio + deliveryFee ? "paid" : "pending";
+      totalPagado >= totalPedido + deliveryFee ? "paid" : "pending";
     const orderStatus = paymentStatus === "paid" ? "confirmed" : "pending";
     const orderTypeMap = {
       domicilio: "delivery",
@@ -384,7 +598,7 @@ export const CartProvider = ({ children }) => {
       trackingToken,
       fecha: new Date(),
       items,
-      total: totalPrecio,
+      total: totalPedido,
       deliveryFee,
       tipAmount,
       tipPercent,
@@ -400,7 +614,7 @@ export const CartProvider = ({ children }) => {
     const orderPayload = {
       business_id: businessId,
       status: orderStatus,
-      total: totalPrecio,
+      total: totalPedido,
       order_number: orderNumber,
       updated_at: new Date().toISOString(),
       scheduled_at: null,
@@ -653,10 +867,7 @@ export const CartProvider = ({ children }) => {
         const prop = Number(pedido.tipAmount) || 0;
         const porcentajePropina = Number(pedido.tipPercent) || 0;
         lines.push(
-          `*PROPINA VOLUNTARIA (${porcentajePropina}%):* ${fmt(prop)}`,
-        );
-        lines.push(
-          `*TOTAL CON PROPINA:* ${fmt(totalAPagar + prop)}`,
+          `*PROPINA VOLUNTARIA (OPCIONAL, ${porcentajePropina}%):* ${fmt(prop)}`,
         );
         lines.push("");
       }
@@ -808,6 +1019,7 @@ export const CartProvider = ({ children }) => {
     setDeliverySettings,
     puedeConfirmarEntrega,
     agregarConVariante,
+    sincronizarProductosTienda,
     obtenerItemId,
     pedidoActivo,
     estadoPedido,

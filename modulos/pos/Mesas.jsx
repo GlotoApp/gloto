@@ -558,6 +558,7 @@ function PanelBody({
       tableStatus: mesa.tableStatus || mesa.estado || "",
       isReservation: Boolean(mesa.isReservation),
       total: Number(mesa.total || 0),
+      deliveryFee: Number(mesa.deliveryFee || 0),
       paymentMethod: mesa.paymentMethod || "",
       paymentStatus: mesa.paymentStatus || "pending",
       paymentMethods: Array.isArray(mesa.paymentMethods)
@@ -1336,7 +1337,8 @@ export default function MesasPOS() {
           order_number, 
           status, 
           mesa, 
-          total, 
+          total,
+          delivery_fee,
           created_at, 
           customer_name, 
           customer_phone, 
@@ -1409,6 +1411,7 @@ export default function MesasPOS() {
           horaReserva: orden.hora_reserva || "",
           startTime: new Date(orden.created_at).getTime(),
           total: parseFloat(orden.total) || 0,
+          deliveryFee: parseFloat(orden.delivery_fee) || 0,
           comanda: (orden.order_items || []).map((item) => ({
             id: item.id,
             orderBatchId: item.order_batch_id || null,
