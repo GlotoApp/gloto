@@ -1,12 +1,15 @@
-import React, {
-  useCallback,
-  useMemo,
-  useState,
-  useRef,
-  useEffect,
-} from "react";
+import { useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Trash2, Pencil, Check, X, Maximize2 } from "lucide-react";
+import {
+  Trash2,
+  Pencil,
+  Check,
+  X,
+  Maximize2,
+  ChevronDown,
+  ChevronUp,
+  Plus,
+} from "lucide-react";
 import SplitPaymentModal from "./SplitPaymentModal";
 import { printOrderInvoice } from "./OrderInvoice";
 import {
@@ -14,6 +17,14 @@ import {
   shareOrderInvoicePdf,
 } from "./OrderInvoicePdf";
 import { supabase } from "../../src/lib/supabaseClient";
+import {
+  buildProductOptionGroups,
+  clearDependentProductOptionSelections,
+  getMissingProductOptionGroups,
+  getProductOptionsExtraPrice,
+  getSelectedOptionsExtraPrice,
+  getSelectedProductOptions,
+} from "../../src/lib/productOptions";
 import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 import {
   calculateDeliveryPricing,
@@ -140,8 +151,7 @@ const getDeliveryPlaceLabel = (properties = {}) => {
       (part, index, values) =>
         part &&
         values.findIndex(
-          (value) =>
-            String(value).toLowerCase() === String(part).toLowerCase(),
+          (value) => String(value).toLowerCase() === String(part).toLowerCase(),
         ) === index,
     )
     .join(", ");
@@ -252,71 +262,6 @@ const parseDecimalQuantity = (value) => {
   return Number.isFinite(quantity) ? quantity : null;
 };
 
-const normalizeOptionGroup = (group, items = []) => {
-  const isRequired =
-    group.is_required ?? group.es_requerido ?? group.required ?? false;
-  const selectionType =
-    group.selection_type ?? group.selectionType ?? group.type ?? "single";
-
-  const opciones = (items || [])
-    .map((item) => ({
-      id: item.id,
-      nombre:
-        item.nombre ||
-        item.name ||
-        item.title ||
-        item.label ||
-        item.option_name ||
-        item.option ||
-        item.text ||
-        item.value ||
-        `Opción ${item.id}`,
-      precio_extra:
-        Number(
-          item.precio_extra ??
-            item.price ??
-            item.price_extra ??
-            item.extra_price ??
-            0,
-        ) || 0,
-      obligatorio:
-        item.es_opcion_obligatoria ??
-        item.mandatory ??
-        item.is_mandatory ??
-        item.required ??
-        item.is_required ??
-        false,
-      order: Number(item.order_index ?? item.order ?? 0),
-    }))
-    .sort((a, b) => a.order - b.order);
-
-  return {
-    id: group.id,
-    nombre: group.name || group.nombre || group.title || `Grupo ${group.id}`,
-    descripcion: group.description || group.descripcion || group.hint || "",
-    obligatorio: Boolean(isRequired),
-    selectionType,
-    maxSelections:
-      Number(group.max_selections ?? group.maxSelections) || null,
-    order: Number(group.order_index ?? group.orderIndex ?? group.order ?? 0),
-    opciones,
-  };
-};
-
-const getSelectedOptionItems = (product, selections) => {
-  if (!product || !product.optionGroups) return [];
-  return product.optionGroups.flatMap((group) => {
-    const selected = selections[group.id];
-    if (group.selectionType === "multiple") {
-      return (Array.isArray(selected) ? selected : [])
-        .map((optionId) => group.opciones.find((opt) => opt.id === optionId))
-        .filter(Boolean);
-    }
-    const option = group.opciones.find((opt) => opt.id === selected);
-    return option ? [option] : [];
-  });
-};
-
 const getOptionIdsKey = (selectedOptions) =>
   selectedOptions
     .map((opt) => opt.id)
@@ -327,8 +272,7 @@ const getOptionIdsKey = (selectedOptions) =>
 const getOptionNames = (selectedOptions) =>
   selectedOptions.map((opt) => opt.nombre).filter(Boolean);
 
-const getOptionExtraPrice = (selectedOptions) =>
-  selectedOptions.reduce((sum, opt) => sum + (opt.precio_extra || 0), 0);
+const getOptionExtraPrice = getSelectedOptionsExtraPrice;
 
 const getInitialCartPrice = (item) => {
   const storedInitialPrice = Number(item?.initPrice || 0);
@@ -346,10 +290,10 @@ const createCartItemFromSelection = (
   selectedOptions,
   note,
   qty = 1,
+  extraPrice = getOptionExtraPrice(selectedOptions),
 ) => {
   const optionIdsKey = getOptionIdsKey(selectedOptions);
   const optionNames = getOptionNames(selectedOptions);
-  const extraPrice = getOptionExtraPrice(selectedOptions);
   const cartId = Date.now();
 
   return {
@@ -367,6 +311,209 @@ const createCartItemFromSelection = (
     name: product.name,
     image_url: product.image_url || product.image || product.imageUrl || "",
   };
+};
+
+const ProductOptionGroup = ({
+  group,
+  selections,
+  setSelections,
+  depth = 0,
+}) => {
+  const isNested = depth > 0;
+  const selected = selections[group.id];
+  const selectedIds =
+    group.selectionType === "multiple"
+      ? Array.isArray(selected)
+        ? selected
+        : []
+      : selected
+        ? [selected]
+        : [];
+  const maxSelections = group.maxSelections;
+
+  return (
+    <div
+      data-option-group-id={group.id}
+      className={
+        isNested
+          ? "rounded-lg border-l-2 border-violet-400/60 bg-violet-400/[0.04] p-2.5"
+          : "border-b border-white/10 pb-3 pt-3 last:border-b-0 last:pb-0"
+      }
+    >
+      <div className="flex flex-col gap-1.5">
+        {isNested ? (
+          <span className="text-[8px] font-bold uppercase tracking-[0.16em] text-violet-300">
+            Personaliza esta opción
+          </span>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <p
+            className={
+              isNested
+                ? "text-xs font-semibold text-on-surface"
+                : "text-sm font-semibold text-on-surface"
+            }
+          >
+            {group.nombre}
+          </p>
+          {group.minSelections > 0 ? (
+            <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-red-300">
+              Obligatorio
+            </span>
+          ) : null}
+          <span className="rounded-full bg-white/5 px-2 py-0.5 text-[9px] text-on-surface-variant">
+            {group.selectionType === "multiple"
+              ? `${group.minSelections ? `Mín. ${group.minSelections} · ` : ""}${maxSelections ? `Hasta ${maxSelections}` : "Elige varias"}`
+              : "Elige una"}
+          </span>
+        </div>
+        {group.descripcion ? (
+          <p className="text-[10px] leading-4 text-on-surface-variant">
+            {group.descripcion}
+          </p>
+        ) : null}
+      </div>
+      <div
+        className={`mt-2 grid gap-1.5 ${
+          isNested ? "grid-cols-2 sm:grid-cols-3" : ""
+        }`}
+      >
+        {group.opciones.map((option) => {
+          const isSelected = selectedIds.includes(option.id);
+          const reachedMax =
+            group.selectionType === "multiple" &&
+            maxSelections !== null &&
+            selectedIds.length >= maxSelections &&
+            !isSelected;
+
+          return (
+            <div key={option.id}>
+              <button
+                type="button"
+                disabled={reachedMax}
+                aria-pressed={isSelected}
+                onClick={() =>
+                  setSelections((previous) => {
+                    const next = { ...previous };
+                    const current =
+                      group.selectionType === "multiple"
+                        ? Array.isArray(previous[group.id])
+                          ? previous[group.id]
+                          : []
+                        : previous[group.id]
+                          ? [previous[group.id]]
+                          : [];
+                    if (group.selectionType === "multiple") {
+                      const isRemoving = current.includes(option.id);
+                      const cleared = isRemoving
+                        ? clearDependentProductOptionSelections(next, [option])
+                        : next;
+                      cleared[group.id] = isRemoving
+                        ? current.filter((id) => id !== option.id)
+                        : [...current, option.id];
+                      return cleared;
+                    } else {
+                      const isRemoving = current.includes(option.id);
+                      const optionsToClear = current
+                        .map((id) =>
+                          group.opciones.find((item) => item.id === id),
+                        )
+                        .filter(
+                          (item) =>
+                            item && (isRemoving || item.id !== option.id),
+                        );
+                      const cleared = clearDependentProductOptionSelections(
+                        next,
+                        optionsToClear,
+                      );
+                      cleared[group.id] = isRemoving ? null : option.id;
+                      return cleared;
+                    }
+                  })
+                }
+                className={`w-full text-left transition ${
+                  isNested
+                    ? "flex h-full min-h-14 flex-col items-start justify-center gap-1 rounded-lg border px-2.5 py-2"
+                    : "rounded-2xl px-3.5 py-3"
+                } ${
+                  isSelected
+                    ? isNested
+                      ? "border-violet-400/60 bg-violet-400/15 text-white"
+                      : "border border-primary-container/40 text-on-surface bg-primary-container/50"
+                    : reachedMax
+                      ? "cursor-not-allowed border-white/5 bg-white/[0.02] text-on-surface-variant/40"
+                      : isNested
+                        ? "border-white/5 bg-black/20 text-on-surface-variant hover:border-violet-400/30 hover:bg-violet-400/[0.07]"
+                        : "bg-white/5 text-on-surface-variant hover:bg-white/10"
+                }`}
+              >
+                <div
+                  className={`flex w-full ${
+                    isNested
+                      ? "items-start justify-between gap-1"
+                      : "items-center justify-between gap-4"
+                  }`}
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    {!isNested ? (
+                      <span
+                        className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px] transition-colors ${
+                          isSelected
+                            ? "border-primary-container bg-primary-container text-white"
+                            : "border-white/20 bg-white/5 text-transparent"
+                        }`}
+                      >
+                        {isSelected ? "✓" : ""}
+                      </span>
+                    ) : null}
+                    <p
+                      className={
+                        isNested
+                          ? "text-[11px] font-medium line-clamp-1"
+                          : "text-sm font-medium line-clamp-1"
+                      }
+                    >
+                      {option.nombre}
+                    </p>
+                  </div>
+                  {option.precio_extra ? (
+                    <p
+                      className={
+                        isNested
+                          ? "text-[9px] text-violet-200"
+                          : "text-xs text-on-surface-variant"
+                      }
+                    >
+                      +$ {formatPrice(option.precio_extra)}
+                    </p>
+                  ) : !isNested ? (
+                    <span className="rounded-full bg-white/5 px-2 py-0.5 text-[9px] uppercase tracking-wide text-on-surface-variant">
+                      Incluido
+                    </span>
+                  ) : null}
+                </div>
+              </button>
+              {isSelected
+                ? (option.grupos || []).map((childGroup) => (
+                    <div
+                      key={childGroup.id}
+                      className="ml-2 mt-1.5 border-l border-white/10 pl-2"
+                    >
+                      <ProductOptionGroup
+                        group={childGroup}
+                        selections={selections}
+                        setSelections={setSelections}
+                        depth={depth + 1}
+                      />
+                    </div>
+                  ))
+                : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 };
 
 const numeroALetras = (num) => {
@@ -548,6 +695,10 @@ const POS = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [cart, setCart] = useState([]);
+  const [checkoutFooterCollapsed, setCheckoutFooterCollapsed] = useState(false);
+  const [posColumnRatios, setPosColumnRatios] = useState([40, 30, 30]);
+  const posLayoutRef = useRef(null);
+  const columnResizeRef = useRef(null);
   const [quantityDrafts, setQuantityDrafts] = useState({});
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
@@ -588,6 +739,15 @@ const POS = () => {
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [isProductCatalogReady, setIsProductCatalogReady] = useState(false);
   const [businessId, setBusinessId] = useState(null);
+  const [floorAreas, setFloorAreas] = useState([]);
+  const [configuredTables, setConfiguredTables] = useState([]);
+  const [isLoadingConfiguredTables, setIsLoadingConfiguredTables] =
+    useState(false);
+  const [configuredTablesError, setConfiguredTablesError] = useState("");
+  const [selectedTableAreaId, setSelectedTableAreaId] = useState("");
+  const [isAddingConfiguredTable, setIsAddingConfiguredTable] = useState(false);
+  const [newConfiguredTableLabel, setNewConfiguredTableLabel] = useState("");
+  const [isSavingConfiguredTable, setIsSavingConfiguredTable] = useState(false);
   const [inventoryEnabled, setInventoryEnabled] = useState(false);
   const [deliverySettings, setDeliverySettings] = useState(null);
   const [deliveryClock, setDeliveryClock] = useState(() => new Date());
@@ -604,7 +764,6 @@ const POS = () => {
   const submittingOrderRef = useRef(false);
   const cartScrollRef = useRef(null);
   const cartScrollRefMobile = useRef(null);
-  const tableInputRef = useRef(null);
   const optionQuantityInputRef = useRef(null);
   const optionNoteInputRef = useRef(null);
   const modalOverlayRef = useRef(null);
@@ -720,7 +879,10 @@ const POS = () => {
       const parsed = JSON.parse(cached);
       return parsed && typeof parsed === "object" ? parsed : null;
     } catch (error) {
-      console.warn("No se pudo leer la ubicación guardada de la tienda:", error);
+      console.warn(
+        "No se pudo leer la ubicación guardada de la tienda:",
+        error,
+      );
       return null;
     }
   };
@@ -828,24 +990,24 @@ const POS = () => {
           console.error("Error cargando grupos de opciones:", groupsRes.error);
         }
 
-        const itemsByGroup = {};
-        (itemsRes.data || []).forEach((item) => {
-          const groupId = item.option_group_id;
-          if (!groupId) return;
-          itemsByGroup[groupId] = itemsByGroup[groupId] || [];
-          itemsByGroup[groupId].push(item);
-        });
-
         const groupsByProduct = {};
         (groupsRes.data || []).forEach((group) => {
           const productId = group.product_id;
           groupsByProduct[productId] = groupsByProduct[productId] || [];
-          groupsByProduct[productId].push(
-            normalizeOptionGroup(group, itemsByGroup[group.id] || []),
-          );
+          groupsByProduct[productId].push(group);
         });
 
-        optionGroupsByProduct = groupsByProduct;
+        optionGroupsByProduct = Object.fromEntries(
+          data.map((product) => [
+            product.id,
+            buildProductOptionGroups(
+              groupsByProduct[product.id] || [],
+              (itemsRes.data || []).filter(
+                (option) => option.product_id === product.id,
+              ),
+            ),
+          ]),
+        );
       }
 
       const normalizedProducts = (data || []).map((item) => {
@@ -864,7 +1026,11 @@ const POS = () => {
           optionGroups: groups,
           hasOptionGroups: groups.length > 0,
           stock: Number(item.stock || 0),
-          unit: item.unit || { id: item.unit_id, name: "UNIDAD", allows_fraction: false },
+          unit: item.unit || {
+            id: item.unit_id,
+            name: "UNIDAD",
+            allows_fraction: false,
+          },
           soldOut: item.is_sold_out || item.is_soldout || false,
           orderIndex: Number(item.order_index || 0),
         };
@@ -949,9 +1115,7 @@ const POS = () => {
         profile.business_id,
       );
       setDeliverySettings(cachedDeliverySettings);
-      setDeliveryBusinessLogoUrl(
-        readDeliveryLogoCache(profile.business_id),
-      );
+      setDeliveryBusinessLogoUrl(readDeliveryLogoCache(profile.business_id));
       setDeliverySettingsError("");
       setIsLoadingDeliverySettings(!cachedDeliverySettings);
       setBusinessId(profile.business_id);
@@ -962,6 +1126,157 @@ const POS = () => {
 
     loadProfile();
   }, [user]);
+
+  useEffect(() => {
+    if (!businessId) {
+      setFloorAreas([]);
+      setConfiguredTables([]);
+      setConfiguredTablesError("");
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loadConfiguredTables = async () => {
+      setIsLoadingConfiguredTables(true);
+      const [areasResult, tablesResult] = await Promise.all([
+        supabase
+          .from("restaurant_floor_areas")
+          .select("id, name")
+          .eq("business_id", businessId)
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("restaurant_floor_tables")
+          .select("id, area_id, label")
+          .eq("business_id", businessId),
+      ]);
+
+      if (cancelled) return;
+      if (areasResult.error || tablesResult.error) {
+        console.error(
+          "Error cargando áreas y mesas configuradas:",
+          areasResult.error || tablesResult.error,
+        );
+        setFloorAreas([]);
+        setConfiguredTables([]);
+        setConfiguredTablesError("No se pudieron cargar las áreas y mesas.");
+      } else {
+        const areas = areasResult.data || [];
+        setConfiguredTables(
+          (tablesResult.data || [])
+            .map((table) => ({
+              id: table.id,
+              areaId: table.area_id,
+              label: table.label,
+            }))
+            .sort((first, second) =>
+              first.label.localeCompare(second.label, "es", { numeric: true }),
+            ),
+        );
+        setFloorAreas(areas);
+        setSelectedTableAreaId((current) =>
+          areas.some((area) => area.id === current)
+            ? current
+            : areas[0]?.id || "",
+        );
+        setConfiguredTablesError("");
+      }
+      setIsLoadingConfiguredTables(false);
+    };
+
+    loadConfiguredTables();
+    const channel = supabase
+      .channel(`pos-floor-layout-${businessId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "restaurant_floor_tables",
+          filter: `business_id=eq.${businessId}`,
+        },
+        loadConfiguredTables,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "restaurant_floor_areas",
+          filter: `business_id=eq.${businessId}`,
+        },
+        loadConfiguredTables,
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [businessId]);
+
+  const addConfiguredTable = async () => {
+    const label = newConfiguredTableLabel.trim();
+    if (!businessId || !selectedTableAreaId || !label) {
+      addToast("Ingresa el número y el área de la mesa.", "error");
+      return;
+    }
+    if (!/^\d+$/.test(label) || Number(label) < 1) {
+      addToast("El número de mesa debe ser un entero mayor que cero.", "error");
+      return;
+    }
+    if (
+      configuredTables.some(
+        (table) => table.label.toLowerCase() === label.toLowerCase(),
+      )
+    ) {
+      addToast("Ya existe una mesa con ese nombre.", "error");
+      return;
+    }
+
+    setIsSavingConfiguredTable(true);
+    const tablesInArea = configuredTables.filter(
+      (table) => table.areaId === selectedTableAreaId,
+    );
+    const index = tablesInArea.length;
+    const { data, error } = await supabase
+      .from("restaurant_floor_tables")
+      .insert({
+        business_id: businessId,
+        area_id: selectedTableAreaId,
+        label,
+        position_x: 12 + (index % 5) * 19,
+        position_y: Math.min(90, 20 + Math.floor(index / 5) * 24),
+        shape: "round",
+      })
+      .select("id, area_id, label")
+      .single();
+
+    if (error) {
+      console.error("Error creando mesa desde el POS:", error);
+      addToast(
+        error.code === "23505"
+          ? "Ya existe una mesa con ese número."
+          : "No se pudo agregar la mesa.",
+        "error",
+      );
+      setIsSavingConfiguredTable(false);
+      return;
+    }
+
+    setConfiguredTables((current) =>
+      [
+        ...current,
+        { id: data.id, areaId: data.area_id, label: data.label },
+      ].sort((first, second) =>
+        first.label.localeCompare(second.label, "es", { numeric: true }),
+      ),
+    );
+    setSelectedTable(data.label);
+    setNewConfiguredTableLabel("");
+    setIsAddingConfiguredTable(false);
+    setIsSavingConfiguredTable(false);
+    addToast(`Mesa ${data.label} agregada al área seleccionada.`, "success");
+  };
 
   useEffect(() => {
     if (!businessId) return undefined;
@@ -1006,8 +1321,7 @@ const POS = () => {
             "No se pudo cargar la configuración de domicilio.",
           );
           setDeliverySettings(
-            (current) =>
-              current || readDeliverySettingsCache(businessId),
+            (current) => current || readDeliverySettingsCache(businessId),
           );
         } else {
           setDeliverySettings(data || null);
@@ -1184,7 +1498,15 @@ const POS = () => {
 
   useEffect(() => {
     const editMesa = location.state?.mesaEdit;
-    if (!editMesa) return;
+    const newMesa = location.state?.mesaNueva;
+    if (!editMesa) {
+      if (newMesa) {
+        setDeliveryMethod("table");
+        setSelectedTable(String(newMesa));
+        setMobilePanel("resumen");
+      }
+      return;
+    }
     setMobilePanel("resumen");
 
     const nextTable = String(editMesa.mesa || editMesa.numero || "");
@@ -1208,8 +1530,7 @@ const POS = () => {
         )) ||
       parseMapCoordinates(editMesa.deliveryMapLink) ||
       parseMapCoordinates(storedAddress);
-    const editAddress =
-      parseMapCoordinates(storedAddress) ? "" : storedAddress;
+    const editAddress = parseMapCoordinates(storedAddress) ? "" : storedAddress;
     const storedReferencePoint =
       editMesa.referencePoint || editMesa.delivery_instructions || "";
     const storedLocationText = editMesa.locationText || editMesa.punto || "";
@@ -1689,8 +2010,7 @@ const POS = () => {
         0,
       ) || 0;
     const numericStock = Number(product?.stock);
-    const hasFiniteStock =
-      inventoryEnabled && Number.isFinite(numericStock);
+    const hasFiniteStock = inventoryEnabled && Number.isFinite(numericStock);
     const editQuantityLimit =
       isEditingTableOrder && originalQuantityInEdit > 0 && hasFiniteStock
         ? Math.max(0, numericStock + originalQuantityInEdit)
@@ -1869,9 +2189,7 @@ const POS = () => {
     }
     const existingQuantity = cart.reduce(
       (sum, item) =>
-        item.productId === activeProduct.id
-          ? sum + Number(item.qty || 0)
-          : sum,
+        item.productId === activeProduct.id ? sum + Number(item.qty || 0) : sum,
       0,
     );
     const availableStock = Number(activeProduct.stock);
@@ -1882,19 +2200,14 @@ const POS = () => {
     ) {
       addToast("Stock insuficiente. Se registrará el faltante.", "warning");
     }
-    const selectedOptions = getSelectedOptionItems(
-      activeProduct,
+    const selectedOptions = getSelectedProductOptions(
+      activeProduct.optionGroups || [],
       optionSelections,
     );
 
-    const missingRequiredGroups = (activeProduct.optionGroups || []).filter(
-      (group) => {
-        if (!group.obligatorio) return false;
-        const selected = optionSelections[group.id];
-        return group.selectionType === "multiple"
-          ? !Array.isArray(selected) || selected.length === 0
-          : !selected;
-      },
+    const missingRequiredGroups = getMissingProductOptionGroups(
+      activeProduct.optionGroups || [],
+      optionSelections,
     );
 
     if (missingRequiredGroups.length > 0) {
@@ -1923,11 +2236,16 @@ const POS = () => {
       return;
     }
 
+    const extraPrice = getProductOptionsExtraPrice(
+      activeProduct.optionGroups || [],
+      optionSelections,
+    );
     const newItem = createCartItemFromSelection(
       activeProduct,
       selectedOptions,
       optionNote,
       requestedQuantity,
+      extraPrice,
     );
 
     if (typeof window !== "undefined" && window.innerWidth < 1024) {
@@ -2092,9 +2410,7 @@ const POS = () => {
     const numericStock = Number(product.stock);
     const isOutOfStock =
       product.soldOut ||
-      (inventoryEnabled &&
-        Number.isFinite(numericStock) &&
-        numericStock <= 0);
+      (inventoryEnabled && Number.isFinite(numericStock) && numericStock <= 0);
 
     if (isOutOfStock) {
       setOutOfStockProduct(product);
@@ -2411,10 +2727,7 @@ const POS = () => {
           const latitudeOffset = DELIVERY_PLACE_MAX_DISTANCE_KM / 111;
           const longitudeOffset =
             latitudeOffset /
-            Math.max(
-              Math.cos((deliveryOrigin.latitude * Math.PI) / 180),
-              0.2,
-            );
+            Math.max(Math.cos((deliveryOrigin.latitude * Math.PI) / 180), 0.2);
           params.set(
             "bbox",
             [
@@ -2493,12 +2806,7 @@ const POS = () => {
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [
-    address,
-    deliveryDestination,
-    deliveryOrigin,
-    isLoadingDeliverySettings,
-  ]);
+  }, [address, deliveryDestination, deliveryOrigin, isLoadingDeliverySettings]);
 
   useEffect(() => {
     if (!deliveryDestination) return undefined;
@@ -2534,7 +2842,10 @@ const POS = () => {
         }
       } catch (error) {
         if (error.name !== "AbortError") {
-          console.warn("No se pudo obtener la dirección de las coordenadas:", error);
+          console.warn(
+            "No se pudo obtener la dirección de las coordenadas:",
+            error,
+          );
         }
       }
     }, 500);
@@ -2579,11 +2890,7 @@ const POS = () => {
     Math.min(100, Number(deliverySettings?.tip_percent) || 0),
   );
   const totalWithoutTip = itemsSubtotal + deliveryFee;
-  const tipAmount = calculateTipAmount(
-    itemsSubtotal,
-    deliveryFee,
-    tipPercent,
-  );
+  const tipAmount = calculateTipAmount(itemsSubtotal, deliveryFee, tipPercent);
   const total = totalWithoutTip + tipAmount;
   const assignedTotal = splitPayments.reduce(
     (acc, curr) => acc + (parseFloat(curr.amount) || 0),
@@ -2986,6 +3293,10 @@ const POS = () => {
               id: option.id || null,
               nombre: option.nombre || option.name || option.label || "Opción",
               precio_extra: Number(option.precio_extra || 0),
+              grupo_id: option.grupoId || null,
+              grupo: option.grupoNombre || null,
+              price_mode: option.priceMode || "sum",
+              max_extra_price: option.maxExtraPrice ?? null,
             }))
           : Array.isArray(item.optionNames)
             ? item.optionNames.map((nombre) => ({ nombre, precio_extra: 0 }))
@@ -3098,12 +3409,10 @@ const POS = () => {
               )
             : 0;
 
-    const submittedTotal =
-      paymentMethod === "efectivo" ? orderTotal : total;
+    const submittedTotal = paymentMethod === "efectivo" ? orderTotal : total;
     const submittedTipAmount =
       paymentMethod === "efectivo" ? orderTipAmount : tipAmount;
-    const paymentStatus =
-      totalPagado >= submittedTotal ? "paid" : "pending";
+    const paymentStatus = totalPagado >= submittedTotal ? "paid" : "pending";
     const orderStatus = paymentStatus === "paid" ? "confirmed" : "pending";
     const deliveryMapLink =
       deliveryMethod === "delivery" && deliveryDestination
@@ -3297,8 +3606,7 @@ const POS = () => {
       metodoEntrega: metadata.metodoEntrega || order.order_type,
       cliente: order.customer_name || customer.nombre || "Consumidor final",
       telefono: order.customer_phone || customer.telefono || "",
-      deliveryAddress:
-        order.delivery_address || customer.direccion || "",
+      deliveryAddress: order.delivery_address || customer.direccion || "",
       deliveryInstructions:
         order.delivery_instructions || customer.referencia || "",
       punto: order.punto || metadata.puntoRetiro || "",
@@ -3515,13 +3823,12 @@ const POS = () => {
     setHighlightItem(null);
   };
 
-  const activeProductSelectedOptions = getSelectedOptionItems(
-    activeProduct,
-    optionSelections,
-  );
   const activeProductSelectedPrice =
     Number(activeProduct?.price || 0) +
-    getOptionExtraPrice(activeProductSelectedOptions);
+    getProductOptionsExtraPrice(
+      activeProduct?.optionGroups || [],
+      optionSelections,
+    );
 
   {
     /* Componente único de "División de Pago" reutilizable */
@@ -3579,30 +3886,26 @@ const POS = () => {
       </div>
 
       <div className="grid grid-cols-5 gap-1.5">
-        {[
-          "efectivo",
-          "tarjeta",
-          "transferencia",
-          "dividir",
-          "variado",
-        ].map((method) => (
-          <button
-            key={method}
-            onClick={() => handlePaymentMethodChange(method)}
-            className={`py-1.5 lg:py-2 rounded-xl flex flex-col items-center gap-0.5 transition-all ${
-              paymentMethod === method
-                ? "bg-primary-container border-primary shadow-lg shadow-primary-container/40 text-on-surface"
-                : "bg-background border-outline text-on-surface-variant hover:border-outline"
-            }`}
-          >
-            <span className="material-symbols-outlined text-sm lg:text-base">
-              {paymentLabels[method].icon}
-            </span>
-            <span className="text-[7px]  font-black uppercase">
-              {paymentLabels[method].label}
-            </span>
-          </button>
-        ))}
+        {["efectivo", "tarjeta", "transferencia", "dividir", "variado"].map(
+          (method) => (
+            <button
+              key={method}
+              onClick={() => handlePaymentMethodChange(method)}
+              className={`py-1.5 lg:py-2 rounded-xl flex flex-col items-center gap-0.5 transition-all ${
+                paymentMethod === method
+                  ? "bg-primary-container border-primary shadow-lg shadow-primary-container/40 text-on-surface"
+                  : "bg-background border-outline text-on-surface-variant hover:border-outline"
+              }`}
+            >
+              <span className="material-symbols-outlined text-sm lg:text-base">
+                {paymentLabels[method].icon}
+              </span>
+              <span className="text-[7px]  font-black uppercase">
+                {paymentLabels[method].label}
+              </span>
+            </button>
+          ),
+        )}
       </div>
       {paymentMethod === "variado" && (
         <p className="mt-1 text-center text-[9px] font-semibold text-amber-300">
@@ -3626,9 +3929,7 @@ const POS = () => {
                     : "border-white/10 focus-within:border-violet-400/70"
                 }`}
               >
-                <span className="text-xs font-medium text-neutral-500">
-                  $
-                </span>
+                <span className="text-xs font-medium text-neutral-500">$</span>
                 <input
                   id="cash-amount-received"
                   type="text"
@@ -3685,56 +3986,56 @@ const POS = () => {
           deliveryPlaceSuggestions.length > 0 ||
           isSearchingDeliveryPlaces ||
           deliveryPlaceSearchError) && (
-        <div
-          className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-outline bg-surface shadow-xl"
-          role="listbox"
-          aria-label="Sugerencias de direcciones"
-        >
-          {isSearchingDeliveryPlaces && (
-            <p className="px-3 py-2 text-xs text-on-surface-variant">
-              {isLoadingDeliverySettings
-                ? "Cargando ubicación de la tienda..."
-                : "Buscando direcciones cercanas..."}
-            </p>
-          )}
-          {address.trim().length === 1 &&
-            !isSearchingDeliveryPlaces &&
-            !deliveryPlaceSearchError && (
+          <div
+            className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-outline bg-surface shadow-xl"
+            role="listbox"
+            aria-label="Sugerencias de direcciones"
+          >
+            {isSearchingDeliveryPlaces && (
               <p className="px-3 py-2 text-xs text-on-surface-variant">
-                Escribe otro carácter para ver sugerencias cercanas.
+                {isLoadingDeliverySettings
+                  ? "Cargando ubicación de la tienda..."
+                  : "Buscando direcciones cercanas..."}
               </p>
             )}
-          {deliveryPlaceSearchError && (
-            <p className="px-3 py-2 text-xs text-red-300">
-              {deliveryPlaceSearchError}
-            </p>
-          )}
-          {!isSearchingDeliveryPlaces &&
-            deliveryPlaceSuggestions.map((suggestion) => (
-              <button
-                key={suggestion.id}
-                type="button"
-                role="option"
-                aria-selected="false"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  suppressDeliveryPlaceSearchRef.current = suggestion.label;
-                  skipReverseGeocodeRef.current = `${suggestion.latitude.toFixed(6)},${suggestion.longitude.toFixed(6)}`;
-                  setDeliveryPlaceSuggestions([]);
-                  setDeliveryPlaceSearchError("");
-                  handleDeliveryDestinationChange({
-                    latitude: suggestion.latitude,
-                    longitude: suggestion.longitude,
-                  });
-                  setAddress(suggestion.label);
-                }}
-                className="block w-full border-b border-outline/40 px-3 py-2 text-left text-xs text-on-surface transition last:border-b-0 hover:bg-surface-hover"
-              >
-                {suggestion.label}
-              </button>
-            ))}
-        </div>
-      )}
+            {address.trim().length === 1 &&
+              !isSearchingDeliveryPlaces &&
+              !deliveryPlaceSearchError && (
+                <p className="px-3 py-2 text-xs text-on-surface-variant">
+                  Escribe otro carácter para ver sugerencias cercanas.
+                </p>
+              )}
+            {deliveryPlaceSearchError && (
+              <p className="px-3 py-2 text-xs text-red-300">
+                {deliveryPlaceSearchError}
+              </p>
+            )}
+            {!isSearchingDeliveryPlaces &&
+              deliveryPlaceSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  type="button"
+                  role="option"
+                  aria-selected="false"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    suppressDeliveryPlaceSearchRef.current = suggestion.label;
+                    skipReverseGeocodeRef.current = `${suggestion.latitude.toFixed(6)},${suggestion.longitude.toFixed(6)}`;
+                    setDeliveryPlaceSuggestions([]);
+                    setDeliveryPlaceSearchError("");
+                    handleDeliveryDestinationChange({
+                      latitude: suggestion.latitude,
+                      longitude: suggestion.longitude,
+                    });
+                    setAddress(suggestion.label);
+                  }}
+                  className="block w-full border-b border-outline/40 px-3 py-2 text-left text-xs text-on-surface transition last:border-b-0 hover:bg-surface-hover"
+                >
+                  {suggestion.label}
+                </button>
+              ))}
+          </div>
+        )}
     </div>
   );
 
@@ -3917,9 +4218,74 @@ const POS = () => {
     </div>
   );
 
+  const handleColumnResizeStart = (boundary, event) => {
+    if (window.innerWidth < 1280) return;
+    event.preventDefault();
+    columnResizeRef.current = { boundary, pointerId: event.pointerId };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleColumnResizeMove = (event) => {
+    const drag = columnResizeRef.current;
+    const layout = posLayoutRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !layout) return;
+
+    const bounds = layout.getBoundingClientRect();
+    const totalWidth = bounds.width;
+    const columnWidths = posColumnRatios.map(
+      (ratio) => (ratio / 100) * totalWidth,
+    );
+    const leftColumn = drag.boundary;
+    const rightColumn = leftColumn + 1;
+    const pairWidth = columnWidths[leftColumn] + columnWidths[rightColumn];
+    const pairOffset = leftColumn === 0 ? 0 : columnWidths[0];
+    const minimumWidths = [320, 260, 300];
+    const nextLeftWidth = Math.min(
+      pairWidth - minimumWidths[rightColumn],
+      Math.max(
+        minimumWidths[leftColumn],
+        event.clientX - bounds.left - pairOffset,
+      ),
+    );
+    const nextRatios = [...posColumnRatios];
+    nextRatios[leftColumn] = (nextLeftWidth / totalWidth) * 100;
+    nextRatios[rightColumn] = ((pairWidth - nextLeftWidth) / totalWidth) * 100;
+    setPosColumnRatios(nextRatios);
+  };
+
+  const handleColumnResizeEnd = (event) => {
+    if (columnResizeRef.current?.pointerId !== event.pointerId) return;
+    columnResizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   return (
     <>
-      <div className="grid grid-cols-1 lg:grid-cols-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] h-screen bg-background font-sans selection:bg-primary-container/30 pb-20 lg:pb-0">
+      <div
+        ref={posLayoutRef}
+        className="relative grid grid-cols-1 lg:grid-cols-4 xl:grid-cols-[minmax(0,var(--pos-products-column))_minmax(0,var(--pos-delivery-column))_minmax(0,var(--pos-cart-column))] h-screen bg-background font-sans selection:bg-primary-container/30 pb-20 lg:pb-0"
+        style={{
+          "--pos-products-column": `${posColumnRatios[0]}fr`,
+          "--pos-delivery-column": `${posColumnRatios[1]}fr`,
+          "--pos-cart-column": `${posColumnRatios[2]}fr`,
+        }}
+      >
+        {[posColumnRatios[0], posColumnRatios[0] + posColumnRatios[1]].map(
+          (position, index) => (
+            <div
+              key={`column-resizer-${index}`}
+              aria-hidden="true"
+              className="absolute bottom-0 top-0 z-30 hidden w-3 -translate-x-1/2 touch-none cursor-col-resize xl:block"
+              style={{ left: `${position}%` }}
+              onPointerDown={(event) => handleColumnResizeStart(index, event)}
+              onPointerMove={handleColumnResizeMove}
+              onPointerUp={handleColumnResizeEnd}
+              onPointerCancel={handleColumnResizeEnd}
+            />
+          ),
+        )}
         {isDeliveryMapFullscreen && deliveryMethod === "delivery" && (
           <div className="fixed inset-0 z-[100] flex flex-col gap-3 bg-background p-3 sm:p-5">
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 pb-3">
@@ -4088,139 +4454,139 @@ const POS = () => {
                     </button>
                   ))}
             </aside>
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-2 custom-sidebar min-[420px]:p-3 lg:p-4">
-            {isLoadingProducts && filteredProducts.length === 0 ? (
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-2 custom-sidebar min-[420px]:p-3 lg:p-4">
+              {isLoadingProducts && filteredProducts.length === 0 ? (
                 <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3">
-                {[...Array(8)].map((_, idx) => (
-                  <div
-                    key={idx}
-                    className="group relative bg-surface rounded-[1.25rem] p-2 flex flex-col animate-pulse"
-                  >
-                    <div className="bg-surface-hover/50 rounded-[1rem] h-24 mb-3 border border-outline/[0.03]" />
-                    <div className="px-1 flex-1">
-                      <div className="h-4 bg-white/10 rounded-full w-3/4 mb-3" />
-                      <div className="h-5 bg-white/10 rounded-full w-1/2" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : filteredProducts.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center gap-3">
-                <span className="material-symbols-outlined text-5xl text-on-surface-variant/40">
-                  search_off
-                </span>
-                <div className="text-center">
-                  <p className="text-on-surface-variant font-bold text-sm uppercase tracking-wide">
-                    No se encontraron productos
-                  </p>
-                  <p className="text-on-surface-variant/60 text-xs mt-1">
-                    Intenta con otra búsqueda o categoría
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3">
-                {filteredProducts.map((product) => (
-                  <div
-                    key={product.id}
-                    onClick={() => addToCart(product)}
-                    aria-disabled={!isProductCatalogReady}
-                    className={`group relative flex flex-col rounded-[1.25rem] bg-surface transition-all duration-500 hover:bg-surface-hover/50 hover:border-primary-container/40 active:scale-[0.97] ${
-                      isProductCatalogReady
-                        ? "cursor-pointer"
-                        : "cursor-wait opacity-80"
-                    }`}
-                  >
-                    {(inventoryEnabled || product.soldOut) && (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setProductStockToEdit(product);
-                        }}
-                        title="Editar stock del producto"
-                        aria-label={`Confirmar edición de stock de ${product.name}`}
-                        className={`absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-full text-white text-[10px] font-bold uppercase tracking-wider ${
-                          product.soldOut ||
-                          (inventoryEnabled && Number(product.stock) <= 0)
-                            ? "bg-red-600"
-                            : "bg-green-600"
-                        } cursor-pointer`}
-                      >
-                        {product.soldOut
-                          ? "Agotado"
-                          : inventoryEnabled
-                            ? `Stock: ${formatStockQuantity(product.stock)} ${getProductUnitAbbreviation(product)}`
-                            : "Disponible"}
-                      </button>
-                    )}
-                    {/* Botón Info - Elevado con Glassmorphism */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowInfo(
-                          showInfo === product.id ? null : product.id,
-                        );
-                      }}
-                      className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all duration-300 bg-primary-container/50 text-primary border-primary/30 hover:bg-primary-container hover:text-on-surface z-10"
+                  {[...Array(8)].map((_, idx) => (
+                    <div
+                      key={idx}
+                      className="group relative bg-surface rounded-[1.25rem] p-2 flex flex-col animate-pulse"
                     >
-                      <span className="material-symbols-outlined text-sm">
-                        info
-                      </span>
-                    </button>
-
-                    {/* Contenedor del icono image */}
-                    <div className="bg-surface-hover/50 rounded-t-[1rem] h-24 flex items-center justify-center border border-outline/[0.03] overflow-hidden relative">
-                      {hasUsableProductImage(product.image_url) ? (
-                        <>
-                          <div className="absolute inset-0 bg-gradient-to-br from-primary-container/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                          <img
-                            src={product.image_url}
-                            alt={product.name}
-                            className="h-full w-full object-cover"
-                          />
-                        </>
-                      ) : (
-                        <div
-                          className="flex h-full w-full items-center justify-center bg-neutral-200 px-3"
-                          aria-label={product.name}
-                        >
-                          <span className="truncate text-center text-lg text-neutral-500">
-                            {product.name}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Información de Producto */}
-                    <div className="px-2 pt-1">
-                      <p className="font-bold text-on-surface text-sm group-hover:text-primary transition-colors">
-                        {product.name}
-                      </p>
-
-                      <div className="flex items-center justify-between gap-1 pb-2">
-                        <p className="text-primary font-black text-sm tracking-tight">
-                          $ {formatPrice(product.price)}{" "}
-                          <span className="text-[10px] font-bold text-on-surface-variant">
-                            {product.unit?.name || "UNIDAD"}
-                          </span>
-                        </p>
-                        <button
-                          onClick={(e) => openNoteModal(e, product)}
-                          className="w-5 h-5 flex items-center justify-center text-on-surface-variant hover:text-primary-container transition-colors "
-                        >
-                          <span className="material-symbols-outlined text-xl">
-                            add_notes
-                          </span>
-                        </button>
+                      <div className="bg-surface-hover/50 rounded-[1rem] h-24 mb-3 border border-outline/[0.03]" />
+                      <div className="px-1 flex-1">
+                        <div className="h-4 bg-white/10 rounded-full w-3/4 mb-3" />
+                        <div className="h-5 bg-white/10 rounded-full w-1/2" />
                       </div>
                     </div>
-
-                    {/* Info button only (modal rendered globally) */}
+                  ))}
+                </div>
+              ) : filteredProducts.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                  <span className="material-symbols-outlined text-5xl text-on-surface-variant/40">
+                    search_off
+                  </span>
+                  <div className="text-center">
+                    <p className="text-on-surface-variant font-bold text-sm uppercase tracking-wide">
+                      No se encontraron productos
+                    </p>
+                    <p className="text-on-surface-variant/60 text-xs mt-1">
+                      Intenta con otra búsqueda o categoría
+                    </p>
                   </div>
-                ))}
-              </div>
-            )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3">
+                  {filteredProducts.map((product) => (
+                    <div
+                      key={product.id}
+                      onClick={() => addToCart(product)}
+                      aria-disabled={!isProductCatalogReady}
+                      className={`group relative flex flex-col rounded-[1.25rem] bg-surface transition-all duration-500 hover:bg-surface-hover/50 hover:border-primary-container/40 active:scale-[0.97] ${
+                        isProductCatalogReady
+                          ? "cursor-pointer"
+                          : "cursor-wait opacity-80"
+                      }`}
+                    >
+                      {(inventoryEnabled || product.soldOut) && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setProductStockToEdit(product);
+                          }}
+                          title="Editar stock del producto"
+                          aria-label={`Confirmar edición de stock de ${product.name}`}
+                          className={`absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-full text-white text-[10px] font-bold uppercase tracking-wider ${
+                            product.soldOut ||
+                            (inventoryEnabled && Number(product.stock) <= 0)
+                              ? "bg-red-600"
+                              : "bg-green-600"
+                          } cursor-pointer`}
+                        >
+                          {product.soldOut
+                            ? "Agotado"
+                            : inventoryEnabled
+                              ? `Stock: ${formatStockQuantity(product.stock)} ${getProductUnitAbbreviation(product)}`
+                              : "Disponible"}
+                        </button>
+                      )}
+                      {/* Botón Info - Elevado con Glassmorphism */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowInfo(
+                            showInfo === product.id ? null : product.id,
+                          );
+                        }}
+                        className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all duration-300 bg-primary-container/50 text-primary border-primary/30 hover:bg-primary-container hover:text-on-surface z-10"
+                      >
+                        <span className="material-symbols-outlined text-sm">
+                          info
+                        </span>
+                      </button>
+
+                      {/* Contenedor del icono image */}
+                      <div className="bg-surface-hover/50 rounded-t-[1rem] h-24 flex items-center justify-center border border-outline/[0.03] overflow-hidden relative">
+                        {hasUsableProductImage(product.image_url) ? (
+                          <>
+                            <div className="absolute inset-0 bg-gradient-to-br from-primary-container/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                            <img
+                              src={product.image_url}
+                              alt={product.name}
+                              className="h-full w-full object-cover"
+                            />
+                          </>
+                        ) : (
+                          <div
+                            className="flex h-full w-full items-center justify-center bg-neutral-200 px-3"
+                            aria-label={product.name}
+                          >
+                            <span className="truncate text-center text-lg text-neutral-500">
+                              {product.name}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Información de Producto */}
+                      <div className="px-2 pt-1">
+                        <p className="font-bold text-on-surface text-sm group-hover:text-primary transition-colors">
+                          {product.name}
+                        </p>
+
+                        <div className="flex items-center justify-between gap-1 pb-2">
+                          <p className="text-primary font-black text-sm tracking-tight">
+                            $ {formatPrice(product.price)}{" "}
+                            <span className="text-[10px] font-bold text-on-surface-variant">
+                              {product.unit?.name || "UNIDAD"}
+                            </span>
+                          </p>
+                          <button
+                            onClick={(e) => openNoteModal(e, product)}
+                            className="w-5 h-5 flex items-center justify-center text-on-surface-variant hover:text-primary-container transition-colors "
+                          >
+                            <span className="material-symbols-outlined text-xl">
+                              add_notes
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Info button only (modal rendered globally) */}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -4379,15 +4745,9 @@ const POS = () => {
                 }
               />
               <div>
-                <TextField
-                  label="Mesa"
-                  value={selectedTable}
-                  setValue={setSelectedTable}
-                  placeholder="Número de mesa"
-                  type="number"
-                  size="compact"
-                  inputRef={tableInputRef}
-                />
+                <label className="block text-[9px] font-black text-neutral-500 uppercase tracking-widest">
+                  Mesa
+                </label>
                 {tableOccupancyWarning?.occupied && (
                   <div className="mt-2 p-3 rounded-lg bg-red-500/15 border border-red-500/50 animate-in fade-in slide-in-from-top-2 duration-300">
                     <p className="text-xs font-bold text-red-600 leading-relaxed">
@@ -4395,30 +4755,142 @@ const POS = () => {
                     </p>
                   </div>
                 )}
-                <div className="grid grid-cols-5 gap-1 mt-2">
-                  {Array.from({ length: 9 }, (_, i) => i + 1).map((num) => (
-                    <button
-                      key={num}
-                      onClick={() => setSelectedTable(num.toString())}
-                      className={`p-2 rounded-lg font-bold text-xs  transition-all ${
-                        selectedTable === num.toString()
-                          ? "bg-primary-container text-on-surface border-primary"
-                          : "bg-surface border-outline text-on-surface-variant hover:border-outline"
-                      }`}
-                    >
-                      {num}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => tableInputRef.current?.focus()}
-                    className=" rounded-lg font-bold text-xs transition-all bg-primary-container/20  text-primary hover:bg-primary-container hover:text-on-surface hover:border-primary"
-                    title="Agregar mesa con número mayor a 9"
-                  >
-                    <span className="material-symbols-outlined text-base">
-                      add
-                    </span>
-                  </button>
-                </div>
+                {!isLoadingConfiguredTables &&
+                  !configuredTablesError &&
+                  floorAreas.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {floorAreas.map((area) => (
+                        <button
+                          key={area.id}
+                          type="button"
+                          onClick={() => setSelectedTableAreaId(area.id)}
+                          className={`rounded-lg px-2 py-1 text-[9px] font-bold transition-all ${
+                            selectedTableAreaId === area.id
+                              ? "bg-primary-container text-on-surface"
+                              : "border border-outline bg-surface text-on-surface-variant hover:text-on-surface"
+                          }`}
+                        >
+                          {area.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                {isLoadingConfiguredTables ? (
+                  <p className="mt-2 text-[10px] text-on-surface-variant">
+                    Cargando áreas y mesas...
+                  </p>
+                ) : configuredTablesError ? (
+                  <p role="alert" className="mt-2 text-[10px] text-red-400">
+                    {configuredTablesError}
+                  </p>
+                ) : floorAreas.length === 0 ? (
+                  <p className="mt-2 text-[10px] text-on-surface-variant">
+                    Crea primero un área desde el plano de mesas.
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-5 gap-1 mt-2">
+                      {configuredTables
+                        .filter((table) => table.areaId === selectedTableAreaId)
+                        .map((table) => (
+                          <button
+                            key={table.id}
+                            type="button"
+                            onClick={() => setSelectedTable(table.label)}
+                            className={`p-2 rounded-lg font-bold text-xs transition-all ${
+                              selectedTable === table.label
+                                ? "bg-primary-container text-on-surface border-primary"
+                                : "bg-surface border-outline text-on-surface-variant hover:border-outline"
+                            }`}
+                          >
+                            {table.label}
+                          </button>
+                        ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const numericLabels = configuredTables
+                            .map((table) => Number(table.label))
+                            .filter(
+                              (number) =>
+                                Number.isInteger(number) && number > 0,
+                            );
+                          setNewConfiguredTableLabel(
+                            String(Math.max(0, ...numericLabels) + 1),
+                          );
+                          setIsAddingConfiguredTable(true);
+                        }}
+                        disabled={isAddingConfiguredTable}
+                        className="flex items-center justify-center rounded-lg border border-dashed border-primary/50 p-2 text-primary transition-all hover:bg-primary/10 disabled:opacity-40"
+                        title="Agregar mesa"
+                        aria-label="Agregar mesa"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                    {configuredTables.filter(
+                      (table) => table.areaId === selectedTableAreaId,
+                    ).length === 0 &&
+                      !isAddingConfiguredTable && (
+                        <p className="mt-2 text-[10px] text-on-surface-variant">
+                          No hay mesas en esta área todavía.
+                        </p>
+                      )}
+                    {isAddingConfiguredTable && (
+                      <div className="mt-2 space-y-2 rounded-lg border border-outline p-2">
+                        <label className="block text-[9px] font-bold text-on-surface-variant">
+                          Nueva mesa
+                        </label>
+                        <input
+                          autoFocus
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={newConfiguredTableLabel}
+                          onChange={(event) =>
+                            setNewConfiguredTableLabel(event.target.value)
+                          }
+                          placeholder="Número de mesa"
+                          maxLength={40}
+                          className="w-full rounded-lg border border-outline bg-surface px-2 py-1.5 text-xs text-on-surface outline-none focus:border-primary"
+                        />
+                        <select
+                          value={selectedTableAreaId}
+                          onChange={(event) =>
+                            setSelectedTableAreaId(event.target.value)
+                          }
+                          className="w-full rounded-lg border border-outline bg-surface px-2 py-1.5 text-xs text-on-surface outline-none focus:border-primary"
+                        >
+                          {floorAreas.map((area) => (
+                            <option key={area.id} value={area.id}>
+                              {area.name}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={addConfiguredTable}
+                            disabled={isSavingConfiguredTable}
+                            className="flex-1 rounded-lg bg-primary-container px-2 py-1.5 text-[10px] font-bold text-on-surface disabled:opacity-50"
+                          >
+                            {isSavingConfiguredTable
+                              ? "Guardando..."
+                              : "Guardar"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsAddingConfiguredTable(false)}
+                            disabled={isSavingConfiguredTable}
+                            className="rounded-lg border border-outline px-2 py-1.5 text-[10px] font-bold text-on-surface-variant"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -4662,8 +5134,7 @@ const POS = () => {
                         item.unit?.allows_fraction ? "decimal" : "numeric"
                       }
                       value={
-                        quantityDrafts[item.cartId] ??
-                        formatInteger(item.qty)
+                        quantityDrafts[item.cartId] ?? formatInteger(item.qty)
                       }
                       onFocus={() =>
                         item.unit?.allows_fraction &&
@@ -4725,125 +5196,159 @@ const POS = () => {
           </div>
 
           {/* Footer: Totales y Pago */}
-          <div className="p-3 bg-surface border-t border-outline mt-auto flex-shrink-0 shadow-[0_-15px_30px_rgba(0,0,0,0.5)]">
-            {/* Resumen Numérico */}
-            <div className="space-y-0.5 mb-1.5">
-              <div className="flex justify-between items-center opacity-60 m-0">
-                <span className="text-[10px] font-bold uppercase tracking-widest">
-                  Subtotal
-                </span>
-                <span className="text-sm font-bold">
-                  $ {formatPrice(itemsSubtotal)}
-                </span>
-              </div>
-              {deliveryMethod === "delivery" && deliveryBaseFee !== null && (
-                <>
-                  <div className="flex justify-between items-center opacity-70">
-                    <span className="text-[10px] font-bold uppercase tracking-widest">
-                      Domicilio
-                    </span>
-                    {deliveryFeeEditControl}
-                  </div>
-                </>
-              )}
-
-              {(paymentMethod === "efectivo" || paymentMethod === "dividir") &&
-                (paidAmount > 0 || assignedTotal > 0) && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-                      {remainingLabel}
-                    </span>
-                    <span
-                      className={`text-lg font-black ${
-                        remaining > 0
-                          ? "text-red-500"
-                          : remaining < 0
-                            ? "text-emerald-500"
-                            : "text-violet-400"
-                      }`}
-                    >
-                      $ {remainingDisplay}
-                    </span>
-                  </div>
-                )}
-
-              <div className="flex justify-between items-center">
-                <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
-                  Total a pagar
-                </span>
-                <span className="text-xl font-black text-on-surface tracking-tighter">
-                  $ {formatPrice(totalWithoutTip)}
-                </span>
-              </div>
-              {tipAmount > 0 && (
-                <div className="flex justify-between items-center text-emerald-300">
-                  <span className="text-[10px] font-bold uppercase tracking-widest">
-                    Propina ({tipPercent}%)
-                  </span>
-                  <span className="text-sm font-bold">
-                    + $ {formatPrice(tipAmount)}
-                  </span>
-                </div>
-              )}
-              {tipAmount > 0 && (
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
-                    Total con propina
-                  </span>
-                  <span className="text-xl font-black text-on-surface tracking-tighter">
-                    $ {formatPrice(total)}
-                  </span>
-                </div>
-              )}
-              {/* Lectura de número */}
-              {total > 0 && (
-                <p className="text-[9px] leading-tight text-on-surface uppercase tracking-wider">
-                  {numeroALetras(total)}
-                </p>
-              )}
-            </div>
-
-            {/* Observaciones Generales */}
-            <div className="mb-2">
-              <textarea
-                rows={1}
-                value={orderNotes}
-                onChange={(e) => setOrderNotes(e.target.value)}
-                placeholder="Observaciones generales..."
-                className="w-full min-h-10 resize-none rounded-xl border border-outline bg-background px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary/20"
-              />
-            </div>
-
-            {/* Métodos de Pago */}
-            {paymentMethodsSection}
-
-            {splitPaymentPreview}
-
-            {/* Botón de Acción Principal */}
+          <div
+            className={`relative bg-surface border-t border-outline mt-auto flex-shrink-0 shadow-[0_-15px_30px_rgba(0,0,0,0.5)] ${
+              checkoutFooterCollapsed ? "px-2 py-1" : "p-3"
+            }`}
+          >
             <button
-              onClick={crearPedidoPOS}
-              disabled={
-                isSubmittingOrder ||
-                cart.length === 0 ||
-                isCashPaymentBelowTotal ||
-                (isEditingTableOrder && !hasEditChanges)
+              type="button"
+              onClick={() =>
+                setCheckoutFooterCollapsed((collapsed) => !collapsed)
               }
-              aria-busy={isSubmittingOrder}
-              className="w-full bg-primary-container hover:bg-success active:scale-[0.98] text-on-surface font-black py-2.5 rounded-xl transition-all uppercase text-[10px] tracking-[0.2em] disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label={
+                checkoutFooterCollapsed
+                  ? "Mostrar panel de pago"
+                  : "Ocultar panel de pago"
+              }
+              aria-expanded={!checkoutFooterCollapsed}
+              title={
+                checkoutFooterCollapsed
+                  ? "Mostrar panel de pago"
+                  : "Ocultar panel de pago"
+              }
+              className="absolute -top-8 left-0 z-10 flex h-8 w-8 items-center justify-center   bg-surface/70 text-on-surface-variant shadow-md transition-colors hover:text-on-surface"
             >
-              {isSubmittingOrder ? (
-                <>
-                  <span className="material-symbols-outlined mr-2 animate-spin align-middle">
-                    progress_activity
-                  </span>
-                  Procesando...
-                </>
-              ) : isEditingTableOrder ? (
-                "Actualizar"
+              {checkoutFooterCollapsed ? (
+                <ChevronUp size={20} />
               ) : (
-                "Confirmar"
+                <ChevronDown size={20} />
               )}
             </button>
+            {!checkoutFooterCollapsed && (
+              <div>
+                {/* Resumen Numérico */}
+                <div className="space-y-0.5 mb-1.5">
+                  <div className="flex justify-between items-center opacity-60 m-0">
+                    <span className="text-[10px] font-bold uppercase tracking-widest">
+                      Subtotal
+                    </span>
+                    <span className="text-sm font-bold">
+                      $ {formatPrice(itemsSubtotal)}
+                    </span>
+                  </div>
+                  {deliveryMethod === "delivery" &&
+                    deliveryBaseFee !== null && (
+                      <>
+                        <div className="flex justify-between items-center opacity-70">
+                          <span className="text-[10px] font-bold uppercase tracking-widest">
+                            Domicilio
+                          </span>
+                          {deliveryFeeEditControl}
+                        </div>
+                      </>
+                    )}
+
+                  {(paymentMethod === "efectivo" ||
+                    paymentMethod === "dividir") &&
+                    (paidAmount > 0 || assignedTotal > 0) && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+                          {remainingLabel}
+                        </span>
+                        <span
+                          className={`text-lg font-black ${
+                            remaining > 0
+                              ? "text-red-500"
+                              : remaining < 0
+                                ? "text-emerald-500"
+                                : "text-violet-400"
+                          }`}
+                        >
+                          $ {remainingDisplay}
+                        </span>
+                      </div>
+                    )}
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
+                      Total a pagar
+                    </span>
+                    <span className="text-xl font-black text-on-surface tracking-tighter">
+                      $ {formatPrice(totalWithoutTip)}
+                    </span>
+                  </div>
+                  {tipAmount > 0 && (
+                    <div className="flex justify-between items-center text-emerald-300">
+                      <span className="text-[10px] font-bold uppercase tracking-widest">
+                        Propina ({tipPercent}%)
+                      </span>
+                      <span className="text-sm font-bold">
+                        + $ {formatPrice(tipAmount)}
+                      </span>
+                    </div>
+                  )}
+                  {tipAmount > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
+                        Total con propina
+                      </span>
+                      <span className="text-xl font-black text-on-surface tracking-tighter">
+                        $ {formatPrice(total)}
+                      </span>
+                    </div>
+                  )}
+                  {/* Lectura de número */}
+                  {total > 0 && (
+                    <p className="text-[9px] leading-tight text-on-surface uppercase tracking-wider">
+                      {numeroALetras(total)}
+                    </p>
+                  )}
+                </div>
+
+                {/* Observaciones Generales */}
+                <div className="mb-2">
+                  <textarea
+                    rows={1}
+                    value={orderNotes}
+                    onChange={(e) => setOrderNotes(e.target.value)}
+                    placeholder="Observaciones generales..."
+                    className="w-full min-h-10 resize-none rounded-xl border border-outline bg-background px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary/20"
+                  />
+                </div>
+
+                {/* Métodos de Pago */}
+                {paymentMethodsSection}
+
+                {splitPaymentPreview}
+
+                {/* Botón de Acción Principal */}
+                <button
+                  onClick={crearPedidoPOS}
+                  disabled={
+                    isSubmittingOrder ||
+                    cart.length === 0 ||
+                    isCashPaymentBelowTotal ||
+                    (isEditingTableOrder && !hasEditChanges)
+                  }
+                  aria-busy={isSubmittingOrder}
+                  className="w-full bg-primary-container hover:bg-success active:scale-[0.98] text-on-surface font-black py-2.5 rounded-xl transition-all uppercase text-[10px] tracking-[0.2em] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSubmittingOrder ? (
+                    <>
+                      <span className="material-symbols-outlined mr-2 animate-spin align-middle">
+                        progress_activity
+                      </span>
+                      Procesando...
+                    </>
+                  ) : isEditingTableOrder ? (
+                    "Actualizar"
+                  ) : (
+                    "Confirmar"
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -5063,126 +5568,160 @@ const POS = () => {
           </div>
 
           {/* Footer: Totales y Pago */}
-          <div className="p-3 bg-surface border-t border-outline mt-auto flex-shrink-0 mb-20 shadow-[0_-15px_30px_rgba(0,0,0,0.5)] overflow-y-auto max-h-[50%] custom-sidebar">
-            {/* Resumen Numérico */}
-            <div className="space-y-0.5 mb-1.5">
-              <div className="flex justify-between items-center opacity-60 m-0">
-                <span className="text-[10px] font-bold uppercase tracking-widest">
-                  Subtotal
-                </span>
-                <span className="text-sm font-bold">
-                  $ {formatPrice(itemsSubtotal)}
-                </span>
-              </div>
-              {deliveryMethod === "delivery" && deliveryBaseFee !== null && (
-                <>
-                  <div className="flex justify-between items-center opacity-70">
-                    <span className="text-[10px] font-bold uppercase tracking-widest">
-                      Domicilio
-                    </span>
-                    {deliveryFeeEditControl}
-                  </div>
-                </>
-              )}
-
-              {(paymentMethod === "efectivo" || paymentMethod === "dividir") &&
-                (paidAmount > 0 || assignedTotal > 0) && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-                      {remainingLabel}
-                    </span>
-                    <span
-                      className={`text-lg font-black ${
-                        remaining > 0
-                          ? "text-red-500"
-                          : remaining < 0
-                            ? "text-emerald-500"
-                            : "text-violet-400"
-                      }`}
-                    >
-                      $ {remainingDisplay}
-                    </span>
-                  </div>
-                )}
-
-              <div className="flex justify-between items-center">
-                <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
-                  Total a pagar
-                </span>
-                <span className="text-xl font-black text-on-surface tracking-tighter">
-                  $ {formatPrice(totalWithoutTip)}
-                </span>
-              </div>
-              {tipAmount > 0 && (
-                <div className="flex justify-between items-center text-emerald-300">
-                  <span className="text-[10px] font-bold uppercase tracking-widest">
-                    Propina ({tipPercent}%)
-                  </span>
-                  <span className="text-sm font-bold">
-                    + $ {formatPrice(tipAmount)}
-                  </span>
-                </div>
-              )}
-              {tipAmount > 0 && (
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
-                    Total con propina
-                  </span>
-                  <span className="text-xl font-black text-on-surface tracking-tighter">
-                    $ {formatPrice(total)}
-                  </span>
-                </div>
-              )}
-              {/* Lectura de número */}
-              {total > 0 && (
-                <p className="text-[9px] leading-tight text-on-surface uppercase tracking-wider">
-                  {numeroALetras(total)}
-                </p>
-              )}
-            </div>
-
-            {/* Observaciones Generales */}
-            <div className="mb-2">
-              <textarea
-                rows={1}
-                value={orderNotes}
-                onChange={(e) => setOrderNotes(e.target.value)}
-                placeholder="Observaciones generales..."
-                className="w-full min-h-10 resize-none rounded-xl border border-outline bg-background px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary/20"
-              />
-            </div>
-
-            {/* Métodos de Pago */}
-            {paymentMethodsSection}
-
-            {/* Preview de División de Pagos */}
-            {splitPaymentPreview}
-
-            {/* Botón de Acción Principal */}
+          <div
+            className={`relative bg-surface border-t border-outline mt-auto flex-shrink-0 mb-20 shadow-[0_-15px_30px_rgba(0,0,0,0.5)] ${
+              checkoutFooterCollapsed ? "px-2 py-1" : "p-3"
+            }`}
+          >
             <button
-              onClick={crearPedidoPOS}
-              disabled={
-                isSubmittingOrder ||
-                cart.length === 0 ||
-                isCashPaymentBelowTotal ||
-                (isEditingTableOrder && !hasEditChanges)
+              type="button"
+              onClick={() =>
+                setCheckoutFooterCollapsed((collapsed) => !collapsed)
               }
-              aria-busy={isSubmittingOrder}
-              className="w-full bg-primary-container hover:bg-success active:scale-[0.98] text-on-surface font-black py-2.5 rounded-xl transition-all uppercase text-[10px] tracking-[0.2em] shadow-xl shadow-primary-container/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label={
+                checkoutFooterCollapsed
+                  ? "Mostrar panel de pago"
+                  : "Ocultar panel de pago"
+              }
+              aria-expanded={!checkoutFooterCollapsed}
+              title={
+                checkoutFooterCollapsed
+                  ? "Mostrar panel de pago"
+                  : "Ocultar panel de pago"
+              }
+              className="absolute -top-5 left-3 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-outline bg-surface text-on-surface-variant shadow-md transition-colors hover:text-on-surface"
             >
-              {isSubmittingOrder ? (
-                <>
-                  <span className="material-symbols-outlined mr-2 animate-spin align-middle">
-                    progress_activity
-                  </span>
-                  Procesando...
-                </>
-              ) : isEditingTableOrder ? (
-                "Actualizar"
+              {checkoutFooterCollapsed ? (
+                <ChevronUp size={20} />
               ) : (
-                "Confirmar"
+                <ChevronDown size={20} />
               )}
             </button>
+            {!checkoutFooterCollapsed && (
+              <div className="max-h-[calc(50vh-1.5rem)] overflow-y-auto custom-sidebar lg:max-h-none lg:overflow-visible">
+                {/* Resumen Numérico */}
+                <div className="space-y-0.5 mb-1.5">
+                  <div className="flex justify-between items-center opacity-60 m-0">
+                    <span className="text-[10px] font-bold uppercase tracking-widest">
+                      Subtotal
+                    </span>
+                    <span className="text-sm font-bold">
+                      $ {formatPrice(itemsSubtotal)}
+                    </span>
+                  </div>
+                  {deliveryMethod === "delivery" &&
+                    deliveryBaseFee !== null && (
+                      <>
+                        <div className="flex justify-between items-center opacity-70">
+                          <span className="text-[10px] font-bold uppercase tracking-widest">
+                            Domicilio
+                          </span>
+                          {deliveryFeeEditControl}
+                        </div>
+                      </>
+                    )}
+
+                  {(paymentMethod === "efectivo" ||
+                    paymentMethod === "dividir") &&
+                    (paidAmount > 0 || assignedTotal > 0) && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+                          {remainingLabel}
+                        </span>
+                        <span
+                          className={`text-lg font-black ${
+                            remaining > 0
+                              ? "text-red-500"
+                              : remaining < 0
+                                ? "text-emerald-500"
+                                : "text-violet-400"
+                          }`}
+                        >
+                          $ {remainingDisplay}
+                        </span>
+                      </div>
+                    )}
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
+                      Total a pagar
+                    </span>
+                    <span className="text-xl font-black text-on-surface tracking-tighter">
+                      $ {formatPrice(totalWithoutTip)}
+                    </span>
+                  </div>
+                  {tipAmount > 0 && (
+                    <div className="flex justify-between items-center text-emerald-300">
+                      <span className="text-[10px] font-bold uppercase tracking-widest">
+                        Propina ({tipPercent}%)
+                      </span>
+                      <span className="text-sm font-bold">
+                        + $ {formatPrice(tipAmount)}
+                      </span>
+                    </div>
+                  )}
+                  {tipAmount > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-violet-500">
+                        Total con propina
+                      </span>
+                      <span className="text-xl font-black text-on-surface tracking-tighter">
+                        $ {formatPrice(total)}
+                      </span>
+                    </div>
+                  )}
+                  {/* Lectura de número */}
+                  {total > 0 && (
+                    <p className="text-[9px] leading-tight text-on-surface uppercase tracking-wider">
+                      {numeroALetras(total)}
+                    </p>
+                  )}
+                </div>
+
+                {/* Observaciones Generales */}
+                <div className="mb-2">
+                  <textarea
+                    rows={1}
+                    value={orderNotes}
+                    onChange={(e) => setOrderNotes(e.target.value)}
+                    placeholder="Observaciones generales..."
+                    className="w-full min-h-10 resize-none rounded-xl border border-outline bg-background px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary/20"
+                  />
+                </div>
+
+                {/* Métodos de Pago */}
+                {paymentMethodsSection}
+
+                {/* Preview de División de Pagos */}
+                {splitPaymentPreview}
+
+                {/* Botón de Acción Principal */}
+                <button
+                  onClick={crearPedidoPOS}
+                  disabled={
+                    isSubmittingOrder ||
+                    cart.length === 0 ||
+                    isCashPaymentBelowTotal ||
+                    (isEditingTableOrder && !hasEditChanges)
+                  }
+                  aria-busy={isSubmittingOrder}
+                  className="w-full bg-primary-container hover:bg-success active:scale-[0.98] text-on-surface font-black py-2.5 rounded-xl transition-all uppercase text-[10px] tracking-[0.2em] shadow-xl shadow-primary-container/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSubmittingOrder ? (
+                    <>
+                      <span className="material-symbols-outlined mr-2 animate-spin align-middle">
+                        progress_activity
+                      </span>
+                      Procesando...
+                    </>
+                  ) : isEditingTableOrder ? (
+                    "Actualizar"
+                  ) : (
+                    "Confirmar"
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -5349,130 +5888,14 @@ const POS = () => {
                       activeProduct.descripcion}
                   </div>
                 )}
-                {(activeProduct?.optionGroups || []).map((group) => {
-                  const selected = optionSelections[group.id];
-                  return (
-                    <div
-                      key={group.id}
-                      className="border-b border-white/10 pb-5 pt-5 last:border-b-0 last:pb-0"
-                    >
-                      <div className="flex flex-col gap-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-semibold text-on-surface">
-                            {group.nombre}
-                          </p>
-                          {group.obligatorio ? (
-                            <span className="rounded-full bg-red-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-red-300">
-                              Obligatorio
-                            </span>
-                          ) : null}
-                          <span className="rounded-full bg-white/5 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-on-surface-variant">
-                            {group.selectionType === "multiple"
-                              ? group.maxSelections
-                                ? `Hasta ${group.maxSelections} opciones`
-                                : "Elige varias"
-                              : "Elige una"}
-                          </span>
-                        </div>
-                        {group.descripcion ? (
-                          <p className="text-xs leading-5 text-on-surface-variant">
-                            {group.descripcion}
-                          </p>
-                        ) : null}
-                        {group.selectionType === "multiple" &&
-                        group.maxSelections ? (
-                          <p className="text-xs text-on-surface-variant">
-                            Selecciona hasta {group.maxSelections} opciones.
-                          </p>
-                        ) : null}
-                      </div>
-                      <div
-                        data-option-group-id={group.id}
-                        className="mt-4 grid gap-2"
-                      >
-                        {group.opciones.map((option) => {
-                          const isSelected =
-                            group.selectionType === "multiple"
-                              ? Array.isArray(selected) &&
-                                selected.includes(option.id)
-                              : selected === option.id;
-                          const reachedMax =
-                            group.selectionType === "multiple" &&
-                            group.maxSelections !== null &&
-                            (Array.isArray(selected) ? selected.length : 0) >=
-                              group.maxSelections &&
-                            !isSelected;
-                          return (
-                            <button
-                              key={option.id}
-                              type="button"
-                              disabled={reachedMax}
-                              onClick={() => {
-                                setOptionSelections((prev) => {
-                                  const next = { ...prev };
-                                  if (group.selectionType === "multiple") {
-                                    const current = Array.isArray(
-                                      prev[group.id],
-                                    )
-                                      ? prev[group.id]
-                                      : [];
-                                    if (current.includes(option.id)) {
-                                      next[group.id] = current.filter(
-                                        (id) => id !== option.id,
-                                      );
-                                    } else {
-                                      next[group.id] = [...current, option.id];
-                                    }
-                                  } else {
-                                    next[group.id] = option.id;
-                                  }
-                                  return next;
-                                });
-                              }}
-                              className={`w-full rounded-[1.5rem] px-4 py-4 text-left transition ${
-                                isSelected
-                                  ? "text-on-surface bg-primary-container/50"
-                                  : reachedMax
-                                    ? "cursor-not-allowed bg-white/[0.02] text-on-surface-variant/40"
-                                    : "bg-white/5 text-on-surface-variant hover:bg-white/10"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-4">
-                                <div className="flex items-center gap-3">
-                                  <span
-                                    className={`inline-flex h-5 w-5 items-center justify-center rounded-full border text-[12px] transition-colors ${
-                                      isSelected
-                                        ? "border-primary-container bg-primary-container text-white"
-                                        : "border-white/20 bg-white/5 text-transparent"
-                                    }`}
-                                  >
-                                    {isSelected ? (
-                                      <span className="material-symbols-outlined leading-none text-white">
-                                        check
-                                      </span>
-                                    ) : null}
-                                  </span>
-                                  <p className="text-sm font-medium line-clamp-1">
-                                    {option.nombre}
-                                  </p>
-                                </div>
-                                {option.precio_extra ? (
-                                  <p className="text-sm text-on-surface-variant">
-                                    +$ {formatPrice(option.precio_extra)}
-                                  </p>
-                                ) : (
-                                  <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-on-surface-variant">
-                                    Incluido
-                                  </span>
-                                )}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
+                {(activeProduct?.optionGroups || []).map((group) => (
+                  <ProductOptionGroup
+                    key={group.id}
+                    group={group}
+                    selections={optionSelections}
+                    setSelections={setOptionSelections}
+                  />
+                ))}
 
                 <div className="mt-5">
                   <label className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-on-surface-variant mb-2">

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { supabase, resolveImageUrl } from "../../../src/lib/supabaseClient";
+import { buildProductOptionGroups } from "../../../src/lib/productOptions";
 import { useCart } from "./CartContext";
 import Carrito from "./Carrito";
 import Checkout from "./Checkout";
@@ -603,7 +604,7 @@ const Shop = () => {
         const productosData = productosRes.data || [];
         const productsItemsMap = {};
         const productsGroupsMap = {};
-        const itemsByGroup = {};
+        const optionItemsByProduct = {};
 
         const getOptionLabel = (item) =>
           item.nombre ||
@@ -637,54 +638,6 @@ const Shop = () => {
         const getOptionTags = (item) =>
           item.tags ?? item.tag ?? item.categories ?? null;
 
-        const normalizeGroup = (group, itemsForGroup = []) => {
-          const isRequired =
-            group.is_required ??
-            group.es_requerido ??
-            group.required ??
-            group.isRequired ??
-            false;
-          const selectionType =
-            group.selection_type ??
-            group.selectionType ??
-            group.type ??
-            group.selection ??
-            "single";
-
-          return {
-            id: group.id,
-            name:
-              group.name ?? group.nombre ?? group.title ?? `Grupo ${group.id}`,
-            nombre:
-              group.name ?? group.nombre ?? group.title ?? `Grupo ${group.id}`,
-            description:
-              group.description ?? group.descripcion ?? group.hint ?? "",
-            descripcion:
-              group.description ?? group.descripcion ?? group.hint ?? "",
-            is_required: Boolean(isRequired),
-            es_requerido: Boolean(isRequired),
-            selection_type: selectionType,
-            selectionType,
-            max_selections: Number(group.max_selections) || null,
-            maxSelections: Number(group.max_selections) || null,
-            order_index: Number(
-              group.order_index ?? group.orderIndex ?? group.order ?? 0,
-            ),
-            orderIndex: Number(
-              group.order_index ?? group.orderIndex ?? group.order ?? 0,
-            ),
-            opciones: (itemsForGroup || [])
-              .map((item) => ({
-                ...item,
-                nombre: getOptionLabel(item),
-                precioExtra: getOptionPrice(item),
-                obligatorio: getOptionMandatory(item),
-                order: Number(item.order_index ?? item.order ?? 0),
-              }))
-              .sort((a, b) => (a.order || 0) - (b.order || 0)),
-          };
-        };
-
         const mapearProductos = () =>
           productosData.map((producto) => {
             const categoria = categoriasMapeadas.find(
@@ -701,11 +654,10 @@ const Shop = () => {
               }),
             );
 
-            const grupos = (productsGroupsMap[producto.id] || [])
-              .map((group) =>
-                normalizeGroup(group, itemsByGroup[group.id] || []),
-              )
-              .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+            const grupos = buildProductOptionGroups(
+              productsGroupsMap[producto.id] || [],
+              optionItemsByProduct[producto.id] || [],
+            );
 
             return {
               id: producto.id,
@@ -767,11 +719,12 @@ const Shop = () => {
               );
             } else {
               (itemsRes.data || []).forEach((item) => {
+                if (!optionItemsByProduct[item.product_id]) {
+                  optionItemsByProduct[item.product_id] = [];
+                }
+                optionItemsByProduct[item.product_id].push(item);
                 if (item.option_group_id) {
-                  if (!itemsByGroup[item.option_group_id]) {
-                    itemsByGroup[item.option_group_id] = [];
-                  }
-                  itemsByGroup[item.option_group_id].push(item);
+                  return;
                 } else {
                   if (!productsItemsMap[item.product_id]) {
                     productsItemsMap[item.product_id] = [];

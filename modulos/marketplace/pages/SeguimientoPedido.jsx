@@ -1285,6 +1285,9 @@ const SeguimientoPedido = ({ onCerrar }) => {
                       }}
                     >
                       •{" "}
+                      {typeof opt === "object" && opt?.grupo
+                        ? `${opt.grupo}: `
+                        : ""}
                       {typeof opt === "string"
                         ? opt
                         : opt?.nombre || opt?.name || "Opción"}

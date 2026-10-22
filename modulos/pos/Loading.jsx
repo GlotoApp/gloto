@@ -6,7 +6,7 @@ export { default as SectionLoading } from "./SubLoading";
 
 export const Loading = () => {
   return (
-    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background">
+    <div className="pos-loading-overlay fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background">
       <div className="relative flex items-center justify-center">
         <img
           src="/logo.png"

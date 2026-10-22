@@ -18,15 +18,23 @@ import {
   Banknote,
   Bell,
   LogOut,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 import { useEmployeeAccess } from "../../src/components/EmployeeAccessContext";
 import { getEmployeePermissionForPath } from "../../src/lib/employeePermissions";
+import { useAuth } from "../../src/components/AuthContext";
+import {
+  cacheColorMode,
+  getStoredColorMode,
+} from "../../src/lib/colorMode";
 
 const Sidebar = ({
   isExpanded,
   toggleSidebar,
+  onColorModeChange,
   onMouseEnter,
   onMouseLeave,
   overlayClassName = "",
@@ -34,6 +42,7 @@ const Sidebar = ({
   const location = useLocation();
   const navigate = useNavigate();
   const navRef = useRef(null);
+  const { user } = useAuth();
   const { isEmployee, permissions } = useEmployeeAccess();
   const canAccessPath = (path) => {
     if (!isEmployee) return true;
@@ -57,6 +66,9 @@ const Sidebar = ({
   const [inventoryEnabled, setInventoryEnabled] = useState(false);
   const [tablesEnabled, setTablesEnabled] = useState(true);
   const [ticketUsage, setTicketUsage] = useState(null);
+  const [colorMode, setColorMode] = useState(getStoredColorMode);
+  const [colorModeReady, setColorModeReady] = useState(false);
+  const [savingColorMode, setSavingColorMode] = useState(false);
   const isOrdersActive = location.pathname.startsWith("/pos/ordenes");
   const accountPlanStyles = planName.toLowerCase().includes("premium")
     ? {
@@ -85,6 +97,85 @@ const Sidebar = ({
   useEffect(() => {
     if (!isExpanded) setUserMenuOpen(false);
   }, [isExpanded]);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!user?.id) {
+      setColorModeReady(true);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    setColorModeReady(false);
+    const cachedMode = cacheColorMode(getStoredColorMode(user.id), user.id);
+    setColorMode(cachedMode);
+    onColorModeChange?.(cachedMode);
+    const loadColorMode = async () => {
+      try {
+        const { data: profile, error } = await supabase
+          .from("profiles")
+          .select("color_mode")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (!isMounted) return;
+        if (error) {
+          console.error("No se pudo cargar la apariencia del usuario:", error);
+          setColorModeReady(true);
+          return;
+        }
+        if (profile?.color_mode === "light" || profile?.color_mode === "dark") {
+          const savedMode = cacheColorMode(profile.color_mode, user.id);
+          setColorMode(savedMode);
+          onColorModeChange?.(savedMode);
+        }
+        setColorModeReady(true);
+      } catch (error) {
+        if (!isMounted) return;
+        console.error("Error cargando la apariencia del usuario:", error);
+        setColorModeReady(true);
+      }
+    };
+
+    loadColorMode();
+    return () => {
+      isMounted = false;
+    };
+  }, [onColorModeChange, user?.id]);
+
+  const handleColorModeToggle = async () => {
+    if (!user?.id || !colorModeReady || savingColorMode) return;
+    const nextMode = colorMode === "dark" ? "light" : "dark";
+    const cachedMode = cacheColorMode(nextMode, user.id);
+    setColorMode(cachedMode);
+    onColorModeChange?.(cachedMode);
+    setSavingColorMode(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .update({ color_mode: nextMode })
+        .eq("id", user.id)
+        .select("id")
+        .maybeSingle();
+      if (error || !data) {
+        console.error(
+          "No se pudo guardar la apariencia del usuario:",
+          error || "No se actualizó ningún perfil para el usuario actual.",
+        );
+        window.alert(
+          "El tema cambió en este dispositivo, pero no se pudo guardar en tu perfil. Intenta nuevamente.",
+        );
+      }
+    } catch (error) {
+      console.error("Error guardando la apariencia del usuario:", error);
+      window.alert(
+        "El tema cambió en este dispositivo, pero no se pudo guardar en tu perfil. Intenta nuevamente.",
+      );
+    } finally {
+      setSavingColorMode(false);
+    }
+  };
 
   const menuItems = [
     { name: "POS", path: "/pos", icon: Plus },
@@ -528,7 +619,7 @@ const Sidebar = ({
           isExpanded ? "w-64" : "w-20"
         }`}
       >
-        <div className="h-10 flex items-center px-5 pt-10 shrink-0">
+        <div className="h-10 flex items-center px-1 pt-10 shrink-0">
           <div
             className={`relative z-50 bg-background flex items-center w-full pb-2 ${
               isExpanded
@@ -567,6 +658,11 @@ const Sidebar = ({
                     ? "flex-1 truncate opacity-100 translate-x-0"
                     : "flex-none w-0 opacity-0 -translate-x-4 pointer-events-none overflow-hidden"
                 }`}
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
               >
                 {businessName || "Gloto"}
               </span>
@@ -575,7 +671,8 @@ const Sidebar = ({
             {isExpanded && (
               <button
                 onClick={toggleSidebar}
-                className="shrink-0 p-2 rounded-default hover:bg-surface-hover text-on-surface-variant hover:text-primary transition-all animate-in fade-in zoom-in-95 duration-200"
+                aria-label="Cerrar menú"
+                className="shrink-0 rounded-default p-2 text-on-surface-variant transition-all hover:bg-surface-hover hover:text-primary animate-in fade-in zoom-in-95 duration-200"
               >
                 <X size={18} />
               </button>
@@ -1213,6 +1310,34 @@ const Sidebar = ({
               </button>
             </div>
             )}
+
+            <div className={`mb-2 ${isExpanded ? "" : "flex justify-center"}`}>
+              <button
+                type="button"
+                onClick={handleColorModeToggle}
+                disabled={!colorModeReady || savingColorMode || !user?.id}
+                aria-label={
+                  colorMode === "dark"
+                    ? "Cambiar a modo claro"
+                    : "Cambiar a modo oscuro"
+                }
+                title={
+                  colorMode === "dark"
+                    ? "Cambiar a modo claro"
+                    : "Cambiar a modo oscuro"
+                }
+                className={`relative flex h-10 w-full items-center rounded-default transition-colors hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 ${isExpanded ? "gap-3 px-3" : "w-10 justify-center"}`}
+              >
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center text-on-surface-variant">
+                  {colorMode === "dark" ? <Sun size={19} /> : <Moon size={19} />}
+                </span>
+                {isExpanded && (
+                  <span className="truncate text-left font-label-caps text-xs font-bold uppercase tracking-tight text-on-surface-variant">
+                    Apariencia: {colorMode === "dark" ? "Oscuro" : "Claro"}
+                  </span>
+                )}
+              </button>
+            </div>
 
             <button
               type="button"

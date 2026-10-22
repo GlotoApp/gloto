@@ -29,8 +29,10 @@ const Layout = () => {
   const location = useLocation();
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
+  const [colorMode, setColorMode] = useState("dark");
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
   const isPosRoute = location.pathname === "/pos";
+  const isMesasRoute = location.pathname === "/pos/mesas";
 
   const toggleSidebar = () => {
     if (isSidebarPinned || isSidebarHovered) {
@@ -64,7 +66,10 @@ const Layout = () => {
   const sidebarPushesContent = isPosRoute && isSidebarExpanded;
 
   return (
-    <div className="bg-neutral-950 min-h-screen flex font-manrope selection:bg-violet-500/30 text-white relative overflow-x-hidden">
+    <div
+      className="pos-theme bg-neutral-950 min-h-screen flex font-manrope selection:bg-violet-500/30 text-white relative overflow-x-hidden"
+      data-theme={colorMode}
+    >
       <div className="z-50 fixed top-0 left-0 h-screen transition-all duration-300">
         <Sidebar
           isExpanded={isSidebarExpanded}
@@ -72,11 +77,14 @@ const Layout = () => {
           toggleSidebar={toggleSidebar}
           onMouseEnter={handleSidebarMouseEnter}
           onMouseLeave={handleSidebarMouseLeave}
+          onColorModeChange={setColorMode}
         />
       </div>
 
       <main
-        className={`flex-1 p-0 overflow-y-auto min-h-screen ml-20 w-[calc(100%-5rem)] transition-all duration-300 ${
+        className={`flex-1 p-0 ${
+          isMesasRoute ? "h-[100dvh] overflow-hidden" : "overflow-y-auto min-h-screen"
+        } ml-20 w-[calc(100%-5rem)] transition-all duration-300 ${
           sidebarPushesContent
             ? "lg:ml-64 lg:w-[calc(100%-16rem)]"
             : ""

@@ -3,6 +3,13 @@ import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, Minus, Plus } from "lucide-react";
 import { supabase } from "../../../src/lib/supabaseClient";
+import {
+  buildProductOptionGroups,
+  clearDependentProductOptionSelections,
+  getMissingProductOptionGroups,
+  getProductOptionsExtraPrice,
+  getSelectedProductOptions,
+} from "../../../src/lib/productOptions";
 import { useCart } from "./CartContext";
 
 const fmt = (n) =>
@@ -127,13 +134,30 @@ const ProductoDetalle = ({
             selectionType,
             maxSelections:
               Number(group.max_selections ?? group.maxSelections) || null,
+            minSelections:
+              group.min_selections == null
+                ? isRequired
+                  ? 1
+                  : 0
+                : Number(group.min_selections),
+            priceMode:
+              group.price_mode ?? group.priceMode ?? "sum",
+            maxExtraPrice:
+              group.max_extra_price == null &&
+              group.maxExtraPrice == null
+                ? null
+                : Number(group.max_extra_price ?? group.maxExtraPrice),
             order: Number(
               group.order_index ?? group.orderIndex ?? group.order ?? 0,
             ),
             opciones: rawOptions
               .map((item) => ({
                 ...normalizeOptionItem(item),
+                precio_extra: Number(
+                  item.precio_extra ?? item.precioExtra ?? 0,
+                ),
                 order: Number(item.order_index ?? item.order ?? 0),
+                grupos: mapGroups(item.grupos || item.childGroups || []),
               }))
               .sort((a, b) => a.order - b.order),
           };
@@ -164,29 +188,10 @@ const ProductoDetalle = ({
           return [];
         }
 
-        const itemsByGroup = {};
-        (itemsRes.data || []).forEach((item) => {
-          const groupKey =
-            item.option_group_id ??
-            item.group_id ??
-            item.product_option_group_id ??
-            item.optionGroupId ??
-            null;
-          if (!groupKey) return;
-          if (!itemsByGroup[groupKey]) {
-            itemsByGroup[groupKey] = [];
-          }
-          itemsByGroup[groupKey].push(item);
-        });
-
-        const fallbackGroups = (groupsRes.data || []).map((group) => ({
-          ...group,
-          opciones: (itemsByGroup[group.id] || []).map((item) => ({
-            ...item,
-          })),
-        }));
-
-        return fallbackGroups;
+        return buildProductOptionGroups(
+          groupsRes.data || [],
+          itemsRes.data || [],
+        );
       } catch (error) {
         console.error("Error en fallback de grupos:", error);
         return [];
@@ -247,22 +252,22 @@ const ProductoDetalle = ({
   if (!producto) return null;
 
   const modoGrupos = grupos.length > 0;
+  const hasAdvancedGroups = (optionGroups) =>
+    optionGroups.some(
+      (group) =>
+        group.minSelections > 1 ||
+        group.priceMode === "highest" ||
+        group.maxExtraPrice !== null ||
+        group.opciones.some(
+          (option) =>
+            (option.grupos || []).length > 0 ||
+            hasAdvancedGroups(option.grupos || []),
+        ),
+    );
+  const renderAdvancedOptions = hasAdvancedGroups(grupos);
 
   const selectedOptions = modoGrupos
-    ? grupos.flatMap((group) => {
-        const selected = selecciones[group.id];
-        if (!selected) return [];
-
-        if (group.selectionType === "multiple") {
-          return (Array.isArray(selected) ? selected : [selected])
-            .map((id) => group.opciones.find((opt) => opt.id === id))
-            .filter(Boolean);
-        }
-
-        return group.opciones.find((opt) => opt.id === selected)
-          ? [group.opciones.find((opt) => opt.id === selected)]
-          : [];
-      })
+    ? getSelectedProductOptions(grupos, selecciones)
     : [];
 
   const variante = modoGrupos
@@ -270,14 +275,14 @@ const ProductoDetalle = ({
       ? {
           id: selectedOptions.map((opt) => opt.id).join("__"),
           nombre: selectedOptions.map((opt) => opt.nombre).join(" · "),
-          precioExtra: selectedOptions.reduce(
-            (sum, opt) => sum + (Number(opt.precioExtra) || 0),
-            0,
-          ),
+          precioExtra: getProductOptionsExtraPrice(grupos, selecciones),
           opciones: selectedOptions.map((opt) => ({
             id: opt.id,
             nombre: opt.nombre,
-            precioExtra: Number(opt.precioExtra) || 0,
+            precioExtra: Number(opt.precio_extra ?? opt.precioExtra) || 0,
+            grupoId: opt.grupoId,
+            priceMode: opt.priceMode,
+            maxExtraPrice: opt.maxExtraPrice,
           })),
         }
       : null
@@ -303,19 +308,11 @@ const ProductoDetalle = ({
     ? grupos.some((group) => group.obligatorio)
     : opciones.some((opt) => opt.obligatorio);
 
+  const missingRequiredGroups = modoGrupos
+    ? getMissingProductOptionGroups(grupos, selecciones)
+    : [];
   const requiereSeleccionarVariante = modoGrupos
-    ? grupos.some((group) => {
-        if (!group.obligatorio) return false;
-
-        const selected = selecciones[group.id];
-        if (!selected) return true;
-
-        if (group.selectionType === "multiple") {
-          return !Array.isArray(selected) || selected.length === 0;
-        }
-
-        return false;
-      })
+    ? missingRequiredGroups.length > 0
     : tieneOpcionesObligatorias && varianteId === null;
 
   // Clave exacta que ocupará esta combinación de variante + notas en el
@@ -342,6 +339,212 @@ const ProductoDetalle = ({
     limiteAlcanzado ||
     cantidadAgregada <= 0 ||
     cantidadAgregada > restanteParaAgregar;
+
+  const renderOptionGroup = (group, depth = 0) => {
+    const selectedValue = selecciones[group.id];
+    const selectedValues = Array.isArray(selectedValue)
+      ? selectedValue
+      : selectedValue
+        ? [selectedValue]
+        : [];
+    const helperText =
+      group.selectionType === "multiple"
+        ? `${group.minSelections ? `Mínimo ${group.minSelections} · ` : ""}${
+            group.maxSelections
+              ? `Hasta ${group.maxSelections}`
+              : "Selecciona varias"
+          }`
+        : "Elige una";
+
+    return (
+      <div
+        key={group.id}
+        data-option-group-id={group.id}
+        style={{
+          marginBottom: depth > 0 ? "8px" : "14px",
+          marginLeft: `${Math.min(depth, 3) * 12}px`,
+          padding: depth > 0 ? "9px 10px" : "12px",
+          borderRadius: depth > 0 ? "12px" : "14px",
+          border:
+            depth > 0 ? "none" : "none",
+          borderLeft:
+            depth > 0 ? "2px solid rgba(167,139,250,0.65)" : "none",
+          background:
+            depth > 0 ? "rgba(124,58,237,0.06)" : "rgba(255,255,255,0.03)",
+        }}
+      >
+        <div style={{ marginBottom: depth > 0 ? "7px" : "10px" }}>
+          {depth > 0 ? (
+            <span
+              style={{
+                display: "block",
+                marginBottom: "4px",
+                color: "#c4b5fd",
+                fontSize: "9px",
+                fontWeight: 700,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+              }}
+            >
+              Personaliza esta opción
+            </span>
+          ) : null}
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "6px",
+              alignItems: "center",
+            }}
+          >
+            <p style={{ fontSize: depth > 0 ? "13px" : "14px", fontWeight: 700, margin: 0 }}>
+              {group.nombre}
+            </p>
+            {group.minSelections > 0 ? (
+              <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-[9px] font-bold text-amber-200">
+                Obligatorio
+              </span>
+            ) : null}
+            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[9px]">
+              {helperText}
+            </span>
+            {group.priceMode === "highest" ? (
+              <span className="rounded-full bg-violet-400/10 px-2.5 py-1 text-[10px] text-violet-200">
+                Se cobra el precio más alto
+              </span>
+            ) : null}
+          </div>
+          {group.descripcion ? (
+            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.65)", margin: "10px 0 0" }}>
+              {group.descripcion}
+            </p>
+          ) : null}
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              depth > 0 ? "repeat(auto-fit, minmax(120px, 1fr))" : "1fr",
+            gap: "6px",
+          }}
+        >
+          {group.opciones.map((option) => {
+            const isSelected = selectedValues.includes(option.id);
+            const reachedMax =
+              group.selectionType === "multiple" &&
+              group.maxSelections !== null &&
+              selectedValues.length >= group.maxSelections &&
+              !isSelected;
+            return (
+              <div key={option.id}>
+                <button
+                  type="button"
+                  aria-pressed={isSelected}
+                  disabled={reachedMax}
+                  onClick={() =>
+                    setSelecciones((previous) => {
+                      const current = previous[group.id];
+                      const values = Array.isArray(current)
+                        ? current
+                        : current
+                          ? [current]
+                          : [];
+                      if (group.selectionType === "multiple") {
+                        const isRemoving = values.includes(option.id);
+                        const cleared = isRemoving
+                          ? clearDependentProductOptionSelections(
+                              previous,
+                              [option],
+                            )
+                          : { ...previous };
+                        cleared[group.id] = isRemoving
+                          ? values.filter((id) => id !== option.id)
+                          : [...values, option.id];
+                        return cleared;
+                      }
+                      const isRemoving = values.includes(option.id);
+                      const optionsToClear = values
+                        .map((id) =>
+                          group.opciones.find((item) => item.id === id),
+                        )
+                        .filter((item) => item && (isRemoving || item.id !== option.id));
+                      const cleared = clearDependentProductOptionSelections(
+                        previous,
+                        optionsToClear,
+                      );
+                      return {
+                        ...cleared,
+                        [group.id]: isRemoving ? null : option.id,
+                      };
+                    })
+                  }
+                  style={{
+                    width: "100%",
+                    background: isSelected
+                      ? depth > 0
+                        ? "rgba(124,58,237,0.18)"
+                        : "linear-gradient(135deg, rgba(124,58,237,0.22), rgba(124,58,237,0.12))"
+                      : depth > 0
+                        ? "rgba(0,0,0,0.22)"
+                        : "#090909",
+                    border: isSelected
+                      ? `1px solid ${depth > 0 ? "rgba(167,139,250,0.7)" : "#7c3aed"}`
+                      : `1px solid ${depth > 0 ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.10)"}`,
+                    color: isSelected ? "#fff" : "rgba(255,255,255,0.92)",
+                    borderRadius: depth > 0 ? "10px" : "16px",
+                    padding: depth > 0 ? "8px 9px" : "12px 14px",
+                    opacity: reachedMax ? 0.45 : 1,
+                    cursor: reachedMax ? "not-allowed" : "pointer",
+                    textAlign: "left",
+                    display: "flex",
+                    flexDirection: depth > 0 ? "column" : "row",
+                    alignItems: depth > 0 ? "flex-start" : "center",
+                    justifyContent: depth > 0 ? "flex-start" : "space-between",
+                    gap: depth > 0 ? "5px" : "14px",
+                  }}
+                >
+                  <span style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: depth > 0 ? "16px" : "18px",
+                        height: depth > 0 ? "16px" : "18px",
+                        borderRadius: "999px",
+                        border: isSelected
+                          ? "1px solid #7c3aed"
+                          : "1px solid rgba(255,255,255,0.25)",
+                        background: isSelected ? "#7c3aed" : "transparent",
+                        color: "#fff",
+                        fontSize: "12px",
+                        fontWeight: 800,
+                      }}
+                    >
+                      {isSelected ? "✓" : ""}
+                    </span>
+                    <span style={{ fontSize: depth > 0 ? "12px" : "14px", fontWeight: 700 }}>
+                      {option.nombre}
+                    </span>
+                  </span>
+                  <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.75)" }}>
+                    {option.precio_extra ?? option.precioExtra
+                      ? `+${fmt(option.precio_extra ?? option.precioExtra)}`
+                      : "Incluido"}
+                  </span>
+                </button>
+                {isSelected
+                  ? (option.grupos || []).map((childGroup) =>
+                      renderOptionGroup(childGroup, depth + 1),
+                    )
+                  : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   const handleAgregar = () => {
     if (noSePuedeAgregar || requiereSeleccionarVariante) return;
@@ -518,7 +721,9 @@ const ProductoDetalle = ({
           )}
 
           {/* Grupos de opciones (tamaños, endulzante, etc.) */}
-          {grupos.length > 0 ? (
+          {renderAdvancedOptions ? (
+            grupos.map((group) => renderOptionGroup(group))
+          ) : grupos.length > 0 ? (
             grupos.map((group) => {
               const seleccionActual = selecciones[group.id];
               const selectedValues = Array.isArray(seleccionActual)
@@ -526,8 +731,6 @@ const ProductoDetalle = ({
                 : seleccionActual
                   ? [seleccionActual]
                   : [];
-              const helperText = `${group.selectionType === "multiple" ? group.maxSelections ? `Selecciona hasta ${group.maxSelections}` : "Selecciona varias" : "Elige una"}${group.descripcion ? ` · ${group.descripcion}` : ""}`;
-
               return (
                 <div
                   key={group.id}
@@ -597,7 +800,7 @@ const ProductoDetalle = ({
                         style={{
                           fontSize: "12px",
                           color: "rgba(255,255,255,0.65)",
-                          margin: "10px 0 0",
+                          margin: "6px 0 0",
                         }}
                       >
                         {group.descripcion}
@@ -683,7 +886,7 @@ const ProductoDetalle = ({
                             style={{
                               display: "flex",
                               alignItems: "center",
-                              gap: "12px",
+                              gap: "8px",
                             }}
                           >
                             <span
@@ -753,7 +956,11 @@ const ProductoDetalle = ({
                     key={v.id}
                     type="button"
                     aria-pressed={activo}
-                    onClick={() => setVarianteId(v.id)}
+                    onClick={() =>
+                      setVarianteId((currentId) =>
+                        currentId === v.id ? null : v.id,
+                      )
+                    }
                     style={{
                       background: activo ? "#7c3aed" : "#080808",
                       border: activo

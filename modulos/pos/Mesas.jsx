@@ -1,16 +1,17 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../../src/lib/supabaseClient";
+import { buildProductOptionGroups } from "../../src/lib/productOptions";
 import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 import { SubLoading } from "./Loading";
 import { useAuth } from "../../src/components/AuthContext";
 import {
   X,
   RotateCcw,
+  Shrink,
   CheckCircle2,
   Plus,
-  Search,
   ChefHat,
   Minus,
   Edit3,
@@ -20,6 +21,10 @@ import {
   Phone,
   Mail,
   Clock,
+  LayoutGrid,
+  Pencil,
+  Trash2,
+  Move,
 } from "lucide-react";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -59,6 +64,71 @@ const ESTADO = {
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 const fmt = (n) => `$${Number(n).toLocaleString("es-CO")}`;
+const FLOOR_CANVAS_WIDTH = 1600;
+const FLOOR_CANVAS_HEIGHT = 1000;
+const FLOOR_TABLE_SHAPES = ["round", "square", "rectangle"];
+const FLOOR_CHAIR_SIZE = 12;
+const FLOOR_CHAIR_GAP = 12;
+const FLOOR_CHAIR_OUTSET = FLOOR_CHAIR_GAP + FLOOR_CHAIR_SIZE;
+const getFloorChairPositions = (shape, count) => {
+  const chairs = Math.max(0, Math.floor(Number(count) || 0));
+  if (!chairs) return [];
+
+  const isMobile = window.innerWidth < 640;
+  const width = shape === "rectangle" ? (isMobile ? 108 : 128) : isMobile ? 78 : 92;
+  const height = shape === "rectangle" ? (isMobile ? 68 : 76) : isMobile ? 78 : 92;
+
+  if (shape === "round") {
+    const radius = width / 2 + FLOOR_CHAIR_GAP + FLOOR_CHAIR_SIZE / 2;
+    return Array.from({ length: chairs }, (_, index) => {
+      const angle = (2 * Math.PI * index) / chairs - Math.PI / 2;
+      return {
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius,
+      };
+    });
+  }
+
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  const edgeOffset = FLOOR_CHAIR_GAP + FLOOR_CHAIR_SIZE / 2;
+  const perimeter = 4 * (halfWidth + halfHeight);
+
+  return Array.from({ length: chairs }, (_, index) => {
+    let distance = (perimeter * (index + 0.5)) / chairs;
+    if (distance < width) {
+      return { x: -halfWidth + distance, y: -halfHeight - edgeOffset };
+    }
+    distance -= width;
+    if (distance < height) {
+      return { x: halfWidth + edgeOffset, y: -halfHeight + distance };
+    }
+    distance -= height;
+    if (distance < width) {
+      return { x: halfWidth - distance, y: halfHeight + edgeOffset };
+    }
+    distance -= width;
+    return { x: -halfWidth - edgeOffset, y: halfHeight - distance };
+  });
+};
+const getFloorTableGuestCount = (table) =>
+  Math.max(
+    0,
+    Math.floor(Number(table.order?.personas ?? table.guest_count) || 0),
+  );
+const getNextFloorTableShape = (shape) => {
+  const currentIndex = FLOOR_TABLE_SHAPES.indexOf(shape);
+  return FLOOR_TABLE_SHAPES[(currentIndex + 1) % FLOOR_TABLE_SHAPES.length];
+};
+const getFloorGridPosition = (index) => {
+  const columns = window.innerWidth < 640 ? 3 : 5;
+  const column = index % columns;
+  const row = Math.floor(index / columns);
+  return {
+    position_x: columns === 3 ? 17 + column * 33 : 12 + column * 19,
+    position_y: Math.min(90, 20 + row * 24),
+  };
+};
 const calc = (c) =>
   c.reduce(
     (s, i) =>
@@ -108,22 +178,6 @@ const getLocalDateKey = (date = new Date()) => {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-};
-
-const formatReservationDateTime = (date, time) => {
-  if (!date || !time) return "";
-
-  const reservationDate = new Date(`${date}T${time}`);
-  if (Number.isNaN(reservationDate.getTime())) return `${date} · ${time}`;
-
-  return reservationDate.toLocaleString("es-CO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
 };
 
 const getPaymentMethodsFromMetadata = (metadata) => {
@@ -177,56 +231,6 @@ const writeProductsCache = (businessId, products) => {
   } catch (error) {
     console.warn("No se pudo guardar el caché de productos de mesas:", error);
   }
-};
-
-// Normalizar grupos de opciones (igual que en POS.jsx)
-const normalizeOptionGroup = (group, items = []) => {
-  const isRequired =
-    group.is_required ?? group.es_requerido ?? group.required ?? false;
-  const selectionType =
-    group.selection_type ?? group.selectionType ?? group.type ?? "single";
-
-  const opciones = (items || [])
-    .map((item) => ({
-      id: item.id,
-      nombre:
-        item.nombre ||
-        item.name ||
-        item.title ||
-        item.label ||
-        item.option_name ||
-        item.option ||
-        item.text ||
-        item.value ||
-        `Opción ${item.id}`,
-      precio_extra:
-        Number(
-          item.precio_extra ??
-            item.price ??
-            item.price_extra ??
-            item.extra_price ??
-            0,
-        ) || 0,
-      obligatorio:
-        item.es_opcion_obligatoria ??
-        item.mandatory ??
-        item.is_mandatory ??
-        item.required ??
-        item.is_required ??
-        false,
-      order: Number(item.order_index ?? item.order ?? 0),
-    }))
-    .sort((a, b) => a.order - b.order);
-
-  return {
-    id: group.id,
-    nombre: group.name || group.nombre || group.title || `Grupo ${group.id}`,
-    descripcion: group.description || group.descripcion || group.hint || "",
-    obligatorio: Boolean(isRequired),
-    selectionType,
-    order: Number(group.order_index ?? group.orderIndex ?? group.order ?? 0),
-    opciones,
-  };
 };
 
 const initializeOptionSelections = (product) => {
@@ -301,16 +305,33 @@ const formatStoredOption = (option) => {
             0,
         )
       : 0;
-  return extraPrice > 0 ? `${label} (+$${fmt(extraPrice).slice(1)})` : label;
+  const group =
+    typeof option === "object"
+      ? option.grupo || option.grupoNombre || ""
+      : "";
+  const displayLabel = group ? `${group}: ${label}` : label;
+  return extraPrice > 0
+    ? `${displayLabel} (+$${fmt(extraPrice).slice(1)})`
+    : displayLabel;
 };
 
 const getCatalogOption = (products, productId, option) => {
   const optionId = typeof option === "object" ? option?.id : option;
   if (!optionId) return null;
   const product = products.find((item) => item.id === productId);
-  return (product?.optionGroups || [])
-    .flatMap((group) => group.opciones || [])
-    .find((catalogOption) => String(catalogOption.id) === String(optionId));
+  const findOption = (groups) => {
+    for (const group of groups || []) {
+      for (const option of group.opciones || []) {
+        if (String(option.id) === String(optionId)) {
+          return { ...option, grupo: group.nombre };
+        }
+        const childOption = findOption(option.grupos || []);
+        if (childOption) return childOption;
+      }
+    }
+    return null;
+  };
+  return findOption(product?.optionGroups || []);
 };
 
 const formatOrderOption = (option, products, productId) => {
@@ -343,110 +364,6 @@ function useTimer(startTime) {
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
-}
-
-// ─── Mesa Tile ────────────────────────────────────────────────────────────────
-function MesaTile({ mesa, onOpen }) {
-  const cfg = ESTADO[mesa.estado];
-  const timer = useTimer(mesa.startTime);
-  const total = calc(mesa.comanda);
-  const isOcc = mesa.estado === "ocupada";
-  const isSuc = mesa.estado === "sucio";
-
-  return (
-    <button
-      onClick={() => onOpen(mesa)}
-      className="relative flex flex-col rounded-2xl overflow-hidden transition-transform duration-100 active:scale-[0.95] focus:outline-none text-left"
-      style={{
-        background: `linear-gradient(145deg, ${cfg.glow}, #0c0c0c)`,
-        border: `1.5px solid ${cfg.border}`,
-        minHeight: 130,
-      }}
-    >
-      {/* Color bar top */}
-      <div
-        className="h-[3px] w-full"
-        style={{ background: cfg.color, opacity: isOcc ? 1 : 0.4 }}
-      />
-
-      {/* Pulse dot */}
-      {(isSuc || mesa.estado === "reserva") && (
-        <span className="absolute top-3 right-3 flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
-        </span>
-      )}
-
-      <div className="flex flex-col flex-1 p-3 gap-2">
-        {/* Number row */}
-        <div className="flex items-start justify-between">
-          <span className="text-2xl font-black tracking-tighter text-white leading-none">
-            {mesa.numero}
-          </span>
-          <span
-            className="text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md"
-            style={{ background: `${cfg.color}22`, color: cfg.color }}
-          >
-            {cfg.label}
-          </span>
-        </div>
-
-        {/* Info */}
-        <div className="flex-1 flex flex-col justify-end gap-1">
-          {mesa.reserva?.nombre && (
-            <span className="truncate text-[10px] font-bold text-slate-300">
-              {mesa.reserva.nombre}
-            </span>
-          )}
-          {mesa.estado === "reserva" &&
-            (mesa.reserva?.fecha || mesa.reserva?.hora) && (
-              <span className="flex items-center gap-1 text-[9px] font-bold text-blue-300">
-                <Calendar size={9} />
-                {formatReservationDateTime(
-                  mesa.reserva.fecha,
-                  mesa.reserva.hora,
-                ) || `${mesa.reserva.fecha || ""} · ${mesa.reserva.hora || ""}`}
-              </span>
-            )}
-          {mesa.estado === "reserva" && mesa.reserva?.personas > 0 && (
-            <span className="flex items-center gap-1 text-[9px] font-bold text-slate-500">
-              <Users size={9} />
-              {mesa.reserva.personas} persona
-              {mesa.reserva.personas !== 1 && "s"}
-            </span>
-          )}
-          {isOcc && (
-            <>
-              <div className="flex items-center gap-1 text-slate-500">
-                <Users size={9} />
-                <span className="text-[9px] font-bold">
-                  {mesa.personas} persona{mesa.personas !== 1 && "s"}
-                </span>
-              </div>
-              <div className="text-[9px] font-mono text-slate-600 tabular-nums">
-                {timer}
-              </div>
-            </>
-          )}
-          {isSuc && (
-            <span className="text-[9px] font-black text-red-500 uppercase tracking-wide">
-              Limpiar
-            </span>
-          )}
-          {mesa.estado === "libre" && (
-            <span className="text-[9px] text-slate-700 font-bold">
-              Disponible
-            </span>
-          )}
-        </div>
-
-        {/* Total */}
-        {total > 0 && (
-          <div className="text-sm font-black text-white">{fmt(total)}</div>
-        )}
-      </div>
-    </button>
-  );
 }
 
 // ─── Panel Body ───────────────────────────────────────────────────────────────
@@ -548,6 +465,13 @@ function PanelBody({
   };
 
   const handleEditarEnPOS = () => {
+    if (mesa.isFloorTable) {
+      navigate("/pos", {
+        state: { mesaNueva: String(mesa.numero) },
+      });
+      return;
+    }
+
     const payload = {
       mesa: String(mesa.numero),
       numero: String(mesa.numero),
@@ -829,7 +753,13 @@ function PanelBody({
                   {personas}
                 </span>
                 <button
-                  onClick={() => setPersonas((p) => Math.min(12, p + 1))}
+                  onClick={() =>
+                    setPersonas((p) =>
+                      mesa.isFloorTable
+                        ? p + 1
+                        : Math.min(12, p + 1),
+                    )
+                  }
                   className="w-11 h-11 rounded-full bg-white/8 active:bg-white/20 flex items-center justify-center text-white"
                 >
                   <Plus size={14} />
@@ -1160,12 +1090,57 @@ export default function MesasPOS() {
   const [mesas, setMesas] = useState([]);
   const [products, setProducts] = useState([]);
   const [selected, setSelected] = useState(null);
-  const [filter, setFilter] = useState("all");
-  const [search, setSearch] = useState("");
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
   const [businessId, setBusinessId] = useState(null);
+  const [floorAreas, setFloorAreas] = useState([]);
+  const [floorTables, setFloorTables] = useState([]);
+  const [activeFloorAreaId, setActiveFloorAreaId] = useState(null);
+  const [isEditingFloor, setIsEditingFloor] = useState(false);
+  const [floorView, setFloorView] = useState({ zoom: 1, x: 0, y: 0 });
+  const [editingAreaId, setEditingAreaId] = useState(null);
+  const [areaFormMode, setAreaFormMode] = useState(null);
+  const [areaNameDraft, setAreaNameDraft] = useState("");
+  const floorRef = useRef(null);
+  const floorTablesRef = useRef(floorTables);
+  const floorDragRef = useRef(null);
+  const floorPanRef = useRef(null);
+  const ordersRefreshTimeoutRef = useRef(null);
+  const areaRenameSavingRef = useRef(new Set());
   const toastRef = useRef(null);
+  const showToast = useCallback((msg) => {
+    setToast(msg);
+    clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const updateFloorView = (nextView) => {
+    setFloorView((current) => {
+      const bounds = floorRef.current?.getBoundingClientRect();
+      const next = typeof nextView === "function" ? nextView(current) : nextView;
+      if (!bounds) return next;
+      const maxPanX = Math.max(
+        bounds.width / 2,
+        (FLOOR_CANVAS_WIDTH * next.zoom - bounds.width) / 2,
+      );
+      const maxPanY = Math.max(
+        bounds.height / 2,
+        (FLOOR_CANVAS_HEIGHT * next.zoom - bounds.height) / 2,
+      );
+      return {
+        ...next,
+        x: Math.max(-maxPanX, Math.min(maxPanX, next.x)),
+        y: Math.max(-maxPanY, Math.min(maxPanY, next.y)),
+      };
+    });
+  };
+
+  const zoomFloor = (amount) => {
+    updateFloorView((current) => ({
+      ...current,
+      zoom: Math.max(0.15, Math.min(2.5, Number((current.zoom + amount).toFixed(2)))),
+    }));
+  };
 
   // Cargar datos de Supabase
   const loadProductsFromDB = useCallback(async (businessIdParam) => {
@@ -1232,24 +1207,24 @@ export default function MesasPOS() {
           console.error("Error cargando grupos de opciones:", groupsRes.error);
         }
 
-        const itemsByGroup = {};
-        (itemsRes.data || []).forEach((item) => {
-          const groupId = item.option_group_id;
-          if (!groupId) return;
-          itemsByGroup[groupId] = itemsByGroup[groupId] || [];
-          itemsByGroup[groupId].push(item);
-        });
-
         const groupsByProduct = {};
         (groupsRes.data || []).forEach((group) => {
           const productId = group.product_id;
           groupsByProduct[productId] = groupsByProduct[productId] || [];
-          groupsByProduct[productId].push(
-            normalizeOptionGroup(group, itemsByGroup[group.id] || []),
-          );
+          groupsByProduct[productId].push(group);
         });
 
-        optionGroupsByProduct = groupsByProduct;
+        optionGroupsByProduct = Object.fromEntries(
+          data.map((product) => [
+            product.id,
+            buildProductOptionGroups(
+              groupsByProduct[product.id] || [],
+              (itemsRes.data || []).filter(
+                (option) => option.product_id === product.id,
+              ),
+            ),
+          ]),
+        );
       }
 
       const normalizedProducts = (data || []).map((item) => ({
@@ -1278,14 +1253,14 @@ export default function MesasPOS() {
   }, []);
 
   // Cargar datos de Supabase
-  const loadMesasFromDB = useCallback(async () => {
+  const loadMesasFromDB = useCallback(async ({ showLoading = true } = {}) => {
     if (!user?.id) {
       setLoading(false);
       return;
     }
 
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
 
       // Obtener business_id del usuario
       const { data: profile, error: profileError } = await supabase
@@ -1439,6 +1414,104 @@ export default function MesasPOS() {
         // Ordenar por número de mesa
         .sort((a, b) => parseInt(a.numero) - parseInt(b.numero));
 
+      let areas = [];
+      const { data: savedAreas, error: areasError } = await supabase
+        .from("restaurant_floor_areas")
+        .select("id, name, created_at")
+        .eq("business_id", profile.business_id)
+        .order("created_at", { ascending: true });
+
+      if (areasError) {
+        console.error("Error cargando áreas del plano:", areasError);
+        setFloorAreas([]);
+        setFloorTables([]);
+        showToast("No se pudo cargar el plano. Verifica la migración de mesas.");
+      } else {
+        areas = savedAreas || [];
+        if (areas.length === 0) {
+          const { data: defaultArea, error: defaultAreaError } = await supabase
+            .from("restaurant_floor_areas")
+            .insert({ business_id: profile.business_id, name: "Mesas" })
+            .select("id, name, created_at")
+            .single();
+
+          if (defaultAreaError) {
+            console.error("Error creando el área inicial:", defaultAreaError);
+            showToast("No se pudo crear el área inicial del plano.");
+          } else {
+            areas = [defaultArea];
+          }
+        }
+
+        setFloorAreas(areas);
+        setActiveFloorAreaId((current) =>
+          areas.some((area) => area.id === current)
+            ? current
+            : (areas[0]?.id ?? null),
+        );
+
+        if (areas.length > 0) {
+          const { data: savedTables, error: tablesError } = await supabase
+            .from("restaurant_floor_tables")
+            .select(
+              "id, business_id, area_id, label, position_x, position_y, shape, guest_count",
+            )
+            .eq("business_id", profile.business_id)
+            .order("created_at", { ascending: true });
+
+          if (tablesError) {
+            console.error("Error cargando mesas del plano:", tablesError);
+            setFloorTables([]);
+            showToast("No se pudieron cargar las mesas del plano.");
+          } else {
+            let tableRows = savedTables || [];
+            const knownLabels = new Set(
+              tableRows.map((table) => table.label.toLowerCase()),
+            );
+            const missingLabels = [
+              ...new Set(
+                mesasOrdenes
+                  .map((mesa) => mesa.numero.trim())
+                  .filter((label) => label && !knownLabels.has(label.toLowerCase())),
+              ),
+            ];
+
+            if (missingLabels.length > 0) {
+              const defaultArea = areas[0];
+              const newTables = missingLabels.map((label, index) => {
+                const positionIndex = tableRows.length + index;
+                const position = getFloorGridPosition(positionIndex);
+                return {
+                  business_id: profile.business_id,
+                  area_id: defaultArea.id,
+                  label,
+                  ...position,
+                  shape: "round",
+                };
+              });
+              const { data: insertedTables, error: insertTablesError } =
+                await supabase
+                  .from("restaurant_floor_tables")
+                  .insert(newTables)
+                  .select(
+                    "id, business_id, area_id, label, position_x, position_y, shape",
+                  );
+
+              if (insertTablesError) {
+                console.error(
+                  "Error agregando mesas activas al plano:",
+                  insertTablesError,
+                );
+                showToast("No se pudieron agregar las mesas activas al plano.");
+              } else {
+                tableRows = [...tableRows, ...(insertedTables || [])];
+              }
+            }
+            setFloorTables(tableRows);
+          }
+        }
+      }
+
       // Solo mostrar mesas con una orden activa o una reserva vigente.
       setMesas(mesasOrdenes);
     } catch (err) {
@@ -1446,7 +1519,7 @@ export default function MesasPOS() {
     } finally {
       setLoading(false);
     }
-  }, [navigate, user?.id]);
+  }, [navigate, showToast, user?.id]);
 
   useEffect(() => {
     loadMesasFromDB();
@@ -1454,7 +1527,7 @@ export default function MesasPOS() {
 
   useEffect(() => {
     const refreshAtDateBoundary = window.setInterval(() => {
-      loadMesasFromDB();
+      loadMesasFromDB({ showLoading: false });
     }, 60 * 1000);
 
     return () => window.clearInterval(refreshAtDateBoundary);
@@ -1475,12 +1548,16 @@ export default function MesasPOS() {
           filter: `business_id=eq.${businessId}`,
         },
         () => {
-          loadMesasFromDB();
+          window.clearTimeout(ordersRefreshTimeoutRef.current);
+          ordersRefreshTimeoutRef.current = window.setTimeout(() => {
+            loadMesasFromDB({ showLoading: false });
+          }, 150);
         },
       )
       .subscribe();
 
     return () => {
+      window.clearTimeout(ordersRefreshTimeoutRef.current);
       supabase.removeChannel(subscription);
     };
   }, [user?.id, businessId, loadMesasFromDB]);
@@ -1490,18 +1567,42 @@ export default function MesasPOS() {
     if (!selected) return;
     const updated = mesas.find((m) => m.id === selected.id);
     if (updated) setSelected(updated);
-    else setSelected(null);
+    else if (!selected.isFloorTable) setSelected(null);
   }, [mesas]);
-
-  const showToast = useCallback((msg) => {
-    setToast(msg);
-    clearTimeout(toastRef.current);
-    toastRef.current = setTimeout(() => setToast(null), 2200);
-  }, []);
 
   // Actualizar mesa y sincronizar con Supabase
   const updateMesa = useCallback(
     async (updated) => {
+      if (updated.isFloorTable && updated.floorTableId && businessId) {
+        const guestCount = Math.max(
+          0,
+          Math.floor(Number(updated.personas) || 0),
+        );
+        setFloorTables((current) =>
+          current.map((table) =>
+            table.id === updated.floorTableId
+              ? { ...table, guest_count: guestCount }
+              : table,
+          ),
+        );
+        setSelected((current) =>
+          current?.floorTableId === updated.floorTableId
+            ? { ...current, personas: guestCount }
+            : current,
+        );
+        const { error } = await supabase
+          .from("restaurant_floor_tables")
+          .update({ guest_count: guestCount })
+          .eq("id", updated.floorTableId)
+          .eq("business_id", businessId);
+        if (error) {
+          console.error("Error guardando las personas de la mesa:", error);
+          showToast("No se pudo guardar la cantidad de personas.");
+          loadMesasFromDB();
+        }
+        return;
+      }
+
       setMesas((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
 
       // Si tiene orderId, actualizar en Supabase
@@ -1533,7 +1634,7 @@ export default function MesasPOS() {
         }
       }
     },
-    [businessId, showToast],
+    [businessId, loadMesasFromDB, showToast],
   );
 
   const closeMesa = useCallback(
@@ -1557,113 +1658,666 @@ export default function MesasPOS() {
     [businessId, loadMesasFromDB, showToast],
   );
 
-  const kpis = {
-    total: mesas.length,
-    ocupadas: mesas.filter((m) => m.estado === "ocupada").length,
-    reservas: mesas.filter((m) => m.estado === "reserva").length,
-    sucias: mesas.filter((m) => m.estado === "sucio").length,
+  const changeFloorTableGuestCount = async (table, change) => {
+    const currentCount = getFloorTableGuestCount(table);
+    const guestCount = Math.max(0, currentCount + change);
+    if (guestCount === currentCount) return;
+
+    if (table.order) {
+      await updateMesa({ ...table.order, personas: guestCount });
+      return;
+    }
+
+    if (!table.id || !businessId) {
+      showToast("No se pudo guardar la cantidad de personas de esta mesa.");
+      return;
+    }
+
+    setFloorTables((current) =>
+      current.map((item) =>
+        item.id === table.id ? { ...item, guest_count: guestCount } : item,
+      ),
+    );
+    const { error } = await supabase
+      .from("restaurant_floor_tables")
+      .update({ guest_count: guestCount })
+      .eq("id", table.id)
+      .eq("business_id", businessId);
+    if (error) {
+      console.error("Error actualizando personas de la mesa:", error);
+      setFloorTables((current) =>
+        current.map((item) =>
+          item.id === table.id
+            ? { ...item, guest_count: currentCount }
+            : item,
+        ),
+      );
+      showToast("No se pudo guardar la cantidad de personas.");
+    }
   };
 
-  const visible = mesas.filter((m) => {
-    const matchF = filter === "all" || m.estado === filter;
-    const matchS = !search || m.numero.includes(search);
-    return matchF && matchS;
-  });
+  const activeFloorArea = floorAreas.find(
+    (area) => area.id === activeFloorAreaId,
+  );
+  const floorItems = (
+    activeFloorArea
+      ? floorTables.filter((table) => table.area_id === activeFloorArea.id)
+      : []
+  ).map((table) => ({
+    ...table,
+    order: mesas.find((mesa) => mesa.numero === table.label) || null,
+  }));
+  const displayedFloorItems = floorItems.length
+    ? floorItems
+    : !activeFloorArea
+      ? mesas.map((mesa, index) => ({
+          id: `active-${mesa.orderId}`,
+          label: mesa.numero,
+          area_id: null,
+          ...getFloorGridPosition(index),
+          shape: "round",
+          order: mesa,
+        }))
+      : [];
+
+  const floorTableLayoutKey = floorTables
+    .map((table) => `${table.id}:${table.area_id}:${table.shape}`)
+    .join("|");
+
+  const fitFloorToTables = useCallback((tables) => {
+    const bounds = floorRef.current?.getBoundingClientRect();
+    if (!bounds || tables.length === 0) {
+      setFloorView({ zoom: 1, x: 0, y: 0 });
+      return;
+    }
+
+    const tableBounds = tables.map((table) => {
+      const x = (Number(table.position_x) / 100) * FLOOR_CANVAS_WIDTH;
+      const y = (Number(table.position_y) / 100) * FLOOR_CANVAS_HEIGHT;
+      const halfWidth =
+        (table.shape === "rectangle" ? 64 : 46) + FLOOR_CHAIR_OUTSET;
+      const halfHeight =
+        (table.shape === "rectangle" ? 38 : 46) + FLOOR_CHAIR_OUTSET;
+      return {
+        minX: x - halfWidth - 92,
+        maxX: x + halfWidth,
+        minY: y - halfHeight,
+        maxY: y + halfHeight,
+      };
+    });
+    const minX = Math.min(...tableBounds.map((table) => table.minX));
+    const maxX = Math.max(...tableBounds.map((table) => table.maxX));
+    const minY = Math.min(...tableBounds.map((table) => table.minY));
+    const maxY = Math.max(...tableBounds.map((table) => table.maxY));
+    const contentWidth = Math.max(1, maxX - minX);
+    const contentHeight = Math.max(1, maxY - minY);
+    const zoom = Math.max(
+      0.15,
+      Math.min(
+        1,
+        (bounds.width - 48) / contentWidth,
+        (bounds.height - 48) / contentHeight,
+      ),
+    );
+
+    setFloorView({
+      zoom,
+      x: -((minX + maxX) / 2 - FLOOR_CANVAS_WIDTH / 2) * zoom,
+      y: -((minY + maxY) / 2 - FLOOR_CANVAS_HEIGHT / 2) * zoom,
+    });
+  }, []);
+
+  useEffect(() => {
+    floorTablesRef.current = floorTables;
+  }, [floorTables]);
+
+  useEffect(() => {
+    if (!activeFloorAreaId || loading) return undefined;
+
+    const fitActiveArea = () => {
+      const tables = floorTablesRef.current.filter(
+        (table) => table.area_id === activeFloorAreaId,
+      );
+      fitFloorToTables(tables);
+    };
+    const animationFrame = window.requestAnimationFrame(fitActiveArea);
+    window.addEventListener("resize", fitActiveArea);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", fitActiveArea);
+    };
+  }, [activeFloorAreaId, floorTableLayoutKey, fitFloorToTables, loading]);
+
+  const handleFloorPointerDown = (event, table) => {
+    if (!isEditingFloor) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    floorDragRef.current = {
+      id: table.id,
+      label: table.label,
+      areaId: activeFloorAreaId,
+      pointerId: event.pointerId,
+      startX: Number(table.position_x),
+      startY: Number(table.position_y),
+      x: Number(table.position_x),
+      y: Number(table.position_y),
+      shape: table.shape || "round",
+    };
+  };
+
+  const handleFloorPanStart = (event) => {
+    if (
+      event.target.closest("button") ||
+      (event.pointerType === "mouse" && event.button !== 0)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    floorPanRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      viewX: floorView.x,
+      viewY: floorView.y,
+    };
+  };
+
+  const handleFloorPanMove = (event) => {
+    const pan = floorPanRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return;
+    updateFloorView({
+      ...floorView,
+      x: pan.viewX + event.clientX - pan.startX,
+      y: pan.viewY + event.clientY - pan.startY,
+    });
+  };
+
+  const handleFloorPanEnd = (event) => {
+    if (floorPanRef.current?.pointerId === event.pointerId) {
+      floorPanRef.current = null;
+    }
+  };
+
+  const handleFloorWheel = (event) => {
+    event.preventDefault();
+    if (event.target.closest('[aria-label="Herramientas del plano"]')) return;
+
+    const bounds = floorRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+
+    const pointerX = event.clientX - bounds.left - bounds.width / 2;
+    const pointerY = event.clientY - bounds.top - bounds.height / 2;
+    const nextZoom = Math.max(
+      0.15,
+      Math.min(2.5, floorView.zoom * Math.exp(-event.deltaY * 0.001)),
+    );
+    const zoomRatio = nextZoom / floorView.zoom;
+
+    updateFloorView({
+      zoom: nextZoom,
+      x: pointerX - (pointerX - floorView.x) * zoomRatio,
+      y: pointerY - (pointerY - floorView.y) * zoomRatio,
+    });
+  };
+
+  const handleFloorPointerMove = (event) => {
+    const drag = floorDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !floorRef.current) return;
+
+    const bounds = floorRef.current.getBoundingClientRect();
+    const localX =
+      (event.clientX - bounds.left - bounds.width / 2 - floorView.x) /
+        floorView.zoom +
+      FLOOR_CANVAS_WIDTH / 2;
+    const localY =
+      (event.clientY - bounds.top - bounds.height / 2 - floorView.y) /
+        floorView.zoom +
+      FLOOR_CANVAS_HEIGHT / 2;
+    const minX =
+      ((event.currentTarget.offsetWidth / 2 +
+        FLOOR_CHAIR_OUTSET +
+        92) /
+        floorView.zoom /
+        FLOOR_CANVAS_WIDTH) *
+      100;
+    const minY =
+      ((event.currentTarget.offsetHeight / 2 + FLOOR_CHAIR_OUTSET) /
+        floorView.zoom /
+        FLOOR_CANVAS_HEIGHT) *
+      100;
+    const maxX =
+      100 -
+      ((event.currentTarget.offsetWidth / 2 + FLOOR_CHAIR_OUTSET) /
+        floorView.zoom /
+        FLOOR_CANVAS_WIDTH) *
+        100;
+    const maxY =
+      100 -
+      ((event.currentTarget.offsetHeight / 2 + FLOOR_CHAIR_OUTSET) /
+        floorView.zoom /
+        FLOOR_CANVAS_HEIGHT) *
+        100;
+    const x = Math.max(
+      minX,
+      Math.min(maxX, (localX / FLOOR_CANVAS_WIDTH) * 100),
+    );
+    const y = Math.max(
+      minY,
+      Math.min(maxY, (localY / FLOOR_CANVAS_HEIGHT) * 100),
+    );
+    drag.x = x;
+    drag.y = y;
+    setFloorTables((current) =>
+      current.map((table) =>
+        table.id === drag.id
+          ? { ...table, position_x: x, position_y: y }
+          : table,
+      ),
+    );
+  };
+
+  const handleFloorPointerUp = async (event) => {
+    const drag = floorDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    floorDragRef.current = null;
+    if (drag.x === drag.startX && drag.y === drag.startY) return;
+
+    if (!businessId || !drag.areaId) {
+      showToast("El plano no está disponible para guardar cambios.");
+      return;
+    }
+
+    const { error } = await supabase.from("restaurant_floor_tables").upsert(
+      {
+        business_id: businessId,
+        area_id: drag.areaId,
+        label: drag.label,
+        position_x: Number(drag.x.toFixed(2)),
+        position_y: Number(drag.y.toFixed(2)),
+        shape: drag.shape,
+      },
+      { onConflict: "business_id,label" },
+    );
+
+    if (error) {
+      console.error("Error guardando la posición de la mesa:", error);
+      setFloorTables((current) =>
+        current.map((table) =>
+          table.id === drag.id
+            ? {
+                ...table,
+                position_x: drag.startX,
+                position_y: drag.startY,
+              }
+            : table,
+        ),
+      );
+      showToast("No se pudo guardar la posición de la mesa.");
+    }
+  };
+
+  const handleAreaFormSubmit = async (event) => {
+    event.preventDefault();
+    const name = areaNameDraft.trim();
+    if (!name) {
+      showToast("Escribe un nombre para el área.");
+      return;
+    }
+    if (!businessId) {
+      showToast("No se encontró el negocio para guardar el área.");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("restaurant_floor_areas")
+      .insert({ business_id: businessId, name })
+      .select("id, name, created_at")
+      .single();
+    if (error) {
+      console.error("Error creando el área:", error);
+      showToast("No se pudo crear el área. Verifica si el nombre ya existe.");
+      return;
+    }
+    setFloorAreas((current) => [...current, data]);
+    setActiveFloorAreaId(data.id);
+    showToast(`Área ${name} creada.`);
+    setAreaFormMode(null);
+    setAreaNameDraft("");
+  };
+
+  const startAreaForm = () => {
+    setAreaFormMode("new");
+    setAreaNameDraft("");
+  };
+
+  const startInlineAreaRename = (area) => {
+    setActiveFloorAreaId(area.id);
+    setEditingAreaId(area.id);
+    setAreaNameDraft(area.name);
+  };
+
+  const saveInlineAreaRename = async (areaId) => {
+    if (areaRenameSavingRef.current.has(areaId)) return;
+    const name = areaNameDraft.trim();
+    if (!name) {
+      showToast("El nombre del área no puede estar vacío.");
+      return;
+    }
+    if (!businessId) {
+      showToast("No se encontró el negocio para guardar el área.");
+      return;
+    }
+
+    const area = floorAreas.find((item) => item.id === areaId);
+    if (name === area?.name) {
+      setEditingAreaId(null);
+      return;
+    }
+
+    areaRenameSavingRef.current.add(areaId);
+    let data;
+    let error;
+    try {
+      ({ data, error } = await supabase
+        .from("restaurant_floor_areas")
+        .update({ name })
+        .eq("id", areaId)
+        .eq("business_id", businessId)
+        .select("id, name, created_at")
+        .single());
+    } catch (saveError) {
+      console.error("Error renombrando el área:", saveError);
+      showToast("No se pudo guardar el nombre del área.");
+      return;
+    } finally {
+      areaRenameSavingRef.current.delete(areaId);
+    }
+    if (error) {
+      console.error("Error renombrando el área:", error);
+      showToast("No se pudo renombrar el área. Verifica si el nombre ya existe.");
+      return;
+    }
+    setFloorAreas((current) =>
+      current.map((item) => (item.id === data.id ? data : item)),
+    );
+    setEditingAreaId(null);
+    setAreaNameDraft("");
+    showToast("Área actualizada.");
+  };
+
+  const handleDeleteArea = async (area) => {
+    if (!area || !businessId) return;
+    if (!window.confirm(`¿Eliminar el área "${area.name}" y sus mesas?`))
+      return;
+
+    const isLastArea = floorAreas.length === 1;
+    let replacementArea = null;
+    if (isLastArea) {
+      const replacementName =
+        area.name.trim().toLowerCase() === "mesas" ? "Mesas 2" : "Mesas";
+      const { data, error: replacementError } = await supabase
+        .from("restaurant_floor_areas")
+        .insert({ business_id: businessId, name: replacementName })
+        .select("id, name, created_at")
+        .single();
+      if (replacementError) {
+        console.error("Error creando el área de reemplazo:", replacementError);
+        showToast("No se pudo preparar el área de reemplazo.");
+        return;
+      }
+      replacementArea = data;
+    }
+
+    const { error } = await supabase
+      .from("restaurant_floor_areas")
+      .delete()
+      .eq("id", area.id)
+      .eq("business_id", businessId);
+    if (error) {
+      console.error("Error eliminando el área:", error);
+      if (replacementArea) {
+        const { error: cleanupError } = await supabase
+          .from("restaurant_floor_areas")
+          .delete()
+          .eq("id", replacementArea.id)
+          .eq("business_id", businessId);
+        if (cleanupError) {
+          console.error("Error limpiando el área de reemplazo:", cleanupError);
+        }
+      }
+      showToast("No se pudo eliminar el área.");
+      return;
+    }
+    const remainingAreas = floorAreas.filter(
+      (item) => item.id !== area.id,
+    );
+    if (replacementArea) remainingAreas.push(replacementArea);
+    setFloorAreas(remainingAreas);
+    setFloorTables((current) =>
+      current.filter((table) => table.area_id !== area.id),
+    );
+    if (activeFloorAreaId === area.id) {
+      setActiveFloorAreaId(remainingAreas[0]?.id || null);
+    }
+    showToast("Área eliminada.");
+  };
+
+  const handleAddFloorTable = async () => {
+    if (!businessId || !activeFloorArea) return;
+    setIsEditingFloor(true);
+    const usedNumbers = [
+      ...floorTables.map((table) => Number(table.label)),
+      ...mesas.map((mesa) => Number(mesa.numero)),
+    ].filter((number) => Number.isInteger(number) && number > 0);
+    const label = String(Math.max(0, ...usedNumbers) + 1);
+    const tableIndex = floorTables.filter(
+      (table) => table.area_id === activeFloorArea.id,
+    ).length;
+    const position = getFloorGridPosition(tableIndex);
+    const { data, error } = await supabase
+      .from("restaurant_floor_tables")
+      .insert({
+        business_id: businessId,
+        area_id: activeFloorArea.id,
+        label,
+        ...position,
+        shape: "round",
+      })
+      .select("id, business_id, area_id, label, position_x, position_y, shape")
+      .single();
+    if (error) {
+      console.error("Error agregando una mesa al plano:", error);
+      showToast("No se pudo agregar la mesa.");
+      return;
+    }
+    setFloorTables((current) => [...current, data]);
+  };
+
+  const handleDeleteFloorTable = async (event, table) => {
+    event.stopPropagation();
+    if (table.order) {
+      showToast("No puedes eliminar una mesa que tiene un pedido activo.");
+      return;
+    }
+    if (!businessId) return;
+    const { error } = await supabase
+      .from("restaurant_floor_tables")
+      .delete()
+      .eq("id", table.id)
+      .eq("business_id", businessId);
+    if (error) {
+      console.error("Error eliminando una mesa del plano:", error);
+      showToast("No se pudo eliminar la mesa.");
+      return;
+    }
+    setFloorTables((current) => current.filter((item) => item.id !== table.id));
+  };
+
+  const handleCycleFloorTableShape = async (event, table) => {
+    event.stopPropagation();
+    if (!businessId || !table.id) return;
+    const shape = getNextFloorTableShape(table.shape || "round");
+    const { error } = await supabase
+      .from("restaurant_floor_tables")
+      .update({ shape })
+      .eq("id", table.id)
+      .eq("business_id", businessId);
+    if (error) {
+      console.error("Error cambiando la forma de la mesa:", error);
+      showToast("No se pudo cambiar la forma de la mesa.");
+      return;
+    }
+    setFloorTables((current) =>
+      current.map((item) => (item.id === table.id ? { ...item, shape } : item)),
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-background text-white font-sans flex flex-col">
+    <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-background font-sans text-white">
       {/* ── Header ── */}
-      <div className="sticky top-0 z-40 bg-background backdrop-blur-xl border-b border-white/6 px-4 pt-4 pb-3 flex-shrink-0">
-        <div className="flex items-center justify-between mb-3">
+      <div className="sticky top-0 z-40 flex-shrink-0 border-b border-white/6 bg-background px-4 pt-4 backdrop-blur-xl">
+        <div className="mb-1 flex items-center justify-between">
           <h1 className="text-2xl font-black tracking-tighter">Mesas</h1>
         </div>
 
-        {/* KPIs con Wrap Optimizado - Mobile First */}
-        <div className="flex flex-wrap w-full gap-2 mb-3 overflow-visible py-1.5 px-0.5">
-          {[
-            {
-              id: "all",
-              label: "Todas",
-              value: kpis.total,
-              color: "text-white",
-              activeBorder: "border-white/40",
-            },
-            {
-              id: "ocupada",
-              label: "Ocupadas",
-              value: kpis.ocupadas,
-              color: "text-orange-400",
-              activeBorder: "border-orange-500/50",
-            },
-            {
-              id: "reserva",
-              label: "Reservas",
-              value: kpis.reservas,
-              color: "text-blue-400",
-              activeBorder: "border-blue-500/50",
-            },
-            {
-              id: "sucio",
-              label: "Por Limpiar",
-              value: kpis.sucias,
-              color: "text-red-400",
-              activeBorder: "border-red-500/50",
-            },
-          ].map(({ id, label, value, color, activeBorder }) => (
-            <button
-              key={id}
-              onClick={() => setFilter(id)}
-              className={`
-        relative flex-1 min-w-[70px] flex flex-col items-center justify-center 
-        bg-white/3 border rounded-xl py-3 px-2 text-center transition-all active:scale-95
-        ${filter === id ? `${activeBorder} bg-white/10` : "border-white/6"}
-      `}
-            >
-              <p className={`text-lg font-black ${color} leading-none`}>
-                {value}
-              </p>
-              <p className="text-[7px] font-black uppercase tracking-widest mt-1 text-slate-500">
-                {label}
-              </p>
-
-              {filter === id && (
-                <motion.div
-                  layoutId="filter-dot"
-                  className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full"
-                  style={{ backgroundColor: "currentColor" }}
+        <div className="flex items-end gap-2 overflow-x-auto">
+          <div className="flex min-w-0 items-end gap-1">
+            {floorAreas.map((area) => {
+              const isRenaming = editingAreaId === area.id;
+              return (
+                <div
+                  key={area.id}
+                  className={`group flex shrink-0 items-center justify-between gap-2 border-b-2 px-2 text-xs font-semibold transition-colors ${
+                    activeFloorAreaId === area.id
+                      ? "border-violet-400 text-white"
+                      : "border-transparent text-slate-400 hover:text-white"
+                  }`}
+                >
+                  {isRenaming ? (
+                    <input
+                      autoFocus
+                      maxLength={80}
+                      value={areaNameDraft}
+                      onChange={(event) => setAreaNameDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          saveInlineAreaRename(area.id);
+                        } else if (event.key === "Escape") {
+                          setEditingAreaId(null);
+                          setAreaNameDraft("");
+                        }
+                      }}
+                      aria-label="Nombre del área"
+                      className="shrink-0 bg-transparent py-2 text-xs font-semibold text-white outline-none"
+                      style={{
+                        width: `${Math.max(area.name.length, areaNameDraft.length, 4)}ch`,
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setActiveFloorAreaId(area.id)}
+                      onDoubleClick={() => startInlineAreaRename(area)}
+                      title="Doble clic para cambiar el nombre"
+                      className="py-2 text-left"
+                    >
+                      {area.name}
+                    </button>
+                  )}
+                  {(isEditingFloor || isRenaming) && (
+                    <span>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => {
+                          if (isRenaming) event.preventDefault();
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (isRenaming) {
+                            saveInlineAreaRename(area.id);
+                          } else {
+                            handleDeleteArea(area);
+                          }
+                        }}
+                        aria-label={
+                          isRenaming
+                            ? `Guardar nombre del área ${area.name}`
+                            : `Eliminar área ${area.name}`
+                        }
+                        title={isRenaming ? "Guardar nombre" : "Eliminar área"}
+                        className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors focus-visible:outline focus-visible:outline-1 ${
+                          isRenaming
+                            ? "text-violet-300 hover:bg-violet-500/15 hover:text-violet-200 focus-visible:outline-violet-300"
+                            : "text-slate-500 hover:bg-red-500/15 hover:text-red-300 focus-visible:outline-red-300"
+                        }`}
+                      >
+                        {isRenaming ? <Check size={14} /> : <Trash2 size={13} />}
+                      </button>
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {areaFormMode === "new" && (
+              <form
+                onSubmit={handleAreaFormSubmit}
+                className="flex shrink-0 items-center gap-1 border-b-2 border-violet-400 px-1"
+              >
+                <input
+                  autoFocus
+                  maxLength={80}
+                  value={areaNameDraft}
+                  onChange={(event) => setAreaNameDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setAreaFormMode(null);
+                      setAreaNameDraft("");
+                    }
+                  }}
+                  aria-label="Nombre de la nueva área"
+                  placeholder="Nombre del área"
+                  className="w-28 bg-transparent py-2 text-xs font-semibold text-white outline-none placeholder:text-slate-500"
                 />
-              )}
+                <button
+                  type="submit"
+                  aria-label="Guardar nueva área"
+                  title="Guardar área"
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-violet-300 hover:bg-violet-500/15 hover:text-violet-200"
+                >
+                  <Check size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAreaFormMode(null);
+                    setAreaNameDraft("");
+                  }}
+                  aria-label="Cancelar nueva área"
+                  title="Cancelar"
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-white"
+                >
+                  <X size={14} />
+                </button>
+              </form>
+            )}
+            <button
+              type="button"
+              onClick={startAreaForm}
+              aria-label="Agregar área"
+              title="Agregar área"
+              className="mb-1 ml-0 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white/8 hover:text-white"
+            >
+              <Plus size={16} />
             </button>
-          ))}
-        </div>
-        {/* Filters + Search simplificado */}
-        <div className="flex gap-2 items-center justify-between">
-          <div className="flex-1">
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-              Filtrando por:{" "}
-              <span className="text-white">
-                {filter === "all" ? "Todas" : filter}
-              </span>
-            </p>
           </div>
+        </div>
 
-          <div className="relative flex-shrink-0">
-            <Search
-              size={11}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600"
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar mesa..."
-              className="w-40 bg-white/5 border border-white/8 rounded-full pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-700 outline-none focus:border-white/20 transition-all"
-            />
-          </div>
-        </div>
       </div>
 
-      {/* ── Grid ── */}
-      <div className="flex-1 p-4 overflow-y-auto">
+      {/* ── Plano ── */}
+      <div className="min-h-0 flex-1 overflow-hidden p-0">
         {loading ? (
           <SubLoading
             label="Cargando mesas"
@@ -1671,21 +2325,323 @@ export default function MesasPOS() {
             dotClassName="bg-violet-400"
             fullHeight
           />
-        ) : visible.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-slate-700">
-            <Search size={32} className="mb-3 opacity-30" />
-            <p className="font-bold text-sm">Sin mesas</p>
-          </div>
         ) : (
-          <div
-            className="grid gap-3"
-            style={{
-              gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-            }}
-          >
-            {visible.map((mesa) => (
-              <MesaTile key={mesa.id} mesa={mesa} onOpen={setSelected} />
-            ))}
+          <div className="h-full w-full">
+            <div
+              ref={floorRef}
+              className={`relative h-full min-h-0 w-full overflow-hidden border bg-surface ${
+                isEditingFloor
+                  ? "border-violet-400/30"
+                  : "border-outline"
+              }`}
+              onPointerDown={handleFloorPanStart}
+              onPointerMove={handleFloorPanMove}
+              onPointerUp={handleFloorPanEnd}
+              onPointerCancel={handleFloorPanEnd}
+              onWheel={handleFloorWheel}
+              style={{
+                touchAction: "none",
+                backgroundImage:
+                  "radial-gradient(circle, rgba(148,163,184,0.16) 1px, transparent 1px)",
+                backgroundSize: "24px 24px",
+              }}
+            >
+              <div
+                className="absolute cursor-grab transition-transform duration-200 ease-out active:cursor-grabbing"
+                style={{
+                  left: "50%",
+                  top: "50%",
+                  width: FLOOR_CANVAS_WIDTH,
+                  height: FLOOR_CANVAS_HEIGHT,
+                  marginLeft: -FLOOR_CANVAS_WIDTH / 2,
+                  marginTop: -FLOOR_CANVAS_HEIGHT / 2,
+                  transform: `translate(${floorView.x}px, ${floorView.y}px) scale(${floorView.zoom})`,
+                  transformOrigin: "center",
+                }}
+              >
+              {displayedFloorItems.map((table) => {
+                const state = table.order?.estado || "clean";
+                const status = ESTADO[state] || ESTADO.clean;
+                const isTableOccupied = state === "ocupada";
+                const guestCount = isTableOccupied
+                  ? getFloorTableGuestCount(table)
+                  : 0;
+                const shape = FLOOR_TABLE_SHAPES.includes(table.shape)
+                  ? table.shape
+                  : "round";
+                const nextShape = getNextFloorTableShape(shape);
+                const shapeLabels = {
+                  round: "redonda",
+                  square: "cuadrada",
+                  rectangle: "rectangular",
+                };
+                return (
+                  <div
+                    key={table.id}
+                    className="absolute"
+                    style={{
+                      left: `${table.position_x}%`,
+                      top: `${table.position_y}%`,
+                      transform: "translate(-50%, -50%)",
+                    }}
+                  >
+                    <div
+                      className={`relative ${
+                        shape === "rectangle"
+                          ? "h-[68px] w-[108px] sm:h-[76px] sm:w-[128px]"
+                          : "h-[78px] w-[78px] sm:h-[92px] sm:w-[92px]"
+                      }`}
+                    >
+                      {getFloorChairPositions(
+                        shape,
+                        guestCount,
+                      ).map((seat, index) => (
+                        <span
+                          key={`${table.id}-seat-${index}`}
+                          aria-hidden="true"
+                          className="pointer-events-none absolute z-10 rounded-full border border-white/30 bg-neutral-500 shadow-sm"
+                          style={{
+                            width: FLOOR_CHAIR_SIZE,
+                            height: FLOOR_CHAIR_SIZE,
+                            left: `calc(50% + ${seat.x}px)`,
+                            top: `calc(50% + ${seat.y}px)`,
+                            transform: "translate(-50%, -50%)",
+                          }}
+                        />
+                      ))}
+                      {isTableOccupied && (
+                        <div
+                          role="group"
+                          aria-label={`Personas en mesa ${table.label}`}
+                          className="absolute right-[calc(100%+28px)] top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-1 p-1"
+                        >
+                          <button
+                            type="button"
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              changeFloorTableGuestCount(table, 1);
+                            }}
+                            aria-label={`Agregar persona a mesa ${table.label}`}
+                            className="flex h-6 w-6 items-center justify-center rounded-full text-violet-300 hover:bg-violet-500/15 disabled:opacity-40"
+                          >
+                            <Plus size={12} />
+                          </button>
+                          <span
+                            aria-label={`${guestCount} personas`}
+                            className="min-w-4 text-center text-xs font-bold tabular-nums text-white"
+                          >
+                            {guestCount}
+                          </span>
+                          <button
+                            type="button"
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              changeFloorTableGuestCount(table, -1);
+                            }}
+                            disabled={guestCount <= 0}
+                            aria-label={`Quitar persona de mesa ${table.label}`}
+                            className="flex h-6 w-6 items-center justify-center rounded-full text-slate-300 hover:bg-white/10 disabled:opacity-40"
+                          >
+                            <Minus size={12} />
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onPointerDown={(event) =>
+                          handleFloorPointerDown(event, table)
+                        }
+                        onPointerMove={handleFloorPointerMove}
+                        onPointerUp={handleFloorPointerUp}
+                        onClick={() => {
+                          if (isEditingFloor) return;
+                          if (table.order) setSelected(table.order);
+                          else
+                            setSelected({
+                              id: `floor-${table.id}`,
+                              floorTableId: table.id,
+                              isFloorTable: true,
+                              numero: String(table.label),
+                              estado: "clean",
+                              startTime: null,
+                              comanda: [],
+                              personas: Number(table.guest_count) || 0,
+                              total: 0,
+                              reserva: null,
+                              nota: "",
+                            });
+                        }}
+                        aria-label={
+                          table.order
+                            ? `Mesa ${table.label}, ${status.label}`
+                            : `Mesa ${table.label}, disponible`
+                        }
+                        className={`absolute inset-0 flex h-full w-full touch-none flex-col items-center justify-center border-2 shadow-lg transition-[transform,box-shadow] ${
+                          isEditingFloor
+                            ? "cursor-move ring-2 ring-violet-400/20 active:scale-105"
+                            : "cursor-pointer hover:scale-105"
+                        } ${
+                          shape === "square"
+                            ? "rounded-2xl"
+                            : shape === "rectangle"
+                              ? "rounded-xl"
+                              : "rounded-full"
+                        }`}
+                        style={{
+                          background: `linear-gradient(145deg, ${status.glow}, #171717)`,
+                          borderColor: status.border,
+                          boxShadow: `0 8px 24px ${status.glow}`,
+                        }}
+                      >
+                        <span className="text-xl font-black leading-none text-white">
+                          {table.label}
+                        </span>
+                        <span
+                          className="mt-1 max-w-[68px] truncate text-[8px] font-black uppercase tracking-wide sm:max-w-[78px]"
+                          style={{ color: status.color }}
+                        >
+                          {table.order ? status.label : "Disponible"}
+                        </span>
+                        {table.order?.total > 0 && (
+                          <span className="mt-0.5 text-[8px] font-bold text-slate-300">
+                            {fmt(table.order.total)}
+                          </span>
+                        )}
+                      </button>
+                      {isEditingFloor && table.id && (
+                        <button
+                          type="button"
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) =>
+                            handleCycleFloorTableShape(event, table)
+                          }
+                          aria-label={`Cambiar mesa ${table.label} a forma ${shapeLabels[nextShape]}`}
+                          title={`Cambiar a mesa ${shapeLabels[nextShape]}`}
+                          className="absolute -right-1 -top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-violet-400/30 bg-neutral-900 text-violet-200 shadow-lg hover:bg-violet-500/20"
+                        >
+                          {nextShape === "square" ? (
+                            <span className="h-3 w-3 rounded-sm border border-current" />
+                          ) : nextShape === "rectangle" ? (
+                            <span className="h-2 w-3.5 rounded-sm border border-current" />
+                          ) : (
+                            <span className="h-3 w-3 rounded-full border border-current" />
+                          )}
+                        </button>
+                      )}
+                      {isEditingFloor && !table.order && table.id && (
+                        <button
+                          type="button"
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) =>
+                            handleDeleteFloorTable(event, table)
+                          }
+                          aria-label={`Eliminar mesa ${table.label}`}
+                          title={`Eliminar mesa ${table.label}`}
+                          className="absolute -left-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full border border-red-400/30 bg-neutral-900 text-red-300 shadow-lg hover:bg-red-500/20"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              </div>
+              {!displayedFloorItems.length && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+                  <LayoutGrid size={32} className="mb-3 text-slate-600" />
+                  <p className="text-sm font-bold text-slate-300">
+                    Este espacio aún está vacío
+                  </p>
+                  <p className="mt-1 max-w-sm text-xs text-slate-500">
+                    {isEditingFloor
+                      ? "Agrega mesas y arrástralas para crear el plano."
+                      : "Activa la edición para agregar mesas o usa el botón Editar plano."}
+                  </p>
+                </div>
+              )}
+              <div
+                role="group"
+                aria-label="Herramientas del plano"
+                className="absolute bottom-3 right-3 z-20 flex flex-col items-center gap-1 rounded-2xl border border-white/10 bg-neutral-950/90 p-1.5 shadow-xl backdrop-blur"
+              >
+                <button
+                  type="button"
+                  onClick={() => setIsEditingFloor((editing) => !editing)}
+                  aria-label={
+                    isEditingFloor ? "Terminar edición del plano" : "Editar plano"
+                  }
+                  title={
+                    isEditingFloor ? "Terminar edición" : "Editar plano"
+                  }
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                    isEditingFloor
+                      ? "text-violet-200 hover:bg-violet-500/20"
+                      : "text-slate-300 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  {isEditingFloor ? <Check size={16} /> : <Pencil size={15} />}
+                </button>
+                <div className="h-px w-6 bg-white/10" />
+                <button
+                  type="button"
+                  onClick={handleAddFloorTable}
+                  disabled={!activeFloorArea}
+                  aria-label="Agregar mesa"
+                  title="Agregar mesa"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-violet-300 transition-colors hover:bg-violet-500/15 hover:text-violet-200 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Plus size={16} />
+                </button>
+                <div className="h-px w-6 bg-white/10" />
+                <button
+                  type="button"
+                  onClick={() =>
+                    fitFloorToTables(
+                      floorTables.filter(
+                        (table) => table.area_id === activeFloorAreaId,
+                      ),
+                    )
+                  }
+                  aria-label="Ajustar todas las mesas a la vista"
+                  title="Ajustar todas las mesas a la vista"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-violet-300 hover:bg-violet-500/15 hover:text-violet-200"
+                >
+                  <Shrink size={16} />
+                </button>
+                <div className="h-px w-6 bg-white/10" />
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => zoomFloor(0.25)}
+                    disabled={floorView.zoom >= 2.5}
+                    aria-label="Acercar plano"
+                    title="Acercar"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-300 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    <Plus size={14} />
+                  </button>
+                  <span
+                    aria-label={`Zoom ${Math.round(floorView.zoom * 100)} por ciento`}
+                    className="text-[8px] font-bold tabular-nums text-slate-400"
+                  >
+                    {Math.round(floorView.zoom * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => zoomFloor(-0.25)}
+                    disabled={floorView.zoom <= 0.15}
+                    aria-label="Alejar plano"
+                    title="Alejar"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-300 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    <Minus size={14} />
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

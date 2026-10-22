@@ -1,21 +1,56 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+const getKitchenOptionLabel = (option) =>
+  typeof option === "string"
+    ? option
+    : option && typeof option === "object"
+      ? option.name ||
+        option.nombre ||
+        option.label ||
+        option.option_name ||
+        option.title ||
+        option.text ||
+        option.value ||
+        "Opción"
+      : "Opción";
+
+const getKitchenOptionGroupName = (option) =>
+  option && typeof option === "object"
+    ? option.grupo || option.grupoNombre || option.group_name || null
+    : null;
+
 export const formatKitchenOption = (option) => {
-  const label =
-    typeof option === "string"
-      ? option
-      : option && typeof option === "object"
-        ? option.name ||
-          option.nombre ||
-          option.label ||
-          option.option_name ||
-          option.title ||
-          option.text ||
-          option.value ||
-          "Opción"
-        : "Opción";
-  return label;
+  const label = getKitchenOptionLabel(option);
+  const group = getKitchenOptionGroupName(option);
+  return group ? `${group}: ${label}` : label;
+};
+
+export const groupKitchenOptions = (options = []) => {
+  const groupedOptions = new Map();
+
+  options.forEach((option, index) => {
+    const groupName = getKitchenOptionGroupName(option);
+    const groupId =
+      typeof option === "string"
+        ? null
+        : option?.grupo_id || option?.grupoId || null;
+    const key = groupId || groupName || `option-${index}`;
+    const group = groupedOptions.get(key) || {
+      groupName,
+      options: [],
+    };
+    group.options.push(option);
+    groupedOptions.set(key, group);
+  });
+
+  return [...groupedOptions.values()];
+};
+
+export const formatKitchenOptionGroup = ({ groupName, options }) => {
+  const labels = options.map(getKitchenOptionLabel);
+  const joinedOptions = labels.join(" / ");
+  return groupName ? `${groupName}: ${joinedOptions}` : joinedOptions;
 };
 
 const KitchenComanda = ({ orden, labelData, logoUrl }) => {
@@ -50,6 +85,13 @@ const KitchenComanda = ({ orden, labelData, logoUrl }) => {
           .item-content { min-width: 0; }
           .product-line { font-size: 9pt; line-height: 1.2; overflow-wrap: anywhere; }
           .product-name { font-weight: 700; }
+          .item-dispatched .product-name,
+          .item-dispatched .quantity,
+          .item-dispatched .item-price,
+          .item-dispatched .option,
+          .item-dispatched .instruction,
+          .item-dispatched .product-note { text-decoration: line-through; text-decoration-thickness: 1px; }
+          .item-dispatched { color: #555; }
           .option, .instruction { margin-top: .75mm; font-size: 7.5pt; line-height: 1.2; overflow-wrap: anywhere; }
           .option { padding-left: 1mm; }
           .product-note { grid-column: 1 / -1; width: 100%; margin-top: .5mm; padding: 1mm 1.5mm; border-left: 1px solid #777; font-size: 7.5pt; line-height: 1.2; overflow-wrap: anywhere; }
@@ -93,7 +135,7 @@ const KitchenComanda = ({ orden, labelData, logoUrl }) => {
 
               return (
                 <article
-                  className="item"
+                  className={`item${item.delivered ? " item-dispatched" : ""}`}
                   key={item.databaseId || `${item.name}-${index}`}
                 >
                   <div className="quantity">
@@ -106,14 +148,16 @@ const KitchenComanda = ({ orden, labelData, logoUrl }) => {
                       {" - "}
                       <span className="item-price">{formatPrice(subtotal)}</span>
                     </div>
-                    {(item.opciones || []).map((option, optionIndex) => (
-                      <div
-                        className="option"
-                        key={`${item.databaseId || index}-option-${optionIndex}`}
-                      >
-                        + {formatKitchenOption(option)}
-                      </div>
-                    ))}
+                    {groupKitchenOptions(item.opciones || []).map(
+                      (optionGroup, optionIndex) => (
+                        <div
+                          className="option"
+                          key={`${item.databaseId || index}-option-${optionIndex}`}
+                        >
+                          + {formatKitchenOptionGroup(optionGroup)}
+                        </div>
+                      ),
+                    )}
                   </div>
                   {item.nota && (
                     <div className="product-note">

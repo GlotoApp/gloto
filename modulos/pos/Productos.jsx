@@ -23,6 +23,10 @@ import {
   ChevronDown,
   ChevronRight,
   LoaderCircle,
+  CircleHelp,
+  Download,
+  Upload,
+  FileSpreadsheet,
 } from "lucide-react";
 import Categorias from "./Categorias";
 import defaultImg from "../../public/default.png";
@@ -32,6 +36,11 @@ import {
 } from "../../src/lib/supabaseClient";
 import { compressCanvasToImage } from "../../src/lib/imageCompression";
 import { useAuth } from "../../src/components/AuthContext";
+import { buildProductOptionGroups } from "../../src/lib/productOptions";
+import {
+  downloadProductTemplate,
+  parseProductWorkbook,
+} from "../../src/lib/productSpreadsheet";
 import ImageCropEditor from "./ImageCropEditor";
 import SubLoading from "./SubLoading";
 
@@ -80,6 +89,55 @@ const formatSentenceInput = (value) => {
   return formatSentenceText(value);
 };
 
+const normalizeProductMatchName = (value) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-CO")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+const getNameSimilarity = (left, right) => {
+  if (!left || !right) return 0;
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    let diagonal = previous[0];
+    previous[0] = row;
+    for (let column = 1; column <= right.length; column += 1) {
+      const above = previous[column];
+      previous[column] = Math.min(
+        previous[column] + 1,
+        previous[column - 1] + 1,
+        diagonal + (left[row - 1] === right[column - 1] ? 0 : 1),
+      );
+      diagonal = above;
+    }
+  }
+  return 1 - previous[right.length] / Math.max(left.length, right.length);
+};
+
+function mapLoadedOptionGroup(group) {
+  return {
+    id: group.id,
+    name: formatSentenceInput(group.name || ""),
+    description: formatSentenceInput(group.description || ""),
+    is_required: Boolean(group.is_required),
+    selection_type: group.selectionType || "single",
+    min_selections: group.minSelections ?? 0,
+    max_selections: group.maxSelections ?? null,
+    price_mode: group.priceMode || "sum",
+    max_extra_price: group.maxExtraPrice ?? "",
+    order_index: Number(group.order || 0),
+    items: (group.opciones || []).map((item) => ({
+      id: item.id,
+      nombre: formatSentenceInput(item.nombre || ""),
+      precio_extra: Number(item.precio_extra || 0),
+      order_index: Number(item.order || 0),
+      childGroups: (item.grupos || []).map(mapLoadedOptionGroup),
+    })),
+  };
+}
+
 const getCatalogCacheKey = (businessId) =>
   `productos-catalog-cache-${businessId}`;
 
@@ -110,6 +168,71 @@ const handleImageError = (e) => {
   e.target.onerror = null; // Previene bucles infinitos si la imagen por defecto también falla
   e.target.src = defaultImg;
 };
+
+const FieldHelp = ({ title, description, example }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [position, setPosition] = useState(null);
+
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        aria-label={`Ayuda: ${title}`}
+        aria-expanded={isOpen}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (isOpen) {
+            setIsOpen(false);
+            return;
+          }
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const popoverWidth = Math.min(224, window.innerWidth - 16);
+          setPosition({
+            top: Math.min(bounds.bottom + 4, window.innerHeight - 160),
+            left: Math.max(
+              8,
+              Math.min(bounds.left, window.innerWidth - popoverWidth - 8),
+            ),
+          });
+          setIsOpen(true);
+        }}
+        className="inline-flex h-5 w-5 items-center justify-center rounded-full text-neutral-500 transition hover:bg-violet-400/10 hover:text-violet-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+      >
+        <CircleHelp size={14} />
+      </button>
+      {isOpen && (
+        <span
+          role="note"
+          style={{
+            position: "fixed",
+            top: position?.top,
+            left: position?.left,
+            width: "min(14rem, calc(100vw - 1rem))",
+          }}
+          className="z-[100] block rounded-xl border border-violet-400/20 bg-neutral-900 p-3 text-left normal-case tracking-normal text-neutral-300 shadow-xl"
+        >
+          <span className="block text-[10px] font-semibold text-white">
+            {title}
+          </span>
+          <span className="mt-1 block text-[10px] leading-4 text-neutral-400">
+            {description}
+          </span>
+          <span className="mt-2 block text-[10px] leading-4 text-violet-200">
+            Ejemplo: {example}
+          </span>
+        </span>
+      )}
+    </span>
+  );
+};
+
+const OptionFieldLabel = ({ children, title, description, example }) => (
+  <div className="mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-neutral-500">
+    <span>{children}</span>
+    <FieldHelp title={title} description={description} example={example} />
+  </div>
+);
 
 const Productos = ({ section = "productos" }) => {
   const { user } = useAuth();
@@ -306,6 +429,7 @@ const Productos = ({ section = "productos" }) => {
 
   // ========== ESTADO PARA PRODUCTOS ==========arepasim
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [productType, setProductType] = useState(null);
   const [viewMode, setViewMode] = useState("grid");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterCategory, setFilterCategory] = useState("todos");
@@ -319,6 +443,13 @@ const Productos = ({ section = "productos" }) => {
   const [selectedProducts, setSelectedProducts] = useState(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
+  const [isDownloadingProductTemplate, setIsDownloadingProductTemplate] =
+    useState(false);
+  const [isImportingProducts, setIsImportingProducts] = useState(false);
+  const [spreadsheetResult, setSpreadsheetResult] = useState(null);
+  const [similarProductsConfirmed, setSimilarProductsConfirmed] =
+    useState(false);
+  const productSpreadsheetInputRef = useRef(null);
 
   // Estado del formulario
   const [formData, setFormData] = useState({
@@ -810,12 +941,19 @@ const Productos = ({ section = "productos" }) => {
         description: formatStoredText(group.description),
         is_required: Boolean(group.is_required),
         selection_type: group.selection_type || "single",
+        min_selections: Number(group.min_selections) || 0,
         max_selections: group.max_selections || null,
+        price_mode: group.price_mode || "sum",
+        max_extra_price:
+          group.max_extra_price === "" || group.max_extra_price == null
+            ? null
+            : Number(group.max_extra_price),
         order_index: index + 1,
         items: group.items.map((item, itemIndex) => ({
           nombre: formatStoredText(item.nombre),
           precio_extra: Number(item.precio_extra) || 0,
           order_index: itemIndex + 1,
+          childGroups: getOptionGroupSnapshot(item.childGroups || []),
         })),
       })),
       selectedIngredients: [...ingredients]
@@ -827,6 +965,27 @@ const Productos = ({ section = "productos" }) => {
           a.inventoryItemId.localeCompare(b.inventoryItemId),
         ),
     });
+  const getOptionGroupSnapshot = (groups) =>
+    groups.map((group, index) => ({
+      name: formatStoredText(group.name),
+      description: formatStoredText(group.description),
+      is_required: Boolean(group.is_required),
+      selection_type: group.selection_type || "single",
+      min_selections: Number(group.min_selections) || 0,
+      max_selections: group.max_selections || null,
+      price_mode: group.price_mode || "sum",
+      max_extra_price:
+        group.max_extra_price === "" || group.max_extra_price == null
+          ? null
+          : Number(group.max_extra_price),
+      order_index: index + 1,
+      items: group.items.map((item, itemIndex) => ({
+        nombre: formatStoredText(item.nombre),
+        precio_extra: Number(item.precio_extra) || 0,
+        order_index: itemIndex + 1,
+        childGroups: getOptionGroupSnapshot(item.childGroups || []),
+      })),
+    }));
   const hasProductFormChanges =
     initialProductFormSnapshot !== null &&
     getProductFormSnapshot(formData, optionGroups, selectedIngredients) !==
@@ -949,6 +1108,7 @@ const Productos = ({ section = "productos" }) => {
     setSelectedIngredients([]);
     setOptionsLoading(false);
     setInitialProductFormSnapshot(getProductFormSnapshot(newFormData, [], []));
+    setProductType("simple");
     setIsModalOpen(true);
   };
 
@@ -976,31 +1136,29 @@ const Productos = ({ section = "productos" }) => {
       setOptionsLoading(false);
       return null;
     } else {
-      const itemsByGroup = (itemsResponse.data || []).reduce(
-        (grouped, item) => {
-          const groupId = item.option_group_id;
-          if (!groupId) return grouped;
-          grouped[groupId] = grouped[groupId] || [];
-          grouped[groupId].push({
-            id: item.id,
-            nombre: formatSentenceInput(item.nombre || ""),
-            precio_extra: Number(item.precio_extra || 0),
-            order_index: Number(item.order_index || 0),
-          });
-          return grouped;
-        },
-        {},
-      );
-
-      const loadedGroups = (groupsResponse.data || []).map((group) => ({
+      const loadedGroups = buildProductOptionGroups(
+        groupsResponse.data || [],
+        itemsResponse.data || [],
+      ).map((group) => ({
         id: group.id,
         name: formatSentenceInput(group.name || ""),
         description: formatSentenceInput(group.description || ""),
         is_required: Boolean(group.is_required),
-        selection_type: group.selection_type || "single",
-        max_selections: group.max_selections ?? null,
-        order_index: Number(group.order_index || 0),
-        items: itemsByGroup[group.id] || [],
+        selection_type: group.selectionType || "single",
+        min_selections: group.minSelections ?? 0,
+        max_selections: group.maxSelections ?? null,
+        price_mode: group.priceMode || "sum",
+        max_extra_price: group.maxExtraPrice ?? "",
+        order_index: Number(group.order || 0),
+        items: (group.opciones || []).map((item) => ({
+          id: item.id,
+          nombre: formatSentenceInput(item.nombre || ""),
+          precio_extra: Number(item.precio_extra || 0),
+          order_index: Number(item.order || 0),
+          childGroups: (item.grupos || []).map((childGroup) =>
+            mapLoadedOptionGroup(childGroup),
+          ),
+        })),
       }));
       setOptionGroups(loadedGroups);
       setExpandedOptionGroups(new Set());
@@ -1036,6 +1194,7 @@ const Productos = ({ section = "productos" }) => {
     };
     setFormData(editFormData);
     setOptionGroups([]);
+    setProductType("configurable");
     setSelectedIngredients([]);
     setExpandedOptionGroups(new Set());
     setInitialProductFormSnapshot(null);
@@ -1052,12 +1211,14 @@ const Productos = ({ section = "productos" }) => {
       setInitialProductFormSnapshot(
         getProductFormSnapshot(editFormData, loadedGroups, loadedIngredients),
       );
+      setProductType(loadedGroups.length > 0 ? "configurable" : "simple");
     });
     setIsModalOpen(true);
   };
 
   const closeProductModal = () => {
     setIsModalOpen(false);
+    setProductType(null);
     focusStockOnOpen.current = false;
     setEditingId(null);
     setInitialProductFormSnapshot(null);
@@ -1161,23 +1322,59 @@ const Productos = ({ section = "productos" }) => {
     if (insertError) throw insertError;
   };
 
-  const addOptionGroup = () => {
-    const newGroup = {
+  const addOptionGroup = (parentItemId = null) => {
+    if (
+      parentItemId &&
+      !optionGroups.some((group) =>
+        group.items.some((item) => item.id === parentItemId),
+      )
+    ) {
+      return;
+    }
+
+    const newGroup = createOptionGroup();
+    if (!parentItemId) {
+      setOptionGroups((groups) => [
+        ...groups,
+        { ...newGroup, order_index: groups.length + 1 },
+      ]);
+    } else {
+      const addToItem = (groups) =>
+        groups.map((group) => ({
+          ...group,
+          items: group.items.map((item) =>
+            item.id === parentItemId
+              ? {
+                  ...item,
+                  childGroups: [
+                    ...(item.childGroups || []),
+                    {
+                      ...newGroup,
+                      order_index: (item.childGroups || []).length + 1,
+                    },
+                  ],
+                }
+              : item,
+          ),
+        }));
+      setOptionGroups(addToItem);
+    }
+    setExpandedOptionGroups((groups) => new Set([...groups, newGroup.id]));
+  };
+
+  const createOptionGroup = () => ({
       id: createOptionId(),
       name: "",
       description: "",
       is_required: false,
       selection_type: "single",
+      min_selections: 0,
       max_selections: null,
+      price_mode: "sum",
+      max_extra_price: "",
       order_index: 0,
       items: [],
-    };
-    setOptionGroups((groups) => [
-      ...groups,
-      { ...newGroup, order_index: groups.length + 1 },
-    ]);
-    setExpandedOptionGroups((groups) => new Set([...groups, newGroup.id]));
-  };
+    });
 
   const toggleOptionGroup = (groupId) => {
     setExpandedOptionGroups((groups) => {
@@ -1189,19 +1386,34 @@ const Productos = ({ section = "productos" }) => {
   };
 
   const updateOptionGroup = (groupId, changes) => {
-    setOptionGroups((groups) =>
+    const updateTree = (groups) =>
       groups.map((group) =>
-        group.id === groupId ? { ...group, ...changes } : group,
-      ),
-    );
+        group.id === groupId
+          ? { ...group, ...changes }
+          : {
+              ...group,
+              items: group.items.map((item) => ({
+                ...item,
+                childGroups: updateTree(item.childGroups || []),
+              })),
+            },
+      );
+    setOptionGroups(updateTree);
   };
 
   const removeOptionGroup = (groupId) => {
-    setOptionGroups((groups) =>
+    const removeFromTree = (groups) =>
       groups
         .filter((group) => group.id !== groupId)
-        .map((group, index) => ({ ...group, order_index: index + 1 })),
-    );
+        .map((group, index) => ({
+          ...group,
+          order_index: index + 1,
+          items: group.items.map((item) => ({
+            ...item,
+            childGroups: removeFromTree(item.childGroups || []),
+          })),
+        }));
+    setOptionGroups(removeFromTree);
   };
 
   const confirmRemoveOptionGroup = (groupId, groupName) => {
@@ -1212,7 +1424,7 @@ const Productos = ({ section = "productos" }) => {
   };
 
   const addOptionItem = (groupId) => {
-    setOptionGroups((groups) =>
+    const addToTree = (groups) =>
       groups.map((group) =>
         group.id === groupId
           ? {
@@ -1224,43 +1436,341 @@ const Productos = ({ section = "productos" }) => {
                   nombre: "",
                   precio_extra: 0,
                   order_index: group.items.length + 1,
+                  childGroups: [],
                 },
               ],
             }
-          : group,
-      ),
-    );
+          : {
+              ...group,
+              items: group.items.map((item) => ({
+                ...item,
+                childGroups: addToTree(item.childGroups || []),
+              })),
+            },
+      );
+    setOptionGroups(addToTree);
   };
 
   const updateOptionItem = (groupId, itemId, changes) => {
-    setOptionGroups((groups) =>
-      groups.map((group) =>
-        group.id === groupId
-          ? {
-              ...group,
-              items: group.items.map((item) =>
-                item.id === itemId ? { ...item, ...changes } : item,
-              ),
-            }
-          : group,
-      ),
-    );
+    const updateInTree = (groups) =>
+      groups.map((group) => ({
+        ...group,
+        items: group.items.map((item) =>
+          group.id === groupId && item.id === itemId
+            ? { ...item, ...changes }
+            : {
+                ...item,
+                childGroups: updateInTree(item.childGroups || []),
+              },
+        ),
+      }));
+    setOptionGroups(updateInTree);
   };
 
   const removeOptionItem = (groupId, itemId) => {
-    setOptionGroups((groups) =>
-      groups.map((group) =>
-        group.id === groupId
-          ? {
-              ...group,
-              items: group.items
+    const removeFromTree = (groups) =>
+      groups.map((group) => ({
+        ...group,
+        items:
+          group.id === groupId
+            ? group.items
                 .filter((item) => item.id !== itemId)
-                .map((item, index) => ({ ...item, order_index: index + 1 })),
-            }
-          : group,
-      ),
-    );
+                .map((item, index) => ({ ...item, order_index: index + 1 }))
+            : group.items.map((item) => ({
+                ...item,
+                childGroups: removeFromTree(item.childGroups || []),
+              })),
+      }));
+    setOptionGroups(removeFromTree);
   };
+
+  const renderDependentGroupEditor = (group, depth = 1) => (
+    <div
+      key={group.id}
+      className="space-y-3 rounded-xl border border-violet-400/15 bg-violet-400/[0.03] p-3"
+      style={{ marginLeft: `${Math.min(depth, 3) * 12}px` }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-violet-200">
+          Grupo dependiente{group.name ? ` · ${group.name}` : ""}
+        </p>
+        <button
+          type="button"
+          onClick={() => confirmRemoveOptionGroup(group.id, group.name)}
+          className="rounded-lg p-2 text-neutral-500 hover:bg-red-500/10 hover:text-red-300"
+          aria-label={`Eliminar grupo ${group.name || "dependiente"}`}
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="space-y-1 text-[9px] text-neutral-500">
+          <OptionFieldLabel
+            title="Nombre del grupo"
+            description="Identifica qué debe elegir el cliente en esta opción dependiente."
+            example="Sabores para una pizza pequeña."
+          >
+            Nombre del grupo
+          </OptionFieldLabel>
+          <input
+            value={group.name}
+            onChange={(event) =>
+              updateOptionGroup(group.id, {
+                name: formatSentenceInput(event.target.value),
+              })
+            }
+            placeholder="Ej: Elige el sabor"
+            aria-label="Nombre del grupo dependiente"
+            className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 text-[11px] text-white outline-none focus:border-violet-400/50"
+          />
+        </label>
+        <label className="space-y-1 text-[9px] text-neutral-500">
+          <OptionFieldLabel
+            title="Descripción"
+            description="Instrucción breve que verá el cliente al personalizar el producto."
+            example="Elige hasta dos sabores."
+          >
+            Descripción
+          </OptionFieldLabel>
+          <input
+            value={group.description}
+            onChange={(event) =>
+              updateOptionGroup(group.id, {
+                description: formatSentenceInput(event.target.value),
+              })
+            }
+            placeholder="Descripción (opcional)"
+            aria-label="Descripción del grupo dependiente"
+            className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 text-[11px] text-white outline-none focus:border-violet-400/50"
+          />
+        </label>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="flex items-center gap-2 text-[10px] text-neutral-300">
+          <input
+            type="checkbox"
+            checked={group.is_required}
+            onChange={(event) =>
+              updateOptionGroup(group.id, {
+                is_required: event.target.checked,
+                min_selections: event.target.checked
+                  ? Math.max(1, Number(group.min_selections) || 0)
+                  : 0,
+              })
+            }
+          />
+          <span>
+            <span className="flex items-center gap-1">
+              Obligatorio
+              <FieldHelp
+                title="Grupo obligatorio"
+                description="Si lo activas, el cliente tendrá que elegir al menos una opción antes de agregar el producto."
+                example="Debe elegir un sabor para continuar."
+              />
+            </span>
+          </span>
+        </label>
+        <label className="space-y-1 text-[9px] text-neutral-500">
+          <OptionFieldLabel
+            title="Tipo de selección"
+            description="Define si el cliente puede elegir una sola opción o combinar varias."
+            example="Una opción para un tamaño; varias para sabores mitad y mitad."
+          >
+            Selección
+          </OptionFieldLabel>
+          <select
+            value={group.selection_type}
+            onChange={(event) =>
+              updateOptionGroup(group.id, {
+                selection_type: event.target.value,
+                max_selections:
+                  event.target.value === "multiple"
+                    ? group.max_selections
+                    : null,
+                min_selections:
+                  event.target.value === "multiple"
+                    ? group.min_selections
+                    : Math.min(1, Number(group.min_selections) || 0),
+              })
+            }
+            aria-label="Tipo de selección del grupo dependiente"
+            className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 text-[11px] text-white outline-none focus:border-violet-400/50"
+          >
+            <option value="single">Elegir una opción</option>
+            <option value="multiple">Elegir varias opciones</option>
+          </select>
+        </label>
+      </div>
+      {group.selection_type === "multiple" && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="space-y-1 text-[9px] text-neutral-500">
+            <OptionFieldLabel
+              title="Mínimo de opciones"
+              description="Cantidad mínima de opciones que el cliente debe seleccionar."
+              example="2 para exigir dos sabores."
+            >
+              Mínimo de opciones
+            </OptionFieldLabel>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={group.min_selections ?? 0}
+              onChange={(event) => {
+                const minimum = Math.max(0, Math.floor(Number(event.target.value) || 0));
+                updateOptionGroup(group.id, {
+                  min_selections: minimum,
+                  is_required: minimum > 0,
+                });
+              }}
+              className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 text-[11px] text-white outline-none focus:border-violet-400/50"
+            />
+          </label>
+          <label className="space-y-1 text-[9px] text-neutral-500">
+            <OptionFieldLabel
+              title="Máximo de opciones"
+              description="Límite de opciones que el cliente puede elegir. Déjalo vacío para no limitar."
+              example="2 para permitir como máximo dos sabores."
+            >
+              Máximo de opciones (vacío = sin límite)
+            </OptionFieldLabel>
+            <input
+              type="number"
+              min={Math.max(1, Number(group.min_selections) || 1)}
+              step="1"
+              value={group.max_selections ?? ""}
+              onChange={(event) => {
+                const maximum = event.target.value
+                  ? Math.max(1, Math.floor(Number(event.target.value)))
+                  : null;
+                updateOptionGroup(group.id, {
+                  max_selections: maximum,
+                  min_selections:
+                    maximum === null
+                      ? group.min_selections
+                      : Math.min(Number(group.min_selections) || 0, maximum),
+                });
+              }}
+              className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 text-[11px] text-white outline-none focus:border-violet-400/50"
+            />
+          </label>
+        </div>
+      )}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="space-y-1 text-[9px] text-neutral-500">
+          <OptionFieldLabel
+            title="Cómo calcular el precio"
+            description="Decide cómo se cobran las opciones seleccionadas."
+            example="En mitad y mitad, cobra solo el sabor más costoso."
+          >
+            Cómo calcular el precio
+          </OptionFieldLabel>
+          <select
+            value={group.price_mode || "sum"}
+            onChange={(event) =>
+              updateOptionGroup(group.id, { price_mode: event.target.value })
+            }
+            className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 text-[11px] text-white outline-none focus:border-violet-400/50"
+          >
+            <option value="sum">Sumar los precios elegidos</option>
+            <option value="highest">Cobrar solo el precio más alto</option>
+          </select>
+        </label>
+        <label className="space-y-1 text-[9px] text-neutral-500">
+          <OptionFieldLabel
+            title="Tope de precio"
+            description="Máximo que se cobrará por los extras de este grupo cuando el cálculo esté en modo suma. No aplica al cobrar el más caro."
+            example="Si suman $8.000 y el tope es $6.000, se cobran $6.000."
+          >
+            Tope de precio (solo al sumar extras)
+          </OptionFieldLabel>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={group.max_extra_price ?? ""}
+            disabled={group.price_mode === "highest"}
+            onChange={(event) =>
+              updateOptionGroup(group.id, {
+                max_extra_price: event.target.value,
+              })
+            }
+            placeholder={
+              group.price_mode === "highest"
+                ? "No aplica"
+                : "Sin tope"
+            }
+            className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 text-[11px] text-white outline-none focus:border-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+        </label>
+      </div>
+      <div className="space-y-2 border-t border-white/5 pt-3">
+        {(group.items || []).map((item, index) => (
+          <div key={item.id} className="space-y-2 rounded-lg bg-black/20 p-2">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_150px_32px]">
+              <label className="space-y-1 text-[9px] text-neutral-500">
+                <OptionFieldLabel
+                  title="Nombre de la opción"
+                  description="Nombre concreto que aparecerá como alternativa para el cliente."
+                  example="Pepperoni."
+                >
+                  Nombre de la opción
+                </OptionFieldLabel>
+                <input
+                  value={item.nombre}
+                  onChange={(event) =>
+                    updateOptionItem(group.id, item.id, {
+                      nombre: formatSentenceInput(event.target.value),
+                    })
+                  }
+                  placeholder={`Opción ${index + 1}`}
+                  aria-label="Nombre de opción dependiente"
+                  className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 text-[11px] text-white outline-none focus:border-violet-400/50"
+                />
+              </label>
+              <label className="space-y-1 text-[9px] text-neutral-500">
+                <OptionFieldLabel
+                  title="Precio adicional"
+                  description="Monto que se suma al precio del producto si el cliente elige esta opción."
+                  example="$2.000 adicionales por elegir pollo."
+                >
+                  Precio adicional
+                </OptionFieldLabel>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={item.precio_extra ?? 0}
+                  onChange={(event) =>
+                    updateOptionItem(group.id, item.id, {
+                      precio_extra: event.target.value,
+                    })
+                  }
+                  aria-label="Precio extra de opción dependiente"
+                  className="h-9 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 text-[11px] text-white outline-none focus:border-violet-400/50"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => removeOptionItem(group.id, item.id)}
+                aria-label={`Eliminar opción ${item.nombre || index + 1}`}
+                className="justify-self-end rounded-lg p-2 text-neutral-500 hover:bg-red-500/10 hover:text-red-300"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => addOptionItem(group.id)}
+          className="text-[9px] font-bold text-violet-300 hover:text-violet-200"
+        >
+          + Agregar opción
+        </button>
+      </div>
+    </div>
+  );
 
   const saveProductOptions = async (productId) => {
     const { error: deleteItemsError } = await supabase
@@ -1275,46 +1785,54 @@ const Productos = ({ section = "productos" }) => {
       .eq("product_id", productId);
     if (deleteGroupsError) throw deleteGroupsError;
 
-    const groupsToSave = optionGroups.filter((group) => group.name.trim());
-    if (groupsToSave.length === 0) return;
+    const saveGroups = async (groups, parentItemId = null) => {
+      for (const [groupIndex, group] of groups.entries()) {
+        if (!group.name.trim()) continue;
+        const { data: savedGroup, error: groupError } = await supabase
+          .from("product_option_groups")
+          .insert({
+            product_id: productId,
+            parent_item_id: parentItemId,
+            name: formatStoredText(group.name),
+            description: formatStoredText(group.description),
+            is_required: Boolean(group.is_required),
+            selection_type: group.selection_type,
+            min_selections: Number(group.min_selections) || 0,
+            max_selections:
+              group.selection_type === "multiple"
+                ? Number(group.max_selections) || null
+                : null,
+            price_mode: group.price_mode || "sum",
+            max_extra_price:
+              group.max_extra_price === "" || group.max_extra_price == null
+                ? null
+                : Number(group.max_extra_price) || 0,
+            order_index: groupIndex + 1,
+          })
+          .select("id")
+          .single();
+        if (groupError) throw groupError;
 
-    const { data: savedGroups, error: groupsError } = await supabase
-      .from("product_option_groups")
-      .insert(
-        groupsToSave.map((group, index) => ({
-          product_id: productId,
-          name: formatStoredText(group.name),
-          description: formatStoredText(group.description),
-          is_required: Boolean(group.is_required),
-          selection_type: group.selection_type,
-          max_selections:
-            group.selection_type === "multiple"
-              ? Number(group.max_selections) || null
-              : null,
-          order_index: index + 1,
-        })),
-      )
-      .select("id, order_index");
-    if (groupsError) throw groupsError;
+        for (const [itemIndex, item] of group.items.entries()) {
+          if (!item.nombre.trim()) continue;
+          const { data: savedItem, error: itemError } = await supabase
+            .from("products_items")
+            .insert({
+              product_id: productId,
+              option_group_id: savedGroup.id,
+              nombre: formatStoredText(item.nombre),
+              precio_extra: Number(item.precio_extra) || 0,
+              order_index: itemIndex + 1,
+            })
+            .select("id")
+            .single();
+          if (itemError) throw itemError;
+          await saveGroups(item.childGroups || [], savedItem.id);
+        }
+      }
+    };
 
-    const itemsToSave = groupsToSave.flatMap((group, groupIndex) =>
-      group.items
-        .filter((item) => item.nombre.trim())
-        .map((item, itemIndex) => ({
-          product_id: productId,
-          option_group_id: savedGroups[groupIndex].id,
-          nombre: formatStoredText(item.nombre),
-          precio_extra: Number(item.precio_extra) || 0,
-          order_index: itemIndex + 1,
-        })),
-    );
-
-    if (itemsToSave.length > 0) {
-      const { error: itemsError } = await supabase
-        .from("products_items")
-        .insert(itemsToSave);
-      if (itemsError) throw itemsError;
-    }
+    await saveGroups(optionGroups);
   };
 
   const openProductImageEditor = (file) => {
@@ -1562,6 +2080,312 @@ const Productos = ({ section = "productos" }) => {
     }
 
     setSavingProduct(false);
+  };
+
+  const handleDownloadProductTemplate = async () => {
+    setIsDownloadingProductTemplate(true);
+    try {
+      const productIds = products.map((product) => product.id);
+      let rawGroups = [];
+      let rawItems = [];
+      if (productIds.length) {
+        const [groupsResponse, itemsResponse] = await Promise.all([
+          supabase
+            .from("product_option_groups")
+            .select("*")
+            .in("product_id", productIds)
+            .order("order_index", { ascending: true }),
+          supabase
+            .from("products_items")
+            .select("*")
+            .in("product_id", productIds)
+            .order("order_index", { ascending: true }),
+        ]);
+        if (groupsResponse.error || itemsResponse.error) {
+          throw groupsResponse.error || itemsResponse.error;
+        }
+        rawGroups = groupsResponse.data || [];
+        rawItems = itemsResponse.data || [];
+      }
+      const categoryNames = Object.fromEntries(
+        categoryRecords.map((category) => [category.id, category.name]),
+      );
+      const template = await downloadProductTemplate({
+        categories: categoryRecords,
+        units,
+        products: products.map((product) => ({
+          name: product.name,
+          description: product.description || "",
+          price: product.price,
+          category: categoryNames[product.categoryId] || product.category || "",
+          unit:
+            units.find((unit) => unit.id === product.unitId)?.name ||
+            units.find((unit) => unit.id === product.unit_id)?.name ||
+            "",
+          stock: product.stock,
+          minStock: product.minStock,
+          isActive: product.isActive,
+          optionGroups: buildProductOptionGroups(
+            rawGroups.filter((group) => group.product_id === product.id),
+            rawItems.filter((item) => item.product_id === product.id),
+          ).map(mapLoadedOptionGroup),
+        })),
+      });
+      const url = URL.createObjectURL(template);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "catalogo-productos-gloto.xlsx";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      console.error("No se pudo generar la plantilla de productos:", error);
+      alert("No se pudo descargar la plantilla de Excel. Intenta nuevamente.");
+    } finally {
+      setIsDownloadingProductTemplate(false);
+    }
+  };
+
+  const handleProductSpreadsheetFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setSpreadsheetResult({
+      fileName: file.name,
+      products: [],
+      errors: [],
+      similarProducts: [],
+      parsing: true,
+    });
+    setSimilarProductsConfirmed(false);
+    try {
+      const parsed = await parseProductWorkbook(file, {
+        categories: categoryRecords,
+        units,
+      });
+      const errors = [...parsed.errors];
+      if (parsed.products.length === 0) {
+        errors.push("No se encontraron productos para importar.");
+      }
+      const similarProducts = parsed.products.flatMap((importedProduct) => {
+        const importedName = normalizeProductMatchName(importedProduct.name);
+        const matches = products
+          .map((existingProduct) => {
+            const existingName = normalizeProductMatchName(existingProduct.name);
+            const exact = importedName === existingName;
+            const similarity = getNameSimilarity(importedName, existingName);
+            return {
+              importedName: importedProduct.name,
+              existingName: existingProduct.name,
+              exact,
+              similarity,
+            };
+          })
+          .filter(
+            (match) =>
+              match.exact ||
+              (Math.min(
+                normalizeProductMatchName(match.importedName).length,
+                normalizeProductMatchName(match.existingName).length,
+              ) >= 6 &&
+                match.similarity >= 0.82),
+          )
+          .sort(
+            (left, right) =>
+              Number(right.exact) - Number(left.exact) ||
+              right.similarity - left.similarity,
+          );
+        return matches.slice(0, 1);
+      });
+      setSpreadsheetResult({
+        fileName: file.name,
+        products: parsed.products,
+        errors,
+        similarProducts,
+        parsing: false,
+      });
+    } catch (error) {
+      console.error("No se pudo leer la plantilla de productos:", error);
+      setSpreadsheetResult({
+        fileName: file.name,
+        products: [],
+        errors: [
+          error.message ||
+            "No se pudo leer el archivo Excel. Descarga y usa la plantilla de Gloto.",
+        ],
+        similarProducts: [],
+        parsing: false,
+      });
+    }
+  };
+
+  const saveImportedOptionGroups = async (
+    productId,
+    groups,
+    parentItemId = null,
+  ) => {
+    for (const [groupIndex, group] of groups.entries()) {
+      const { data: savedGroup, error: groupError } = await supabase
+        .from("product_option_groups")
+        .insert({
+          product_id: productId,
+          parent_item_id: parentItemId,
+          name: formatStoredText(group.name),
+          description: formatStoredText(group.description) || null,
+          is_required: Boolean(group.is_required),
+          selection_type: group.selection_type,
+          min_selections: Number(group.min_selections) || 0,
+          max_selections:
+            group.selection_type === "multiple"
+              ? Number(group.max_selections) || null
+              : null,
+          price_mode: group.price_mode || "sum",
+          max_extra_price:
+            group.max_extra_price == null
+              ? null
+              : Number(group.max_extra_price),
+          order_index: groupIndex + 1,
+        })
+        .select("id")
+        .single();
+      if (groupError) throw groupError;
+
+      for (const [itemIndex, item] of group.items.entries()) {
+        const { data: savedItem, error: itemError } = await supabase
+          .from("products_items")
+          .insert({
+            product_id: productId,
+            option_group_id: savedGroup.id,
+            nombre: formatStoredText(item.nombre),
+            precio_extra: Number(item.precio_extra) || 0,
+            order_index: itemIndex + 1,
+          })
+          .select("id")
+          .single();
+        if (itemError) throw itemError;
+        await saveImportedOptionGroups(
+          productId,
+          item.childGroups || [],
+          savedItem.id,
+        );
+      }
+    }
+  };
+
+  const handleImportProducts = async () => {
+    if (!businessId || !spreadsheetResult?.products?.length) return;
+    setIsImportingProducts(true);
+    let importedCount = 0;
+    const importedProducts = [];
+    const categoryMap = Object.fromEntries(
+      categoryRecords.map((category) => [category.id, category.name]),
+    );
+    const categoryOrder = new Map();
+    products.forEach((product) => {
+      categoryOrder.set(
+        product.categoryId,
+        Math.max(
+          categoryOrder.get(product.categoryId) || 0,
+          Number(product.orderIndex) || 0,
+        ),
+      );
+    });
+
+    try {
+      for (const product of spreadsheetResult.products) {
+        const categoryId = product.category?.id;
+        const orderIndex = (categoryOrder.get(categoryId) || 0) + 1;
+        const payload = {
+          business_id: businessId,
+          name: formatProductNameForStorage(product.name),
+          description: product.description || null,
+          price: product.price,
+          category_id: categoryId,
+          unit_id: product.unit?.id || null,
+          is_active: product.isActive,
+          order_index: orderIndex,
+          image_url: null,
+          ...(inventoryEnabled
+            ? {
+                stock: product.stock,
+                min_stock: product.minStock,
+                is_sold_out: false,
+              }
+            : {}),
+        };
+        const { data: savedProduct, error: productError } = await supabase
+          .from("products")
+          .insert(payload)
+          .select("*")
+          .single();
+        if (productError) throw productError;
+
+        try {
+          await saveImportedOptionGroups(
+            savedProduct.id,
+            product.optionGroups,
+          );
+        } catch (optionsError) {
+          console.error(
+            `No se pudieron guardar las opciones de "${product.name}":`,
+            optionsError,
+          );
+          const cleanupErrors = [];
+          for (const table of ["products_items", "product_option_groups"]) {
+            const { error: cleanupError } = await supabase
+              .from(table)
+              .delete()
+              .eq("product_id", savedProduct.id);
+            if (cleanupError) cleanupErrors.push(cleanupError);
+          }
+          const { error: productCleanupError } = await supabase
+            .from("products")
+            .delete()
+            .eq("id", savedProduct.id)
+            .eq("business_id", businessId);
+          if (productCleanupError) cleanupErrors.push(productCleanupError);
+          if (cleanupErrors.length) {
+            console.error(
+              "No se pudo revertir completamente el producto importado:",
+              cleanupErrors,
+            );
+            throw new Error(
+              `Falló la configuración de "${product.name}" y no se pudo revertir por completo. Revisa ese producto en el catálogo.`,
+              { cause: optionsError },
+            );
+          }
+          throw new Error(
+            `No se pudieron guardar las opciones de "${product.name}". Se canceló ese producto.`,
+            { cause: optionsError },
+          );
+        }
+
+        importedCount += 1;
+        categoryOrder.set(categoryId, orderIndex);
+        importedProducts.push(mapProduct(savedProduct, categoryMap));
+      }
+
+      setProducts((current) => [...current, ...importedProducts]);
+      setSpreadsheetResult({
+        fileName: spreadsheetResult.fileName,
+        products: spreadsheetResult.products,
+        errors: [],
+        outcome: `Se importaron ${importedCount} productos correctamente.`,
+        outcomeStatus: "success",
+      });
+    } catch (error) {
+      console.error("Se detuvo la importación masiva de productos:", error);
+      if (importedProducts.length) {
+        setProducts((current) => [...current, ...importedProducts]);
+      }
+      setSpreadsheetResult((current) => ({
+        ...current,
+        outcome: `Se importaron ${importedCount} de ${spreadsheetResult.products.length} productos. La importación se detuvo: ${error.message || "error al guardar en Supabase"}`,
+        outcomeStatus: importedCount ? "partial" : "error",
+      }));
+    } finally {
+      setIsImportingProducts(false);
+    }
   };
 
   const handleDeleteProduct = async (id) => {
@@ -1981,8 +2805,40 @@ const Productos = ({ section = "productos" }) => {
     <div className="min-h-screen bg-background  text-neutral-200 p-4 md:p-4 font-sans">
       <div className="max-w-7xl mx-auto">
         {/* HEADER DINÁMICO */}
-        {/* Título Principal: Con un tracking más elegante y mejor peso */}
-        <h1 className="text-2xl font-black tracking-tighter mb-3">Productos</h1>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-black tracking-tighter">Productos</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadProductTemplate}
+              disabled={loadingProducts || isDownloadingProductTemplate}
+              className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[9px] font-black uppercase text-neutral-200 transition-all hover:border-emerald-500/30 hover:bg-emerald-500/10 disabled:cursor-wait disabled:opacity-50"
+            >
+              {isDownloadingProductTemplate ? (
+                <LoaderCircle size={13} className="animate-spin" />
+              ) : (
+                <Download size={13} className="text-emerald-400" />
+              )}
+              Descargar catálogo Excel
+            </button>
+            <button
+              type="button"
+              onClick={() => productSpreadsheetInputRef.current?.click()}
+              disabled={loadingProducts || isImportingProducts}
+              className="flex items-center gap-2 rounded-lg border border-violet-500/25 bg-violet-500/10 px-3 py-2 text-[9px] font-black uppercase text-violet-200 transition-all hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Upload size={13} />
+              Cargar Excel
+            </button>
+            <input
+              ref={productSpreadsheetInputRef}
+              type="file"
+              accept=".xlsx"
+              className="hidden"
+              onChange={handleProductSpreadsheetFile}
+            />
+          </div>
+        </div>
         <header className="px-0 pt-2 pb-5  flex-shrink-0">
           {/* Fila Superior: Info y Cierre */}
           <div className="flex items-start justify-between gap-6">
@@ -2893,6 +3749,49 @@ const Productos = ({ section = "productos" }) => {
 
                 {/* Panel Derecho: Formulario */}
                 <div className="flex min-w-0 flex-1 flex-col gap-5 sm:gap-6">
+                  {!editingId && (
+                    <fieldset className="space-y-2">
+                      <legend className="text-[9px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
+                        Tipo de producto
+                      </legend>
+                      <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/5 bg-neutral-950/40 p-1.5">
+                        {[
+                          {
+                            type: "simple",
+                            label: "Producto simple",
+                            description: "Se vende tal cual",
+                          },
+                          {
+                            type: "configurable",
+                            label: "Producto configurable",
+                            description: "Incluye opciones para elegir",
+                          },
+                        ].map(({ type, label, description }) => {
+                          const selected = productType === type;
+                          return (
+                            <button
+                              key={type}
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() => setProductType(type)}
+                              className={`rounded-lg border px-3 py-2.5 text-left transition ${
+                                selected
+                                  ? "border-violet-400/40 bg-violet-400/10 text-white"
+                                  : "border-transparent text-neutral-400 hover:bg-white/[0.04] hover:text-white"
+                              }`}
+                            >
+                              <span className="block text-[11px] font-semibold">
+                                {label}
+                              </span>
+                              <span className="mt-0.5 block text-[9px] text-neutral-500">
+                                {description}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  )}
                   <div className="border-b border-white/5 pb-3">
                     <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
                       01 · Información principal
@@ -3439,9 +4338,9 @@ const Productos = ({ section = "productos" }) => {
                                         categoryId,
                                         categoryName,
                                       )}
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                </div>
                               );
                           },
                         )}
@@ -3452,7 +4351,8 @@ const Productos = ({ section = "productos" }) => {
                   )}
 
                   {/* Opciones y variaciones del producto */}
-                  <div className="order-2 space-y-5 border-t border-white/10 pt-5">
+                  {productType === "configurable" && (
+                    <div className="order-2 space-y-5 border-t border-white/10 pt-5">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10  pb-4 pt-2">
                       <div>
                         <div className="flex items-center gap-2">
@@ -3563,9 +4463,13 @@ const Productos = ({ section = "productos" }) => {
                               <div className="border-t border-white/5 bg-white/[0.01] p-3 sm:p-4">
                                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_200px] sm:items-center">
                                   <div className="space-y-1.5">
-                                    <label className="mb-1.5 block text-[9px] font-black uppercase tracking-widest text-neutral-500 ">
+                                    <OptionFieldLabel
+                                      title="Nombre del grupo"
+                                      description="Categoría que reúne las alternativas que el cliente debe elegir."
+                                      example="Tamaño: Pequeña, Mediana y Grande."
+                                    >
                                       Grupo {groupIndex + 1}
-                                    </label>
+                                    </OptionFieldLabel>
                                     <input
                                       value={group.name}
                                       onChange={(event) =>
@@ -3578,32 +4482,50 @@ const Productos = ({ section = "productos" }) => {
                                       placeholder="Ej: Tipo de leche"
                                       className="w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2.5 text-xs font-medium text-white outline-none transition-colors focus:border-violet-400/50"
                                     />
-                                    <p className="text-[9px] leading-4 text-neutral-600">
-                                      Ejemplo: Color, Talla, Material o Tipo.
-                                    </p>
                                   </div>
-                                  <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg text-[10px] font-bold uppercase tracking-wide text-neutral-400 transition-colors justify-self-end">
+                                  <label className="inline-flex cursor-pointer items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-neutral-400 transition-colors justify-self-end">
                                     <input
                                       type="checkbox"
                                       checked={group.is_required}
                                       onChange={(event) =>
                                         updateOptionGroup(group.id, {
                                           is_required: event.target.checked,
+                                          min_selections:
+                                            event.target.checked
+                                              ? Math.max(
+                                                  1,
+                                                  Number(group.min_selections) ||
+                                                    0,
+                                                )
+                                              : 0,
                                         })
                                       }
                                       aria-label="Grupo obligatorio"
                                       className="peer sr-only"
                                     />
-                                    Obligatorio
+                                    <span>
+                                      <span className="flex items-center gap-1">
+                                        Obligatorio
+                                        <FieldHelp
+                                          title="Grupo obligatorio"
+                                          description="El cliente debe elegir una alternativa de este grupo antes de agregar el producto."
+                                          example="Debe escoger un tamaño de pizza."
+                                        />
+                                      </span>
+                                    </span>
                                     <span className="relative inline-flex h-6 w-10 items-center rounded-full bg-neutral-700  transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-violet-400/50 peer-checked:bg-violet-500 peer-checked:shadow-violet-500/50 sm:h-7 sm:w-12 after:inline-block after:h-4 after:w-4 after:translate-x-0.5 after:transform after:rounded-full after:bg-white after:shadow-md after:transition-all peer-checked:after:translate-x-5 sm:after:h-5 sm:after:w-5 sm:after:translate-x-1 sm:peer-checked:after:translate-x-5.5" />
                                   </label>
                                 </div>
 
                                 <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_200px] sm:items-start">
                                   <div>
-                                    <label className="mb-1.5 block text-[9px] font-black uppercase tracking-widest text-neutral-500">
+                                    <OptionFieldLabel
+                                      title="Descripción del grupo"
+                                      description="Instrucción breve que verá el cliente para entender qué debe elegir."
+                                      example="Elige el tamaño de tu pizza."
+                                    >
                                       Descripción
-                                    </label>
+                                    </OptionFieldLabel>
                                     <input
                                       value={group.description}
                                       onChange={(event) =>
@@ -3616,15 +4538,15 @@ const Productos = ({ section = "productos" }) => {
                                       placeholder="Descripción del grupo (opcional)"
                                       className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none transition-colors focus:border-violet-400/50"
                                     />
-                                    <p className="mt-1 text-[9px] leading-4 text-neutral-600">
-                                      Texto breve que verá el cliente. Ej: Elige
-                                      una opción.
-                                    </p>
                                   </div>
                                   <div className="space-y-1.5">
-                                    <label className="mb-1.5 block text-[9px] font-black uppercase tracking-widest text-neutral-500">
+                                    <OptionFieldLabel
+                                      title="Tipo de selección"
+                                      description="Indica si el cliente puede elegir una sola alternativa o combinar varias."
+                                      example="Una opción para tamaño; varias para sabores."
+                                    >
                                       Selección
-                                    </label>
+                                    </OptionFieldLabel>
                                     <select
                                       value={group.selection_type}
                                       onChange={(event) =>
@@ -3634,6 +4556,15 @@ const Productos = ({ section = "productos" }) => {
                                             event.target.value === "multiple"
                                               ? group.max_selections
                                               : null,
+                                          min_selections:
+                                            event.target.value === "multiple"
+                                              ? group.min_selections
+                                              : Math.min(
+                                                  1,
+                                                  Number(
+                                                    group.min_selections,
+                                                  ) || 0,
+                                                ),
                                         })
                                       }
                                       className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none transition-colors focus:border-violet-400/50"
@@ -3643,58 +4574,159 @@ const Productos = ({ section = "productos" }) => {
                                         Varias opciones
                                       </option>
                                     </select>
-                                    <p className="text-[9px] leading-4 text-neutral-600">
-                                      Una opción para elegir una; varias para
-                                      combinar.
-                                    </p>
                                     {group.selection_type === "multiple" && (
-                                      <div className="mt-3 space-y-1.5">
-                                        <label
-                                          htmlFor={`max-selections-${group.id}`}
-                                          className="block text-[9px] font-black uppercase tracking-widest text-neutral-500"
-                                        >
-                                          Máximo de opciones
+                                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                        <label className="space-y-1 text-[9px] text-neutral-500">
+                                          <OptionFieldLabel
+                                            title="Mínimo de opciones"
+                                            description="Cantidad mínima de alternativas que el cliente debe seleccionar."
+                                            example="2 para exigir que elija dos sabores."
+                                          >
+                                            Mínimo de opciones
+                                          </OptionFieldLabel>
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            step="1"
+                                            value={group.min_selections ?? 0}
+                                            onChange={(event) => {
+                                              const minimum = Math.max(
+                                                0,
+                                                Math.floor(
+                                                  Number(event.target.value) ||
+                                                    0,
+                                                ),
+                                              );
+                                              updateOptionGroup(group.id, {
+                                                min_selections: minimum,
+                                                is_required: minimum > 0,
+                                              });
+                                            }}
+                                            className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none focus:border-violet-400/50"
+                                          />
                                         </label>
-                                        <input
-                                          id={`max-selections-${group.id}`}
-                                          type="number"
-                                          min="1"
-                                          step="1"
-                                          inputMode="numeric"
-                                          value={group.max_selections ?? ""}
-                                          onChange={(event) => {
-                                            const value = event.target.value;
-                                            updateOptionGroup(group.id, {
-                                              max_selections: value
+                                        <label className="space-y-1 text-[9px] text-neutral-500">
+                                          <OptionFieldLabel
+                                            title="Máximo de opciones"
+                                            description="Límite de alternativas que el cliente puede seleccionar. Vacío significa sin límite."
+                                            example="2 para permitir hasta dos sabores."
+                                          >
+                                            Máximo de opciones (vacío = sin límite)
+                                          </OptionFieldLabel>
+                                          <input
+                                            type="number"
+                                            min={Math.max(
+                                              1,
+                                              Number(group.min_selections) || 1,
+                                            )}
+                                            step="1"
+                                            inputMode="numeric"
+                                            value={group.max_selections ?? ""}
+                                            onChange={(event) => {
+                                              const maximum = event.target.value
                                                 ? Math.max(
                                                     1,
-                                                    Math.floor(Number(value)),
+                                                    Math.floor(
+                                                      Number(
+                                                        event.target.value,
+                                                      ),
+                                                    ),
                                                   )
-                                                : null,
-                                            });
-                                          }}
-                                          placeholder="Sin límite"
-                                          className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none transition-colors focus:border-violet-400/50"
-                                        />
-                                        <p className="text-[9px] leading-4 text-neutral-600">
-                                          Déjalo vacío para permitir todas las
-                                          opciones.
-                                        </p>
+                                                : null;
+                                              updateOptionGroup(group.id, {
+                                                max_selections: maximum,
+                                                min_selections:
+                                                  maximum === null
+                                                    ? group.min_selections
+                                                    : Math.min(
+                                                        Number(
+                                                          group.min_selections,
+                                                        ) || 0,
+                                                        maximum,
+                                                      ),
+                                              });
+                                            }}
+                                            placeholder="Sin límite"
+                                            className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none focus:border-violet-400/50"
+                                          />
+                                        </label>
                                       </div>
                                     )}
-                                  </div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                  <label className="space-y-1 text-[9px] text-neutral-500">
+                                    <OptionFieldLabel
+                                      title="Cómo calcular el precio"
+                                      description="Define si se suman los precios adicionales o se cobra solo el más alto."
+                                      example="Mitad y mitad: cobrar el sabor con mayor precio."
+                                    >
+                                      Cómo calcular el precio
+                                    </OptionFieldLabel>
+                                    <select
+                                      value={group.price_mode || "sum"}
+                                      onChange={(event) =>
+                                        updateOptionGroup(group.id, {
+                                          price_mode: event.target.value,
+                                        })
+                                      }
+                                      className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none focus:border-violet-400/50"
+                                    >
+                                      <option value="sum">
+                                        Sumar los precios elegidos
+                                      </option>
+                                      <option value="highest">
+                                        Cobrar solo el precio más alto
+                                      </option>
+                                    </select>
+                                  </label>
+                                  <label className="space-y-1 text-[9px] text-neutral-500">
+                                    <OptionFieldLabel
+                                      title="Tope de precio"
+                                      description="Máximo que se cobrará por los extras si se suman. No aplica cuando se cobra solo el más caro."
+                                      example="Si los extras suman $8.000 y el tope es $6.000, se cobran $6.000."
+                                    >
+                                      Tope de precio (solo al sumar extras)
+                                    </OptionFieldLabel>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      value={group.max_extra_price ?? ""}
+                                      disabled={
+                                        group.price_mode === "highest"
+                                      }
+                                      onChange={(event) =>
+                                        updateOptionGroup(group.id, {
+                                          max_extra_price: event.target.value,
+                                        })
+                                      }
+                                      placeholder={
+                                        group.price_mode === "highest"
+                                          ? "No aplica"
+                                          : "Sin tope"
+                                      }
+                                      className="h-9 w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2 text-[11px] text-white outline-none focus:border-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    />
+                                  </label>
                                 </div>
 
                                 <div className="mt-4 space-y-2 border-t border-white/5 pt-3">
                                   {group.items.map((item, itemIndex) => (
                                     <div
                                       key={item.id}
-                                      className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_162px_32px] sm:items-start"
+                                      className="space-y-2"
                                     >
+                                      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_162px_32px] sm:items-start">
                                       <div className="min-w-0">
-                                        <label className="mb-1.5 block text-[9px] font-black uppercase tracking-widest text-neutral-600 sm:hidden">
+                                        <OptionFieldLabel
+                                          title="Nombre de la opción"
+                                          description="Nombre concreto de esta alternativa, que verá el cliente."
+                                          example="Pequeña, Pepperoni o Pollo."
+                                        >
                                           Opción
-                                        </label>
+                                        </OptionFieldLabel>
                                         <input
                                           value={item.nombre}
                                           onChange={(event) =>
@@ -3711,14 +4743,15 @@ const Productos = ({ section = "productos" }) => {
                                           placeholder={`Opción ${itemIndex + 1}`}
                                           className="w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[11px] font-semibold text-white outline-none focus:border-violet-500/50"
                                         />
-                                        <p className="mt-1 text-[9px] leading-4 text-neutral-600">
-                                          Ej: Rojo, Mediano, Algodón o Premium.
-                                        </p>
                                       </div>
                                       <div>
-                                        <label className="mb-1.5 block text-[9px] font-black uppercase tracking-widest text-neutral-600 sm:hidden">
+                                        <OptionFieldLabel
+                                          title="Precio adicional"
+                                          description="Monto que se suma al precio base si el cliente elige esta alternativa."
+                                          example="$2.000 adicionales por escoger un tamaño grande."
+                                        >
                                           Precio extra
-                                        </label>
+                                        </OptionFieldLabel>
                                         <div className="relative">
                                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-neutral-500">
                                             $
@@ -3750,10 +4783,6 @@ const Productos = ({ section = "productos" }) => {
                                             className="w-full rounded-lg border border-white/10 bg-neutral-900 py-2 pl-7 pr-3 text-[11px] font-semibold text-white outline-none focus:border-violet-500/50"
                                           />
                                         </div>
-                                        <p className="mt-1 text-[9px] leading-4 text-neutral-600">
-                                          Ej: 0 si no cambia el precio, o un
-                                          valor adicional.
-                                        </p>
                                       </div>
                                       <button
                                         type="button"
@@ -3765,6 +4794,33 @@ const Productos = ({ section = "productos" }) => {
                                       >
                                         <X size={14} />
                                       </button>
+                                      </div>
+                                      {(item.childGroups || []).map(
+                                        (childGroup) =>
+                                          renderDependentGroupEditor(
+                                            childGroup,
+                                          ),
+                                      )}
+                                      {!(item.childGroups || []).length && (
+                                        <div>
+                                          <div className="flex items-center gap-1">
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                addOptionGroup(item.id)
+                                              }
+                                              className="text-[9px] font-semibold text-violet-300 hover:text-violet-200"
+                                            >
+                                              + Agregar grupo dependiente
+                                            </button>
+                                            <FieldHelp
+                                              title="Grupo dependiente"
+                                              description="Añade otro grupo de opciones que solo aparecerá si el cliente elige esta alternativa."
+                                              example="Al elegir Pequeña, mostrar los sabores disponibles para ese tamaño."
+                                            />
+                                          </div>
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                   <button
@@ -3783,6 +4839,7 @@ const Productos = ({ section = "productos" }) => {
                       </div>
                     )}
                   </div>
+                  )}
                 </div>
               </div>
 
@@ -3937,6 +4994,216 @@ const Productos = ({ section = "productos" }) => {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {spreadsheetResult && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="product-spreadsheet-title"
+              className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-950 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5">
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-emerald-300">
+                    <FileSpreadsheet size={18} />
+                    <h2
+                      id="product-spreadsheet-title"
+                      className="text-lg font-black"
+                    >
+                      Carga masiva de productos
+                    </h2>
+                  </div>
+                  <p className="break-all text-xs text-neutral-500">
+                    {spreadsheetResult.fileName}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSpreadsheetResult(null)}
+                  disabled={isImportingProducts}
+                  aria-label="Cerrar carga masiva"
+                  className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4 overflow-y-auto p-5">
+                {spreadsheetResult.parsing ? (
+                  <div className="flex items-center gap-3 py-8 text-sm text-neutral-400">
+                    <LoaderCircle
+                      size={18}
+                      className="animate-spin text-violet-400"
+                    />
+                    Revisando el archivo y sus opciones...
+                  </div>
+                ) : (
+                  <>
+                    {spreadsheetResult.errors.length > 0 && (
+                      <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4">
+                        <p className="mb-2 flex items-center gap-2 text-sm font-bold text-rose-300">
+                          <AlertTriangle size={16} />
+                          Corrige estos problemas en Excel antes de importar
+                        </p>
+                        <ul className="max-h-48 space-y-1 overflow-y-auto pl-5 text-xs text-rose-200/80">
+                          {spreadsheetResult.errors.map((error, index) => (
+                            <li key={`${index}-${error}`} className="list-disc">
+                              {error}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {spreadsheetResult.similarProducts?.length > 0 && (
+                      <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
+                        <p className="mb-2 flex items-center gap-2 text-sm font-bold text-amber-200">
+                          <AlertTriangle size={16} />
+                          Hay nombres iguales o parecidos en tu catálogo
+                        </p>
+                        <ul className="space-y-1 text-xs text-amber-100/80">
+                          {spreadsheetResult.similarProducts.map((match) => (
+                            <li key={`${match.importedName}-${match.existingName}`}>
+                              “{match.importedName}” se parece a “{match.existingName}”
+                              {match.exact ? " (mismo nombre)" : ""}. Si continúas,
+                              se agregará como un producto nuevo.
+                            </li>
+                          ))}
+                        </ul>
+                        <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-amber-100">
+                          <input
+                            type="checkbox"
+                            checked={similarProductsConfirmed}
+                            onChange={(event) =>
+                              setSimilarProductsConfirmed(event.target.checked)
+                            }
+                            className="mt-0.5 accent-amber-400"
+                          />
+                          <span>
+                            Revisé los nombres y confirmo que quiero agregar
+                            estos productos como nuevos.
+                          </span>
+                        </label>
+                      </div>
+                    )}
+
+                    {spreadsheetResult.products.length > 0 && (
+                      <div>
+                        <p className="mb-2 text-sm font-bold text-neutral-200">
+                          {spreadsheetResult.products.length} producto
+                          {spreadsheetResult.products.length === 1 ? "" : "s"}{" "}
+                          encontrado
+                          {spreadsheetResult.products.length === 1 ? "" : "s"}
+                        </p>
+                        <div className="max-h-52 space-y-2 overflow-y-auto">
+                          {spreadsheetResult.products.map((product) => {
+                            const similarMatch =
+                              spreadsheetResult.similarProducts?.find(
+                                (match) => match.importedName === product.name,
+                              );
+                            const optionCount = product.optionGroups.reduce(
+                              (count, group) =>
+                                count +
+                                1 +
+                                group.items.reduce(
+                                  (itemCount, item) =>
+                                    itemCount +
+                                    (item.childGroups?.length || 0),
+                                  0,
+                                ),
+                              0,
+                            );
+                            return (
+                              <div
+                                key={product.name}
+                                className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-white">
+                                    {product.name}
+                                  </p>
+                                  <p className="text-[11px] text-neutral-500">
+                                    {product.category?.name} · {product.unit?.name}
+                                    {optionCount
+                                      ? ` · ${optionCount} grupo${optionCount === 1 ? "" : "s"} de opciones`
+                                      : ""}
+                                  </p>
+                                  {similarMatch && (
+                                    <p className="mt-1 text-[10px] font-semibold text-amber-300">
+                                      Coincide con “{similarMatch.existingName}”
+                                      · se agregará como nuevo
+                                    </p>
+                                  )}
+                                </div>
+                                <span className="shrink-0 text-sm font-bold text-emerald-300">
+                                  ${Number(product.price).toLocaleString("es-CO")}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {spreadsheetResult.outcome && (
+                      <p
+                        role="status"
+                        className={`rounded-lg border p-3 text-sm ${
+                          spreadsheetResult.outcomeStatus === "success"
+                            ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-200"
+                            : "border-amber-500/20 bg-amber-500/5 text-amber-200"
+                        }`}
+                      >
+                        {spreadsheetResult.outcome}
+                      </p>
+                    )}
+                    {!inventoryEnabled && (
+                      <p className="text-[11px] text-neutral-500">
+                        El stock de la plantilla se omitirá porque el inventario
+                        no está habilitado para este negocio.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-white/10 p-4">
+                <button
+                  type="button"
+                  onClick={() => setSpreadsheetResult(null)}
+                  disabled={isImportingProducts}
+                  className="rounded-lg border border-white/10 px-4 py-2 text-xs font-bold text-neutral-300 hover:bg-white/5 disabled:opacity-40"
+                >
+                  {spreadsheetResult.outcome ? "Cerrar" : "Cancelar"}
+                </button>
+                {!spreadsheetResult.outcome && (
+                  <button
+                    type="button"
+                    onClick={handleImportProducts}
+                    disabled={
+                      spreadsheetResult.parsing ||
+                      spreadsheetResult.errors.length > 0 ||
+                      spreadsheetResult.products.length === 0 ||
+                      (spreadsheetResult.similarProducts?.length > 0 &&
+                        !similarProductsConfirmed) ||
+                      isImportingProducts
+                    }
+                    className="flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black text-white hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isImportingProducts && (
+                      <LoaderCircle size={14} className="animate-spin" />
+                    )}
+                    {spreadsheetResult.similarProducts?.length > 0 &&
+                    !similarProductsConfirmed
+                      ? "Confirma los nombres para continuar"
+                      : "Agregar productos"}
+                  </button>
+                )}
+              </div>
+            </section>
           </div>
         )}
       </div>

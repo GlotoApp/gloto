@@ -1,6 +1,7 @@
 // Checkout.jsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { supabase } from "../../../src/lib/supabaseClient";
 import {
   ChevronLeft,
   User,
@@ -174,6 +175,7 @@ const Checkout = ({ onVolver, onConfirmar }) => {
     nombreTienda,
     logoTienda,
     totalPrecio,
+    businessId,
     metodoEntrega,
     setMetodoEntrega,
     datosCliente,
@@ -194,6 +196,13 @@ const Checkout = ({ onVolver, onConfirmar }) => {
   );
   const [deliveryDistanceMeters, setDeliveryDistanceMeters] = useState(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+  const [floorTables, setFloorTables] = useState([]);
+  const [areFloorTablesLoading, setAreFloorTablesLoading] = useState(false);
+  const [floorTablesError, setFloorTablesError] = useState("");
+  const [selectedTableError, setSelectedTableError] = useState("");
+  const selectedMesaRef = useRef(datosCliente.mesa);
+  const floorTablesRequestRef = useRef(0);
+  const floorTablesRef = useRef(floorTables);
   const [routeError, setRouteError] = useState("");
   const [locationError, setLocationError] = useState("");
   const [addressSuggestions, setAddressSuggestions] = useState([]);
@@ -211,6 +220,101 @@ const Checkout = ({ onVolver, onConfirmar }) => {
       setMetodoEntrega(null);
     }
   }, [availableDeliveryMethods, metodoEntrega, setMetodoEntrega]);
+
+  useEffect(() => {
+    selectedMesaRef.current = datosCliente.mesa;
+  }, [datosCliente.mesa]);
+
+  useEffect(() => {
+    floorTablesRef.current = floorTables;
+  }, [floorTables]);
+
+  const loadFloorTables = useCallback(async ({ silent = false } = {}) => {
+    if (!businessId) {
+      setFloorTables([]);
+      setFloorTablesError("No pudimos identificar el negocio.");
+      return null;
+    }
+
+    const requestId = ++floorTablesRequestRef.current;
+    if (!silent) {
+      setAreFloorTablesLoading(true);
+      setFloorTablesError("");
+    }
+    try {
+      const { data, error } = await supabase.rpc(
+        "get_public_restaurant_tables",
+        { p_business_id: businessId },
+      );
+      if (error) throw error;
+      if (requestId !== floorTablesRequestRef.current) return null;
+
+      const tables = data || [];
+      setFloorTables(tables);
+      setFloorTablesError("");
+      const selectedMesa = selectedMesaRef.current;
+      if (
+        selectedMesa &&
+        !tables.some(
+          (table) =>
+            table.label === selectedMesa && table.available,
+        )
+      ) {
+        setSelectedTableError(
+          `La mesa ${selectedMesa} acaba de ocuparse. Elige otra mesa para continuar.`,
+        );
+        actualizarDatoCliente("mesa", "");
+      }
+      return tables;
+    } catch (error) {
+      if (requestId !== floorTablesRequestRef.current) return null;
+      console.error("Error al cargar las mesas disponibles:", error);
+      if (!silent || floorTablesRef.current.length === 0) {
+        setFloorTablesError(
+          "No pudimos cargar las mesas. Inténtalo de nuevo más tarde.",
+        );
+      }
+      return null;
+    } finally {
+      if (requestId === floorTablesRequestRef.current) {
+        setAreFloorTablesLoading(false);
+      }
+    }
+  }, [actualizarDatoCliente, businessId]);
+
+  useEffect(() => {
+    if (metodoEntrega === "mesa") {
+      loadFloorTables();
+    } else {
+      setFloorTablesError("");
+    }
+  }, [loadFloorTables, metodoEntrega]);
+
+  useEffect(() => {
+    if (metodoEntrega !== "mesa" || !businessId) return undefined;
+
+    const refreshAvailability = () => loadFloorTables({ silent: true });
+    const channel = supabase
+      .channel(`restaurant-table-availability:${businessId}`)
+      .on(
+        "broadcast",
+        { event: "availability_changed" },
+        refreshAvailability,
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error(
+            `Canal de disponibilidad de mesas: ${status.toLowerCase()}.`,
+          );
+        }
+      });
+
+    return () => {
+      floorTablesRequestRef.current += 1;
+      supabase.removeChannel(channel);
+    };
+  }, [businessId, loadFloorTables, metodoEntrega]);
+
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
   const [orderErrorMessage, setOrderErrorMessage] = useState("");
@@ -507,6 +611,22 @@ const Checkout = ({ onVolver, onConfirmar }) => {
     setOrderErrorMessage("");
 
     try {
+      if (metodoEntrega === "mesa") {
+        const tables = await loadFloorTables();
+        const selectedTable = tables?.find(
+          (table) =>
+            table.label === datosCliente.mesa && table.available,
+        );
+        if (!selectedTable) {
+          const message = tables
+            ? "Esa mesa ya no está disponible. Elige otra mesa para continuar."
+            : "No pudimos verificar la disponibilidad de las mesas.";
+          setSelectedTableError(message);
+          if (datosCliente.mesa) actualizarDatoCliente("mesa", "");
+          setOrderErrorMessage(message);
+          return;
+        }
+      }
       actualizarDatoCliente("deliveryFee", deliveryFee);
       await onConfirmar?.(deliveryFee);
     } catch (error) {
@@ -1015,30 +1135,108 @@ const Checkout = ({ onVolver, onConfirmar }) => {
 
             {/* Mesa */}
             {metodoEntrega === "mesa" && (
-              <div style={iconWrapStyle}>
-                <Armchair size={16} style={iconInsideStyle} />
-                <input
-                  style={inputStyle}
-                  placeholder="Número de mesa"
-                  inputMode="numeric"
-                  value={datosCliente.mesa}
-                  onChange={(e) => {
-                    // Expresión regular: permite solo números
-                    const value = e.target.value.replace(/[^0-9]/g, "");
-                    actualizarDatoCliente("mesa", value);
+              <section style={{ marginBottom: "20px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    marginBottom: "10px",
+                    color: "rgba(255,255,255,0.7)",
+                    fontSize: "12px",
+                    fontWeight: 700,
                   }}
-                />
-                {datosCliente.mesa && (
-                  <button
-                    type="button"
-                    style={clearButtonStyle}
-                    onClick={() => actualizarDatoCliente("mesa", "")}
-                    aria-label="Borrar número de mesa"
-                  >
-                    <X size={16} />
-                  </button>
+                >
+                  <Armchair size={16} />
+                  Elige una mesa
+                </div>
+                {areFloorTablesLoading ? (
+                  <p style={{ ...labelStyle, fontWeight: 400 }}>
+                    Cargando mesas disponibles...
+                  </p>
+                ) : floorTablesError ? (
+                  <p role="alert" style={{ ...labelStyle, color: "#fca5a5" }}>
+                    {floorTablesError}
+                  </p>
+                ) : floorTables.length === 0 ? (
+                  <p style={{ ...labelStyle, fontWeight: 400 }}>
+                    Este negocio todavía no ha configurado mesas.
+                  </p>
+                ) : (
+                  <>
+                    {selectedTableError && (
+                      <p
+                        role="alert"
+                        style={{
+                          ...labelStyle,
+                          color: "#fca5a5",
+                          marginBottom: "10px",
+                        }}
+                      >
+                        {selectedTableError}
+                      </p>
+                    )}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                        gap: "8px",
+                      }}
+                    >
+                      {floorTables.map((table) => {
+                        const selected = datosCliente.mesa === table.label;
+                        return (
+                          <button
+                            key={table.label}
+                            type="button"
+                            disabled={!table.available}
+                            aria-pressed={selected}
+                            onClick={() => {
+                              setSelectedTableError("");
+                              actualizarDatoCliente("mesa", table.label)
+                            }}
+                            style={{
+                              minHeight: "58px",
+                              padding: "8px 4px",
+                              borderRadius: "12px",
+                              border: selected
+                                ? "1px solid #a78bfa"
+                                : "1px solid rgba(255,255,255,0.1)",
+                              background: selected
+                                ? "rgba(124,58,237,0.2)"
+                                : table.available
+                                  ? "#131313"
+                                  : "rgba(255,255,255,0.04)",
+                              color: table.available
+                                ? "#fff"
+                                : "rgba(255,255,255,0.35)",
+                              cursor: table.available ? "pointer" : "not-allowed",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: "3px",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            <span style={{ fontSize: "15px", fontWeight: 800 }}>
+                              {table.label}
+                            </span>
+                            <span style={{ fontSize: "9px" }}>
+                              {table.available ? "Disponible" : "No disponible"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {floorTables.every((table) => !table.available) && (
+                      <p style={{ ...labelStyle, marginTop: "10px", fontWeight: 400 }}>
+                        No hay mesas disponibles en este momento.
+                      </p>
+                    )}
+                  </>
                 )}
-              </div>
+              </section>
             )}
 
             {/* Domicilio */}

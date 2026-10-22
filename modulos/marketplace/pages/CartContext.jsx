@@ -10,6 +10,11 @@ import React, {
 } from "react";
 import { supabase } from "../../../src/lib/supabaseClient";
 import { calculateTipAmount } from "../../../src/lib/deliveryPricing";
+import {
+  buildProductOptionGroups,
+  getMissingProductOptionGroups,
+  getSelectedOptionsExtraPrice,
+} from "../../../src/lib/productOptions";
 
 const CartContext = createContext(null);
 const CART_STORAGE_KEY = "gloto_marketplace_cart_v1";
@@ -249,6 +254,10 @@ export const CartProvider = ({ children }) => {
             id: opt.id,
             nombre: opt.nombre,
             precioExtra: Number(opt.precioExtra) || 0,
+            grupoId: opt.grupoId || null,
+            grupoNombre: opt.grupoNombre || null,
+            priceMode: opt.priceMode || "sum",
+            maxExtraPrice: opt.maxExtraPrice ?? null,
           }))
         : variante
           ? [{ nombre: variante.nombre, precioExtra: precioExtraTotal }]
@@ -288,11 +297,22 @@ export const CartProvider = ({ children }) => {
           const productoBase = productosBase.get(linea.productoBaseId);
           if (!productoBase) return linea;
 
+          const flattenGroups = (groups) =>
+            (groups || []).flatMap((group) =>
+              (group.opciones || []).flatMap((option) => [
+                {
+                  ...option,
+                  grupoId: group.id,
+                  grupoNombre: group.nombre || group.name,
+                  priceMode: group.priceMode || "sum",
+                  maxExtraPrice: group.maxExtraPrice ?? null,
+                },
+                ...flattenGroups(option.grupos || []),
+              ]),
+            );
           const opcionesCatalogo = [
             ...(productoBase.variantes || []),
-            ...(productoBase.product_option_groups || []).flatMap(
-              (grupo) => grupo.opciones || [],
-            ),
+            ...flattenGroups(productoBase.product_option_groups || []),
           ];
           const opcionesPorId = new Map(
             opcionesCatalogo.map((opcion) => [opcion.id, opcion]),
@@ -303,15 +323,22 @@ export const CartProvider = ({ children }) => {
               ? {
                   ...opcion,
                   nombre: opcionActualizada.nombre || opcion.nombre,
-                  precioExtra: Number(opcionActualizada.precioExtra) || 0,
+                  precioExtra: Number(
+                    opcionActualizada.precio_extra ??
+                      opcionActualizada.precioExtra,
+                  ) || 0,
+                  grupoId: opcionActualizada.grupoId || opcion.grupoId || null,
+                  grupoNombre:
+                    opcionActualizada.grupoNombre ||
+                    opcion.grupoNombre ||
+                    null,
+                  priceMode: opcionActualizada.priceMode || "sum",
+                  maxExtraPrice: opcionActualizada.maxExtraPrice ?? null,
                 }
               : opcion;
           });
           const precioBase = Number(productoBase.precio) || 0;
-          const precioExtraTotal = opciones.reduce(
-            (total, opcion) => total + (Number(opcion.precioExtra) || 0),
-            0,
-          );
+          const precioExtraTotal = getSelectedOptionsExtraPrice(opciones);
           const varianteNombre =
             opciones
               .map((opcion) => opcion.nombre)
@@ -388,7 +415,8 @@ export const CartProvider = ({ children }) => {
     const productoIds = [
       ...new Set(productosEnCarrito.map((p) => p.productoBaseId || p.id)),
     ];
-    const [productosActualesRes, opcionesActualesRes] = await Promise.all([
+    const [productosActualesRes, opcionesActualesRes, gruposActualesRes] =
+      await Promise.all([
       supabase
         .from("products")
         .select("id,price,name")
@@ -399,9 +427,14 @@ export const CartProvider = ({ children }) => {
             .select("*")
             .in("product_id", productoIds)
         : Promise.resolve({ data: [], error: null }),
+      supabase
+        .from("product_option_groups")
+        .select("*")
+        .in("product_id", productoIds),
     ]);
     if (productosActualesRes.error) throw productosActualesRes.error;
     if (opcionesActualesRes.error) throw opcionesActualesRes.error;
+    if (gruposActualesRes.error) throw gruposActualesRes.error;
 
     const productosActuales = new Map(
       (productosActualesRes.data || []).map((producto) => [
@@ -415,6 +448,36 @@ export const CartProvider = ({ children }) => {
       opciones.push(opcion);
       opcionesPorProducto.set(opcion.product_id, opciones);
     });
+    const optionGroupsByProductId = new Map();
+    (gruposActualesRes.data || []).forEach((group) => {
+      const groups = optionGroupsByProductId.get(group.product_id) || [];
+      groups.push(group);
+      optionGroupsByProductId.set(group.product_id, groups);
+    });
+    const getCurrentOptionGroupData = (productId) => {
+      const groups = buildProductOptionGroups(
+        optionGroupsByProductId.get(productId) || [],
+        opcionesPorProducto.get(productId) || [],
+      );
+      const groupsById = new Map();
+      const optionsById = new Map();
+      const visitGroups = (optionGroups) =>
+        optionGroups.forEach((group) => {
+          groupsById.set(group.id, group);
+          group.opciones.forEach((option) => {
+            optionsById.set(option.id, {
+              ...option,
+              grupoId: group.id,
+              grupoNombre: group.nombre,
+              priceMode: group.priceMode,
+              maxExtraPrice: group.maxExtraPrice,
+            });
+            visitGroups(option.grupos || []);
+          });
+        });
+      visitGroups(groups);
+      return { groups, groupsById, optionsById };
+    };
     let cambioDePrecio = false;
     const productosVerificados = productos.map((producto) => {
       if (!carrito[producto.id]) return producto;
@@ -432,6 +495,8 @@ export const CartProvider = ({ children }) => {
         throw new Error("El precio actual de un producto no es válido.");
       }
 
+      const currentOptionGroupData =
+        getCurrentOptionGroupData(productoBaseId);
       const opciones = (producto.opciones || []).map((opcion) => {
         const opcionesProducto =
           opcionesPorProducto.get(productoBaseId) || [];
@@ -461,6 +526,8 @@ export const CartProvider = ({ children }) => {
           );
         }
         const opcionActual = coincidencias[0];
+        const optionFromGroup =
+          currentOptionGroupData.optionsById.get(opcionActual.id);
         const precioExtra = Number(
           opcionActual.precio_extra ??
             opcionActual.price ??
@@ -480,12 +547,40 @@ export const CartProvider = ({ children }) => {
             opcionActual.title ||
             opcion.nombre,
           precioExtra,
+          grupoId: optionFromGroup?.grupoId || null,
+          grupoNombre:
+            optionFromGroup?.grupoNombre ||
+            optionFromGroup?.nombreGrupo ||
+            null,
+          priceMode: optionFromGroup?.priceMode || "sum",
+          maxExtraPrice: optionFromGroup?.maxExtraPrice ?? null,
         };
       });
-      const precioExtraTotal = opciones.reduce(
-        (total, opcion) => total + opcion.precioExtra,
-        0,
-      );
+      const selectionByGroup = {};
+      opciones.forEach((option) => {
+        if (!option.grupoId) return;
+        const group = currentOptionGroupData.groupsById.get(option.grupoId);
+        if (!group) return;
+        if (group.selectionType === "multiple") {
+          selectionByGroup[group.id] = [
+            ...(selectionByGroup[group.id] || []),
+            option.id,
+          ];
+        } else {
+          selectionByGroup[group.id] = option.id;
+        }
+      });
+      if (
+        getMissingProductOptionGroups(
+          currentOptionGroupData.groups,
+          selectionByGroup,
+        ).length > 0
+      ) {
+        throw new Error(
+          "Las opciones requeridas de este producto cambiaron. Elimínalo del carrito y vuelve a configurarlo.",
+        );
+      }
+      const precioExtraTotal = getSelectedOptionsExtraPrice(opciones);
       const precio = precioBase + precioExtraTotal;
       const varianteNombre =
         opciones
@@ -548,6 +643,7 @@ export const CartProvider = ({ children }) => {
           varianteNombre: p.varianteNombre || null,
           opciones: Array.isArray(p.opciones)
             ? p.opciones.map((opcion) => ({
+                id: opcion.id || null,
                 nombre: opcion.nombre || opcion.name || "Opción",
                 precioExtra: Number(
                   opcion.precioExtra ??
@@ -558,6 +654,10 @@ export const CartProvider = ({ children }) => {
                     opcion.monto ??
                     0,
                 ),
+                grupoId: opcion.grupoId || null,
+                grupo: opcion.grupoNombre || null,
+                price_mode: opcion.priceMode || "sum",
+                max_extra_price: opcion.maxExtraPrice ?? null,
               }))
             : [],
         };

@@ -2,6 +2,7 @@
 
 /* 1. Definición de Variables CSS Nativas (:root) - Simplificado */
 :root {
+    color-scheme: dark;
     /* IDENTIDAD PRINCIPAL (Obsidian Violet) */
     --background: #0a0a0a;
     /* Fondo base ultra oscuro de la app */
@@ -98,8 +99,178 @@
     --spacing-layout-xl: 40px;
 }
 
+.pos-theme[data-theme="light"] {
+    color-scheme: light;
+    --background: #f1f3f5;
+    --surface: #f8f9fb;
+    --surface-bright: #e9edf1;
+    --surface-hover: #dfe4ea;
+    --on-surface: #0f172a;
+    --on-surface-variant: #475569;
+    --primary: #6d28d9;
+    --outline: rgb(15 23 42 / 16%);
+    --color-background: var(--background);
+    --color-surface: var(--surface);
+    --color-surface-bright: var(--surface-bright);
+    --color-surface-hover: var(--surface-hover);
+    --color-on-surface: var(--on-surface);
+    --color-on-surface-variant: var(--on-surface-variant);
+    --color-primary: var(--primary);
+    --color-primary-container: #7c3aed;
+    --color-on-primary: #ffffff;
+    --color-outline: var(--outline);
+    --color-success: #00c448;
+    --color-warning: #eab308;
+    --color-warning-light: rgb(234 179 8 / 10%);
+    --color-urgent: #7c3aed;
+    --color-urgent-light: rgb(124 58 237 / 15%);
+    --color-error: #ff1900;
+    --color-info: #38bdf8;
+}
 
+/* Bridge legacy Tailwind color utilities to the semantic light palette. */
+.pos-theme[data-theme="light"] {
+    background-color: var(--background);
+    color: var(--on-surface);
+}
 
+.pos-theme[data-theme="light"] .pos-loading-overlay {
+    color-scheme: dark;
+    background-color: #0a0a0a;
+    color: #ffffff;
+}
+
+.pos-theme[data-theme="light"].bg-neutral-950,
+.pos-theme[data-theme="light"] .bg-neutral-950,
+.pos-theme[data-theme="light"] [class~="bg-neutral-950/95"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-950/90"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-950/80"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-950/70"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-950/60"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-950/50"] {
+    background-color: #f1f3f5;
+}
+
+.pos-theme[data-theme="light"] .bg-neutral-900,
+.pos-theme[data-theme="light"] [class~="bg-neutral-900/95"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-900/90"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-900/80"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-900/70"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-900/60"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-900/50"] {
+    background-color: #f8f9fb;
+}
+
+.pos-theme[data-theme="light"] .bg-neutral-800,
+.pos-theme[data-theme="light"] [class~="bg-neutral-800/90"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-800/80"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-800/70"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-800/60"],
+.pos-theme[data-theme="light"] [class~="bg-neutral-800/50"] {
+    background-color: #e9edf1;
+}
+
+.pos-theme[data-theme="light"] .bg-neutral-700 {
+    background-color: #cbd5e1;
+}
+
+.pos-theme[data-theme="light"] .bg-neutral-600 {
+    background-color: #94a3b8;
+}
+
+.pos-theme[data-theme="light"] .bg-black {
+    background-color: #f8f9fb;
+}
+
+.pos-theme[data-theme="light"] .bg-white {
+    background-color: #f8f9fb;
+}
+
+.pos-theme[data-theme="light"] [class~="bg-[#080808]"],
+.pos-theme[data-theme="light"] [class~="bg-[#0c0c0c]"],
+.pos-theme[data-theme="light"] [class~="bg-[#0F0F0F]"],
+.pos-theme[data-theme="light"] [class~="bg-[#111019]"],
+.pos-theme[data-theme="light"] [class~="bg-[#141414]"],
+.pos-theme[data-theme="light"] [class~="bg-[#111]/95"] {
+    background-color: #f8f9fb;
+}
+
+.pos-theme[data-theme="light"] [class~="bg-[#7c3aed]"] {
+    color: #ffffff;
+}
+
+.pos-theme[data-theme="light"] .text-white,
+.pos-theme[data-theme="light"] [class~="text-white/90"],
+.pos-theme[data-theme="light"] [class~="text-white/80"],
+.pos-theme[data-theme="light"] [class~="text-white/70"],
+.pos-theme[data-theme="light"] [class~="text-white/60"],
+.pos-theme[data-theme="light"] [class~="text-white/55"],
+.pos-theme[data-theme="light"] [class~="text-white/50"],
+.pos-theme[data-theme="light"] [class~="text-white/45"],
+.pos-theme[data-theme="light"] [class~="text-white/40"],
+.pos-theme[data-theme="light"] [class~="text-white/30"] {
+    color: var(--on-surface);
+}
+
+.pos-theme[data-theme="light"] .text-neutral-100 {
+    color: #1e293b;
+}
+
+.pos-theme[data-theme="light"] .text-neutral-200 {
+    color: #334155;
+}
+
+.pos-theme[data-theme="light"] .text-neutral-300 {
+    color: #475569;
+}
+
+.pos-theme[data-theme="light"] .text-neutral-400 {
+    color: #475569;
+}
+
+.pos-theme[data-theme="light"] .text-neutral-500 {
+    color: #64748b;
+}
+
+.pos-theme[data-theme="light"] .text-neutral-600 {
+    color: #64748b;
+}
+
+.pos-theme[data-theme="light"] .text-slate-100 {
+    color: #0f172a;
+}
+
+.pos-theme[data-theme="light"] [class~="border-white/5"],
+.pos-theme[data-theme="light"] [class~="border-white/10"],
+.pos-theme[data-theme="light"] [class~="border-white/15"],
+.pos-theme[data-theme="light"] [class~="border-white/20"],
+.pos-theme[data-theme="light"] [class~="border-white/25"],
+.pos-theme[data-theme="light"] [class~="border-white/30"] {
+    border-color: rgb(15 23 42 / 14%);
+}
+
+.pos-theme[data-theme="light"] [class*="bg-white/"] {
+    background-color: rgb(15 23 42 / 4%);
+}
+
+.pos-theme[data-theme="light"] .text-white:is(
+    .bg-violet-500,
+    .bg-violet-600,
+    .bg-violet-700,
+    .bg-emerald-500,
+    .bg-emerald-600,
+    .bg-blue-500,
+    .bg-blue-600,
+    .bg-rose-500,
+    .bg-rose-600,
+    .bg-red-500,
+    .bg-amber-500,
+    .bg-error,
+    .bg-primary-container,
+    [class~="bg-[#7c3aed]"]
+) {
+    color: #ffffff;
+}
 
 /* 3. Estilos Base globales */
 body {

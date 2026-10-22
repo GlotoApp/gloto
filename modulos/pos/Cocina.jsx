@@ -18,7 +18,8 @@ import { useAuth } from "../../src/components/AuthContext";
 import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 import SubLoading from "./SubLoading";
 import {
-  formatKitchenOption as formatOption,
+  formatKitchenOptionGroup,
+  groupKitchenOptions,
   printKitchenComanda,
 } from "./KitchenComanda";
 
@@ -1034,18 +1035,20 @@ const TicketCard = ({
 
                     {item.opciones?.length > 0 && (
                       <div className="mt-1 pl-5 space-y-0.5">
-                        {item.opciones.map((opcion, optionIndex) => (
-                          <p
-                            key={`${key}-opcion-${optionIndex}`}
-                            className={`text-[16px] font-mono ${
-                              delivered
-                                ? "text-sky-300/45 line-through"
-                                : "text-sky-300/90"
-                            }`}
-                          >
-                            • {formatOption(opcion)}
-                          </p>
-                        ))}
+                        {groupKitchenOptions(item.opciones).map(
+                          (optionGroup, optionIndex) => (
+                            <p
+                              key={`${key}-opcion-${optionIndex}`}
+                              className={`text-[16px] font-mono ${
+                                delivered
+                                  ? "text-sky-300/45 line-through"
+                                  : "text-sky-300/90"
+                              }`}
+                            >
+                              • {formatKitchenOptionGroup(optionGroup)}
+                            </p>
+                          ),
+                        )}
                       </div>
                     )}
 
