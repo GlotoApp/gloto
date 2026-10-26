@@ -528,8 +528,7 @@ const OrderCard = memo(
                             </div>
                             <p className="text-sm font-bold text-emerald-400">
                               {formatMoney(
-                                item.subtotal ||
-                                  item.unit_price * item.quantity,
+                                getInvoiceItemPricing(item).subtotal,
                               )}
                             </p>
                           </div>
@@ -538,7 +537,9 @@ const OrderCard = memo(
                               {getSpecificUnitName(item.unit_name)
                                 ? `Precio / ${getSpecificUnitName(item.unit_name)}`
                                 : "Precio c/u"}
-                              : {formatMoney(item.unit_price)}
+                              : {formatMoney(
+                                Number(item.init_price ?? item.unit_price) || 0,
+                              )}
                             </span>
                           </div>
                           {item.options?.length > 0 && (
@@ -795,7 +796,7 @@ const InvoicePreview = ({ order, business, onClose, onPrint }) => {
               </p>
             )}
             <p className="text-base font-black">
-              TOTAL A PAGAR: {formatMoney(order.total)}
+              TOTAL A PAGAR: {formatMoney(order.totalWithoutTip ?? order.total)}
             </p>
           </div>
           <div className="mt-4 border-t border-dashed border-black pt-3 text-[11px]">
@@ -949,11 +950,6 @@ const getDeliveryDetails = (order = {}) => {
       });
     }
 
-    details.push({
-      label: "Total",
-      value: formatMoney(Number(order.total || 0)),
-    });
-
     return details;
   }
 
@@ -1059,6 +1055,7 @@ const getInvoiceItemPricing = (item) => {
 
   return {
     basePrice,
+    unitPrice: totalUnitPrice,
     subtotal: totalUnitPrice * quantity,
   };
 };
@@ -1145,7 +1142,7 @@ const buildInvoicePrintHtml = (order, business = {}) => {
       <section class="columns"><div><h2>Cliente</h2><p><strong>${escapeInvoiceHtml(order.cliente)}</strong></p><p>${escapeInvoiceHtml(order.telefono)}</p>${deliveryDetails}${mapsLink}</div>
       <div><h2>Orden y pago</h2><p><strong>Estado:</strong> ${escapeInvoiceHtml(order.status || "pendiente")}</p><p><strong>Canal:</strong> ${escapeInvoiceHtml(order.canal || "POS")}</p>${paymentDetails}</div></section>
       <table><thead><tr><th>Producto</th><th class="center">Cantidad</th><th class="right">Precio</th><th class="right">Total</th></tr></thead><tbody>${items || '<tr><td colspan="4">Sin productos</td></tr>'}</tbody></table>
-      <section class="totals"><p><span>Subtotal</span><strong>${formatMoney(subtotal)}</strong></p>${deliveryFee > 0 ? `<p><span>Domicilio</span><strong>${formatMoney(deliveryFee)}</strong></p>` : ""}<p class="grand"><span>Total a pagar</span><span>${formatMoney(order.total)}</span></p></section>
+      <section class="totals"><p><span>Subtotal</span><strong>${formatMoney(subtotal)}</strong></p>${deliveryFee > 0 ? `<p><span>Domicilio</span><strong>${formatMoney(deliveryFee)}</strong></p>` : ""}<p class="grand"><span>Total a pagar</span><span>${formatMoney(order.totalWithoutTip ?? order.total)}</span></p></section>
       ${order.observaciones ? `<section class="notes"><h2>Observaciones</h2><p>${escapeInvoiceHtml(order.observaciones)}</p></section>` : ""}
       <footer class="footer">Gracias por tu compra</footer>
     </main></body></html>`;
@@ -1167,8 +1164,14 @@ const mapDatabaseOrderToUi = (order) => {
   const total = Number(order.total || 0);
   const deliveryFee = Number(order.delivery_fee || 0);
   const tipAmount = Number(order.tip_amount || 0);
-  const isMarketplaceOrder = String(canal).toLowerCase() === "marketplace";
+  const isMarketplaceOrder =
+    String(canal).toLowerCase() === "marketplace" ||
+    Boolean(metadata.tracking_token || metadata.createdFrom === "web_app");
   const itemsSubtotal = items.reduce((sum, item) => {
+    if (isMarketplaceOrder) {
+      return sum + getInvoiceItemPricing(item).subtotal;
+    }
+
     const subtotal = Number(item.subtotal);
     if (Number.isFinite(subtotal) && subtotal > 0) return sum + subtotal;
 
@@ -1177,10 +1180,10 @@ const mapDatabaseOrderToUi = (order) => {
       (Number(item.unit_price) || 0) * (Number(item.quantity) || 0)
     );
   }, 0);
+  const marketplaceItemsSubtotal =
+    itemsSubtotal > 0 ? itemsSubtotal : Math.max(0, total);
   const totalWithoutTip = isMarketplaceOrder
-    ? itemsSubtotal > 0
-      ? itemsSubtotal + deliveryFee
-      : Math.max(0, total - tipAmount)
+    ? marketplaceItemsSubtotal + deliveryFee
     : Math.max(0, total - tipAmount);
 
   return {
@@ -1237,7 +1240,9 @@ const mapDatabaseOrderToUi = (order) => {
       init_price:
         item.init_price == null ? null : Number(item.init_price),
       unit_price: Number(item.unit_price || 0),
-      subtotal: Number(item.subtotal || 0),
+      subtotal: isMarketplaceOrder
+        ? (Number(item.unit_price) || 0) * (Number(item.quantity) || 0)
+        : Number(item.subtotal || 0),
       options: Array.isArray(item.options) ? item.options : [],
       notes: item.notes || "",
     })),

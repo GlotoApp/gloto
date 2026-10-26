@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../../../src/lib/supabaseClient";
 import { calculateTipAmount } from "../../../src/lib/deliveryPricing";
+import { getSelectedOptionsExtraPrice } from "../../../src/lib/productOptions";
 import { useCart } from "./CartContext";
 
 const fmt = (n) =>
@@ -30,6 +31,23 @@ const fmt = (n) =>
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(n);
+
+const getTrackingItemSubtotal = (item) => {
+  const unitPrice = Number(item.unit_price ?? item.precio) || 0;
+  const quantity = Number(item.quantity ?? item.cantidad) || 0;
+  const optionsExtra = getSelectedOptionsExtraPrice(
+    (item.opciones || []).filter(
+      (option) => option && typeof option === "object",
+    ),
+  );
+  const basePriceValue = item.init_price ?? item.precioBase;
+  const basePrice = Number(basePriceValue);
+  const unitTotal = Number.isFinite(basePrice)
+    ? Math.max(unitPrice, basePrice + optionsExtra)
+    : unitPrice + optionsExtra;
+
+  return unitTotal * quantity;
+};
 
 // Definición de cada posible etapa (icono + textos)
 const DEFINICION_ETAPAS = {
@@ -100,10 +118,16 @@ const mapOrderStatusToTrackingStatus = (
   const normalizedDeliveryStatus = String(deliveryStatus || "")
     .trim()
     .toLowerCase();
-  if (metodoEntrega === "domicilio" && normalizedDeliveryStatus === "delivered") {
+  if (
+    metodoEntrega === "domicilio" &&
+    normalizedDeliveryStatus === "delivered"
+  ) {
     return "entregado";
   }
-  if (metodoEntrega === "domicilio" && normalizedDeliveryStatus === "picked_up") {
+  if (
+    metodoEntrega === "domicilio" &&
+    normalizedDeliveryStatus === "picked_up"
+  ) {
     return "camino";
   }
   if (!status || status === "pending" || status === "confirmed")
@@ -303,6 +327,8 @@ const SeguimientoPedido = ({ onCerrar }) => {
               nombre: item.product_name,
               cantidad: item.quantity,
               precio: item.unit_price,
+              precioBase: item.init_price,
+              subtotal: item.subtotal,
               notas: item.notes || "",
               opciones: (item.options || []).map((option) => {
                 const name =
@@ -416,16 +442,15 @@ const SeguimientoPedido = ({ onCerrar }) => {
           nombre: item.product_name,
           cantidad: item.quantity,
           precio: item.unit_price,
+          precioBase: item.init_price,
+          subtotal: item.subtotal,
           notas: item.notes || "",
           opciones: (item.options || []).map((option) => ({
             ...(typeof option === "string" ? {} : option),
             nombre:
               typeof option === "string"
                 ? option
-                : option?.nombre ||
-                  option?.name ||
-                  option?.label ||
-                  "Opción",
+                : option?.nombre || option?.name || option?.label || "Opción",
             precioExtra:
               typeof option === "string"
                 ? 0
@@ -462,8 +487,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
                     ...prev.datosCliente,
                     nombre: data.customer_name || "",
                     telefono: data.customer_phone || "",
-                    mesa:
-                      data.mesa ?? data.metadata?.cliente?.mesa ?? "",
+                    mesa: data.mesa ?? data.metadata?.cliente?.mesa ?? "",
                     direccion:
                       data.delivery_address ||
                       data.metadata?.cliente?.direccion ||
@@ -621,14 +645,10 @@ const SeguimientoPedido = ({ onCerrar }) => {
       (isMarketplaceOrder ? deliveryFee : 0) -
       (isMarketplaceOrder ? 0 : storedTipAmount),
   );
-  const itemsSubtotal = (pedido.items || []).reduce((sum, item) => {
-    const subtotal = Number(item.subtotal);
-    if (Number.isFinite(subtotal) && subtotal > 0) return sum + subtotal;
-
-    const unitPrice = Number(item.unit_price ?? item.precio) || 0;
-    const quantity = Number(item.quantity ?? item.cantidad) || 0;
-    return sum + unitPrice * quantity;
-  }, 0);
+  const itemsSubtotal = (pedido.items || []).reduce(
+    (sum, item) => sum + getTrackingItemSubtotal(item),
+    0,
+  );
   const totalMarketplaceSinPropina =
     isMarketplaceOrder && itemsSubtotal > 0
       ? itemsSubtotal + deliveryFee
@@ -1262,7 +1282,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
                   {it.cantidad}× {it.nombre}
                 </span>
                 <span style={{ fontWeight: 700, flexShrink: 0 }}>
-                  {fmt(it.precio * it.cantidad)}
+                  {fmt(getTrackingItemSubtotal(it))}
                 </span>
               </div>
 
@@ -1401,7 +1421,6 @@ const SeguimientoPedido = ({ onCerrar }) => {
               marginTop: "10px",
               padding: "16px 14px",
               borderRadius: "14px",
-              background: "rgba(124,58,237,0.12)",
               color: "#fff",
               fontSize: "14px",
               fontWeight: 800,
@@ -1411,12 +1430,38 @@ const SeguimientoPedido = ({ onCerrar }) => {
             <span
               style={{
                 flexShrink: 0,
+                fontSize: "20px",
+                lineHeight: 1.1,
+              }}
+            >
+              {fmt(totalMarketplaceSinPropina)}
+            </span>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "12px",
+              marginTop: "10px",
+              padding: "16px 14px",
+              borderRadius: "14px",
+              background: "rgba(124,58,237,0.12)",
+              color: "#fff",
+              fontSize: "14px",
+              fontWeight: 800,
+            }}
+          >
+            <span>TOTAL CON PROPINA</span>
+            <span
+              style={{
+                flexShrink: 0,
                 fontSize: "24px",
                 lineHeight: 1.1,
                 color: "#c4b5fd",
               }}
             >
-              {fmt(totalMarketplaceSinPropina)}
+              {fmt(totalMarketplaceSinPropina + tipAmount)}
             </span>
           </div>
         </div>

@@ -117,8 +117,7 @@ export const CartProvider = ({ children }) => {
       if (!next[id]) return prev;
       if (next[id] > cantidad) {
         next[id] = Number((next[id] - cantidad).toFixed(3));
-      }
-      else delete next[id];
+      } else delete next[id];
       return next;
     });
 
@@ -323,15 +322,14 @@ export const CartProvider = ({ children }) => {
               ? {
                   ...opcion,
                   nombre: opcionActualizada.nombre || opcion.nombre,
-                  precioExtra: Number(
-                    opcionActualizada.precio_extra ??
-                      opcionActualizada.precioExtra,
-                  ) || 0,
+                  precioExtra:
+                    Number(
+                      opcionActualizada.precio_extra ??
+                        opcionActualizada.precioExtra,
+                    ) || 0,
                   grupoId: opcionActualizada.grupoId || opcion.grupoId || null,
                   grupoNombre:
-                    opcionActualizada.grupoNombre ||
-                    opcion.grupoNombre ||
-                    null,
+                    opcionActualizada.grupoNombre || opcion.grupoNombre || null,
                   priceMode: opcionActualizada.priceMode || "sum",
                   maxExtraPrice: opcionActualizada.maxExtraPrice ?? null,
                 }
@@ -417,21 +415,18 @@ export const CartProvider = ({ children }) => {
     ];
     const [productosActualesRes, opcionesActualesRes, gruposActualesRes] =
       await Promise.all([
-      supabase
-        .from("products")
-        .select("id,price,name")
-        .in("id", productoIds),
-      productoIds.length > 0
-        ? supabase
-            .from("products_items")
-            .select("*")
-            .in("product_id", productoIds)
-        : Promise.resolve({ data: [], error: null }),
-      supabase
-        .from("product_option_groups")
-        .select("*")
-        .in("product_id", productoIds),
-    ]);
+        supabase.from("products").select("id,price,name").in("id", productoIds),
+        productoIds.length > 0
+          ? supabase
+              .from("products_items")
+              .select("*")
+              .in("product_id", productoIds)
+          : Promise.resolve({ data: [], error: null }),
+        supabase
+          .from("product_option_groups")
+          .select("*")
+          .in("product_id", productoIds),
+      ]);
     if (productosActualesRes.error) throw productosActualesRes.error;
     if (opcionesActualesRes.error) throw opcionesActualesRes.error;
     if (gruposActualesRes.error) throw gruposActualesRes.error;
@@ -495,30 +490,29 @@ export const CartProvider = ({ children }) => {
         throw new Error("El precio actual de un producto no es válido.");
       }
 
-      const currentOptionGroupData =
-        getCurrentOptionGroupData(productoBaseId);
+      const currentOptionGroupData = getCurrentOptionGroupData(productoBaseId);
       const opciones = (producto.opciones || []).map((opcion) => {
-        const opcionesProducto =
-          opcionesPorProducto.get(productoBaseId) || [];
+        const opcionesProducto = opcionesPorProducto.get(productoBaseId) || [];
         const nombreOpcion = String(opcion.nombre || opcion.name || "")
           .trim()
           .toLowerCase();
         const coincidencias = opcion.id
           ? opcionesProducto.filter((actual) => actual.id === opcion.id)
-          : opcionesProducto.filter((actual) =>
-              String(
-                actual.nombre ||
-                  actual.name ||
-                  actual.title ||
-                  actual.label ||
-                  actual.option_name ||
-                  actual.option ||
-                  actual.text ||
-                  actual.value ||
-                  "",
-              )
-                .trim()
-                .toLowerCase() === nombreOpcion,
+          : opcionesProducto.filter(
+              (actual) =>
+                String(
+                  actual.nombre ||
+                    actual.name ||
+                    actual.title ||
+                    actual.label ||
+                    actual.option_name ||
+                    actual.option ||
+                    actual.text ||
+                    actual.value ||
+                    "",
+                )
+                  .trim()
+                  .toLowerCase() === nombreOpcion,
             );
         if (coincidencias.length !== 1) {
           throw new Error(
@@ -526,8 +520,9 @@ export const CartProvider = ({ children }) => {
           );
         }
         const opcionActual = coincidencias[0];
-        const optionFromGroup =
-          currentOptionGroupData.optionsById.get(opcionActual.id);
+        const optionFromGroup = currentOptionGroupData.optionsById.get(
+          opcionActual.id,
+        );
         const precioExtra = Number(
           opcionActual.precio_extra ??
             opcionActual.price ??
@@ -613,9 +608,7 @@ export const CartProvider = ({ children }) => {
 
     const totalPedido = productosVerificados.reduce(
       (total, producto) =>
-        total +
-        (carrito[producto.id] || 0) *
-          (Number(producto.precio) || 0),
+        total + (carrito[producto.id] || 0) * (Number(producto.precio) || 0),
       0,
     );
     if (Math.abs(totalPedido - totalPrecio) > 0.000001) {
@@ -670,11 +663,7 @@ export const CartProvider = ({ children }) => {
       0,
       Math.min(100, Number(deliverySettings?.tip_percent) || 0),
     );
-    const tipAmount = calculateTipAmount(
-      totalPedido,
-      deliveryFee,
-      tipPercent,
-    );
+    const tipAmount = calculateTipAmount(totalPedido, deliveryFee, tipPercent);
     const paymentMethod = metodoPago
       .map((item) => (item.metodo || "desconocido").toString().trim())
       .filter(Boolean)
@@ -944,7 +933,13 @@ export const CartProvider = ({ children }) => {
       }
 
       lines.push("");
-      const totalAPagar = pedido.total + pedido.deliveryFee;
+      const totalProductos = pedido.items.reduce(
+        (total, item) =>
+          total +
+          (Number(item.precio) || 0) * (Number(item.cantidad) || 0),
+        0,
+      );
+      const totalAPagar = totalProductos + (Number(pedido.deliveryFee) || 0);
       lines.push(`*TOTAL A PAGAR:* ${fmt(totalAPagar)}`);
 
       // Método(s) de pago
@@ -962,15 +957,15 @@ export const CartProvider = ({ children }) => {
       }
       lines.push("");
 
-      // Propina opcional si existe
-      if (pedido.tipAmount > 0) {
-        const prop = Number(pedido.tipAmount) || 0;
-        const porcentajePropina = Number(pedido.tipPercent) || 0;
-        lines.push(
-          `*PROPINA VOLUNTARIA (OPCIONAL, ${porcentajePropina}%):* ${fmt(prop)}`,
-        );
-        lines.push("");
-      }
+      const propina = Number(pedido.tipAmount) || 0;
+      const porcentajePropina = Number(pedido.tipPercent) || 0;
+      lines.push(
+        `*PROPINA VOLUNTARIA (${porcentajePropina}%):* ${fmt(propina)}`,
+      );
+
+      const totalConPropina = totalAPagar + propina;
+      lines.push(`*TOTAL CON PROPINA:* ${fmt(totalConPropina)}`);
+      lines.push("");
 
       lines.push(`*OBSERVACIONES:*`);
       lines.push(pedido.observaciones || "__");
@@ -1059,8 +1054,7 @@ export const CartProvider = ({ children }) => {
   };
 
   const actualizarDatoCliente = useCallback(
-    (campo, valor) =>
-      setDatosCliente((prev) => ({ ...prev, [campo]: valor })),
+    (campo, valor) => setDatosCliente((prev) => ({ ...prev, [campo]: valor })),
     [],
   );
 
