@@ -1,7 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-const getKitchenOptionLabel = (option) =>
+export const getKitchenOptionLabel = (option) =>
   typeof option === "string"
     ? option
     : option && typeof option === "object"
@@ -19,6 +19,34 @@ const getKitchenOptionGroupName = (option) =>
   option && typeof option === "object"
     ? option.grupo || option.grupoNombre || option.group_name || null
     : null;
+
+export const getKitchenOptionExtraPrice = (option) => {
+  if (!option || typeof option !== "object") return 0;
+
+  const value =
+    option.precio_extra ??
+    option.precioExtra ??
+    option.price_extra ??
+    option.priceExtra ??
+    option.extra_price ??
+    option.extraPrice ??
+    option.price ??
+    0;
+  const price = Number(value);
+  return Number.isFinite(price) ? price : 0;
+};
+
+export const formatKitchenOptionLabelWithPrice = (option) => {
+  const label = getKitchenOptionLabel(option);
+  const price = getKitchenOptionExtraPrice(option);
+
+  if (price <= 0) return label;
+
+  const formattedPrice = new Intl.NumberFormat("es-CO", {
+    maximumFractionDigits: 0,
+  }).format(price);
+  return `${label} (+$${formattedPrice})`;
+};
 
 export const formatKitchenOption = (option) => {
   const label = getKitchenOptionLabel(option);
@@ -48,7 +76,7 @@ export const groupKitchenOptions = (options = []) => {
 };
 
 export const formatKitchenOptionGroup = ({ groupName, options }) => {
-  const labels = options.map(getKitchenOptionLabel);
+  const labels = options.map(formatKitchenOptionLabelWithPrice);
   const joinedOptions = labels.join(" / ");
   return groupName ? `${groupName}: ${joinedOptions}` : joinedOptions;
 };
@@ -146,7 +174,9 @@ const KitchenComanda = ({ orden, labelData, logoUrl }) => {
                     <div className="product-line">
                       <span className="product-name">{item.name}</span>
                       {" - "}
-                      <span className="item-price">{formatPrice(subtotal)}</span>
+                      <span className="item-price">
+                        {formatPrice(subtotal)}
+                      </span>
                     </div>
                     {groupKitchenOptions(item.opciones || []).map(
                       (optionGroup, optionIndex) => (
@@ -239,15 +269,19 @@ export const printKitchenComanda = (orden, labelData, logoUrl) => {
       printWindow.print();
     } catch (error) {
       console.error("Error preparando la impresión de la comanda:", error);
-      window.alert(error.message || "No se pudo preparar la comanda para imprimir.");
+      window.alert(
+        error.message || "No se pudo preparar la comanda para imprimir.",
+      );
       removeIframe();
     }
   };
 
   iframeDocument.open();
-  iframeDocument.write(`<!doctype html>${renderToStaticMarkup(
-    <KitchenComanda orden={orden} labelData={labelData} logoUrl={logoUrl} />,
-  )}`);
+  iframeDocument.write(
+    `<!doctype html>${renderToStaticMarkup(
+      <KitchenComanda orden={orden} labelData={labelData} logoUrl={logoUrl} />,
+    )}`,
+  );
   iframeDocument.close();
 };
 

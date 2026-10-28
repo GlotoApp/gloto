@@ -18,7 +18,8 @@ import { useAuth } from "../../src/components/AuthContext";
 import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 import SubLoading from "./SubLoading";
 import {
-  formatKitchenOptionGroup,
+  getKitchenOptionExtraPrice,
+  getKitchenOptionLabel,
   groupKitchenOptions,
   printKitchenComanda,
 } from "./KitchenComanda";
@@ -1034,18 +1035,40 @@ const TicketCard = ({
                     </div>
 
                     {item.opciones?.length > 0 && (
-                      <div className="mt-1 pl-5 space-y-0.5">
+                      <div className="mt-0.5 pl-5 space-y-px">
                         {groupKitchenOptions(item.opciones).map(
                           (optionGroup, optionIndex) => (
                             <p
                               key={`${key}-opcion-${optionIndex}`}
-                              className={`text-[16px] font-mono ${
+                              className={`text-[14px] leading-5 font-mono ${
                                 delivered
                                   ? "text-sky-300/45 line-through"
                                   : "text-sky-300/90"
                               }`}
                             >
-                              • {formatKitchenOptionGroup(optionGroup)}
+                              <span aria-hidden="true">• </span>
+                              {optionGroup.groupName && (
+                                <strong>{optionGroup.groupName}: </strong>
+                              )}
+                              {optionGroup.options.map((option, optionValueIndex) => {
+                                const extraPrice = getKitchenOptionExtraPrice(option);
+                                return (
+                                  <React.Fragment
+                                    key={`${key}-opcion-${optionIndex}-${optionValueIndex}`}
+                                  >
+                                    {optionValueIndex > 0 && " / "}
+                                    <span>{getKitchenOptionLabel(option)}</span>
+                                    {extraPrice > 0 && (
+                                      <span>
+                                        {" "}(+$
+                                        {new Intl.NumberFormat("es-CO", {
+                                          maximumFractionDigits: 0,
+                                        }).format(extraPrice)})
+                                      </span>
+                                    )}
+                                  </React.Fragment>
+                                );
+                              })}
                             </p>
                           ),
                         )}

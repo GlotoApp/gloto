@@ -9,7 +9,8 @@ import {
   BarChart3,
   Settings,
   ChevronDown,
-  X,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   CalendarDays,
   Clock3,
@@ -619,32 +620,38 @@ const Sidebar = ({
           isExpanded ? "w-64" : "w-20"
         }`}
       >
-        <div className="h-10 flex items-center px-1 pt-10 shrink-0">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          aria-label={isExpanded ? "Contraer menú lateral" : "Expandir menú lateral"}
+          title={isExpanded ? "Contraer menú" : "Expandir menú"}
+          className="absolute -right-3 top-12 z-[60] flex h-7 w-7 items-center justify-center rounded-full border border-primary/25 bg-background text-on-surface-variant shadow-lg shadow-black/40 transition-all hover:scale-105 hover:border-primary/50 hover:text-primary active:scale-95"
+        >
+          {isExpanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+        </button>
+
+        <div className="h-16 shrink-0 px-3 pt-3">
           <div
-            className={`relative z-50 bg-background flex items-center w-full pb-2 ${
-              isExpanded
-                ? "justify-between border-b border-primary/10"
-                : "justify-center"
+            className={`relative z-50 flex h-10 w-full items-center pb-2 ${
+              isExpanded ? "justify-between border-b border-white/10" : "justify-center"
             }`}
           >
             <div
-              className={`flex items-center min-w-0 ${
+              className={`flex min-w-0 items-center ${
                 isExpanded ? "flex-1 gap-3" : "justify-center"
               }`}
             >
               <button
+                type="button"
                 onClick={!isExpanded ? toggleSidebar : undefined}
                 disabled={isExpanded}
-                className={`w-8 h-8 rounded-lg bg-transparent flex items-center justify-center font-h1 font-black text-on-primary flex-shrink-0 relative p-0 ${
-                  !isExpanded
-                    ? "hover:scale-105 active:scale-95 transition-transform cursor-pointer"
-                    : "cursor-default"
-                }`}
+                aria-label={businessName || "Gloto"}
+                className="flex h-8 w-8 flex-shrink-0 cursor-default items-center justify-center bg-transparent p-0"
               >
                 <img
                   src={businessLogo || logoPng}
                   alt={businessName || "Gloto"}
-                  className="w-7 h-7 object-contain rounded-md"
+                  className="h-7 w-7 object-contain"
                   onError={(event) => {
                     event.currentTarget.src = logoPng;
                   }}
@@ -653,30 +660,15 @@ const Sidebar = ({
 
               <span
                 title={businessName || "Gloto"}
-                className={`min-w-0 text-on-surface font-h2 font-bold tracking-tight text-lg whitespace-nowrap transition-all duration-300 ${
+                className={`min-w-0 whitespace-nowrap text-lg font-bold tracking-tight text-on-surface transition-all duration-300 ${
                   isExpanded
                     ? "flex-1 truncate opacity-100 translate-x-0"
-                    : "flex-none w-0 opacity-0 -translate-x-4 pointer-events-none overflow-hidden"
+                    : "pointer-events-none w-0 overflow-hidden opacity-0 -translate-x-4"
                 }`}
-                style={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
               >
                 {businessName || "Gloto"}
               </span>
             </div>
-
-            {isExpanded && (
-              <button
-                onClick={toggleSidebar}
-                aria-label="Cerrar menú"
-                className="shrink-0 rounded-default p-2 text-on-surface-variant transition-all hover:bg-surface-hover hover:text-primary animate-in fade-in zoom-in-95 duration-200"
-              >
-                <X size={18} />
-              </button>
-            )}
           </div>
         </div>
 

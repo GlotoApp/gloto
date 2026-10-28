@@ -80,6 +80,24 @@ const DELIVERY_STATUS_STYLES = {
   delivered: "bg-emerald-500/20 text-emerald-300",
 };
 
+const ORDER_STATUS_OPTIONS = [
+  { value: "pending", label: "Pendiente" },
+  { value: "confirmed", label: "Confirmado" },
+  { value: "preparing", label: "Preparando" },
+  { value: "ready", label: "Listo" },
+  { value: "dispatched", label: "Despachado" },
+  { value: "delivered", label: "Entregado" },
+  { value: "cancelled", label: "Cancelado" },
+];
+
+const DELIVERY_STATUS_OPTIONS = Object.entries(DELIVERY_STATUS_LABELS).map(
+  ([value, label]) => ({
+    value: `delivery_${value}`,
+    databaseValue: value,
+    label,
+  }),
+);
+
 const PERIODOS_FECHA = [
   { id: "hoy", label: "Hoy" },
   { id: "ayer", label: "Ayer" },
@@ -286,6 +304,113 @@ const formatDateTime = (value) => {
   });
 };
 
+const OrderStatusSelect = memo(
+  ({ orden, showDeliveryStatus, statusClass, onStatusChange }) => {
+    const [updating, setUpdating] = useState(false);
+    const useDeliveryValue =
+      orden.metodoEntrega === "domicilio" &&
+      orden.status === "despachado" &&
+      Boolean(orden.deliveryStatus);
+    const rawValue = useDeliveryValue
+      ? orden.deliveryStatus
+      : orden.databaseStatus || orden.status;
+    const normalizedOrderValue =
+      {
+        listo: "ready",
+        complete: "ready",
+        completed: "ready",
+        despachado: "dispatched",
+        preparado: "preparing",
+        preparando: "preparing",
+        pendiente: "pending",
+        confirmado: "confirmed",
+        entregado: "delivered",
+        cancelado: "cancelled",
+      }[String(rawValue || "").toLowerCase()] ||
+      String(rawValue || "").toLowerCase();
+    const value = useDeliveryValue
+      ? `delivery_${rawValue}`
+      : normalizedOrderValue;
+    const isDeliveryOrder = orden.metodoEntrega === "domicilio";
+    const options = isDeliveryOrder
+      ? [...ORDER_STATUS_OPTIONS, ...DELIVERY_STATUS_OPTIONS]
+      : ORDER_STATUS_OPTIONS;
+
+    const handleChange = async (event) => {
+      const nextValue = event.target.value;
+      if (!nextValue || nextValue === value) return;
+
+      setUpdating(true);
+      try {
+        const deliveryOption = DELIVERY_STATUS_OPTIONS.find(
+          (option) => option.value === nextValue,
+        );
+        await onStatusChange(
+          orden,
+          deliveryOption ? "delivery" : "order",
+          deliveryOption ? deliveryOption.databaseValue : nextValue,
+        );
+      } catch (error) {
+        console.error("Error cambiando el estado de la orden:", error);
+        alert(error?.message || "No se pudo cambiar el estado de la orden.");
+      } finally {
+        setUpdating(false);
+      }
+    };
+
+    return (
+      <div className="relative shrink-0">
+        <select
+          value={
+            options.some((option) => option.value === value)
+              ? value
+              : options[0].value
+          }
+          disabled={updating}
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+          onChange={handleChange}
+          aria-label={
+            showDeliveryStatus ? "Estado de la entrega" : "Estado de la orden"
+          }
+          className={`h-[21px] w-[100px] cursor-pointer appearance-none rounded-full border border-white/10 py-0 pl-2 pr-5 text-[10px] font-black uppercase shadow-sm outline-none transition-colors hover:border-white/20 focus:border-violet-400/60 focus:ring-2 focus:ring-violet-400/20 disabled:cursor-wait disabled:opacity-60 ${statusClass}`}
+        >
+          <optgroup label="Estado de la orden">
+            {ORDER_STATUS_OPTIONS.map((option) => (
+              <option
+                key={option.value}
+                value={option.value}
+                className="bg-neutral-900 text-white"
+              >
+                {option.label}
+              </option>
+            ))}
+          </optgroup>
+          {isDeliveryOrder && (
+            <optgroup label="Estado de domicilio">
+              {DELIVERY_STATUS_OPTIONS.map((option) => (
+                <option
+                  key={option.value}
+                  value={option.value}
+                  className="bg-neutral-900 text-white"
+                >
+                  {option.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+        <ChevronDown
+          aria-hidden="true"
+          size={11}
+          className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-70"
+        />
+      </div>
+    );
+  },
+);
+
 const OrderCard = memo(
   ({
     orden,
@@ -298,6 +423,7 @@ const OrderCard = memo(
     onShareTracking,
     onEdit,
     onOpenMap,
+    onStatusChange,
     canDelete,
   }) => {
     const [isOpen, setIsOpen] = useState(false);
@@ -331,9 +457,17 @@ const OrderCard = memo(
             : "bg-neutral-900/40 hover:bg-neutral-900/70"
         }`}
       >
-        <button
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
-          className="w-full rounded-2xl p-4 text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setIsOpen((current) => !current);
+            }
+          }}
+          className="w-full cursor-pointer rounded-2xl p-4 text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
         >
           {/* 📱 MOBILE */}
           <div className="flex flex-col gap-1 lg:hidden">
@@ -356,17 +490,12 @@ const OrderCard = memo(
               >
                 {displayOrderType(orden.metodoEntrega)}
               </span>
-              <span
-                className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass}`}
-              >
-                {formattedStatusLabel}
-              </span>
-              <motion.div
-                animate={{ rotate: isOpen ? 180 : 0 }}
-                className="rounded-full bg-white/5 p-1.5"
-              >
-                <ChevronDown size={14} />
-              </motion.div>
+              <OrderStatusSelect
+                orden={orden}
+                showDeliveryStatus={showDeliveryStatus}
+                statusClass={statusClass}
+                onStatusChange={onStatusChange}
+              />
             </div>
           </div>
 
@@ -401,20 +530,15 @@ const OrderCard = memo(
               </p>
             </div>
             <div className="col-span-2 flex justify-end items-center gap-2">
-              <span
-                className={`px-2 py-1 rounded-full text-xs font-semibold ${statusClass}`}
-              >
-                {formattedStatusLabel}
-              </span>
-              <motion.div
-                animate={{ rotate: isOpen ? 180 : 0 }}
-                className="rounded-full bg-white/5 p-2"
-              >
-                <ChevronDown size={16} />
-              </motion.div>
+              <OrderStatusSelect
+                orden={orden}
+                showDeliveryStatus={showDeliveryStatus}
+                statusClass={statusClass}
+                onStatusChange={onStatusChange}
+              />
             </div>
           </div>
-        </button>
+        </div>
 
         {/* EXPAND */}
         <AnimatePresence>
@@ -537,7 +661,8 @@ const OrderCard = memo(
                               {getSpecificUnitName(item.unit_name)
                                 ? `Precio / ${getSpecificUnitName(item.unit_name)}`
                                 : "Precio c/u"}
-                              : {formatMoney(
+                              :{" "}
+                              {formatMoney(
                                 Number(item.init_price ?? item.unit_price) || 0,
                               )}
                             </span>
@@ -765,9 +890,7 @@ const InvoicePreview = ({ order, business, onClose, onPrint }) => {
                     <div className="font-bold">{item.product_name}</div>
                     {item.options?.length > 0 && (
                       <div className="text-[10px]">
-                        {item.options
-                          .map(getOptionLabelWithPrice)
-                          .join(" · ")}
+                        {item.options.map(getOptionLabelWithPrice).join(" · ")}
                       </div>
                     )}
                     {item.notes && (
@@ -842,7 +965,7 @@ const InvoicePreview = ({ order, business, onClose, onPrint }) => {
 
 const normalizeStatus = (status) => {
   const key = String(status || "").toLowerCase();
-  if (["listo", "ready"].includes(key)) {
+  if (["listo", "ready", "complete"].includes(key)) {
     return "listo";
   }
   if (["dispatched", "despachado"].includes(key)) {
@@ -1175,10 +1298,7 @@ const mapDatabaseOrderToUi = (order) => {
     const subtotal = Number(item.subtotal);
     if (Number.isFinite(subtotal) && subtotal > 0) return sum + subtotal;
 
-    return (
-      sum +
-      (Number(item.unit_price) || 0) * (Number(item.quantity) || 0)
-    );
+    return sum + (Number(item.unit_price) || 0) * (Number(item.quantity) || 0);
   }, 0);
   const marketplaceItemsSubtotal =
     itemsSubtotal > 0 ? itemsSubtotal : Math.max(0, total);
@@ -1237,8 +1357,7 @@ const mapDatabaseOrderToUi = (order) => {
       product_name: item.product_name || "Producto",
       quantity: Number(item.quantity || 0),
       unit_name: item.unit_name || "UNIDAD",
-      init_price:
-        item.init_price == null ? null : Number(item.init_price),
+      init_price: item.init_price == null ? null : Number(item.init_price),
       unit_price: Number(item.unit_price || 0),
       subtotal: isMarketplaceOrder
         ? (Number(item.unit_price) || 0) * (Number(item.quantity) || 0)
@@ -1549,6 +1668,40 @@ const Ordenes = () => {
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayKey = getLocalDateKey(yesterday);
+
+  const handleStatusChange = async (orden, type, value) => {
+    const updates =
+      type === "delivery"
+        ? {
+            status: "dispatched",
+            delivery_status: value,
+            updated_at: new Date().toISOString(),
+          }
+        : { status: value, updated_at: new Date().toISOString() };
+    const { data, error } = await supabase
+      .from("orders")
+      .update(updates)
+      .eq("id", orden.id)
+      .select("id")
+      .single();
+
+    if (error) throw error;
+    if (!data) throw new Error("No se pudo actualizar la orden.");
+
+    setOrders((current) =>
+      current.map((currentOrder) => {
+        if (currentOrder.id !== orden.id) return currentOrder;
+        if (type === "delivery") {
+          return { ...currentOrder, status: "despachado", databaseStatus: "dispatched", deliveryStatus: value };
+        }
+        return {
+          ...currentOrder,
+          status: normalizeStatus(value),
+          databaseStatus: value,
+        };
+      }),
+    );
+  };
 
   const handleDelete = async (orden) => {
     if (!canDelete) {
@@ -2117,6 +2270,7 @@ const Ordenes = () => {
                                         onShareTracking={handleShareTracking}
                                         onEdit={handleEdit}
                                         onOpenMap={handleOpenMap}
+                                        onStatusChange={handleStatusChange}
                                         canDelete={canDelete}
                                       />
                                     </React.Fragment>

@@ -721,6 +721,7 @@ const POS = () => {
   const [sentOrder, setSentOrder] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [optionModalOpen, setOptionModalOpen] = useState(false);
+  const [focusOptionNote, setFocusOptionNote] = useState(false);
   const [activeProduct, setActiveProduct] = useState(null);
   const [optionSelections, setOptionSelections] = useState({});
   const [optionNote, setOptionNote] = useState("");
@@ -768,6 +769,7 @@ const POS = () => {
   const optionNoteInputRef = useRef(null);
   const modalOverlayRef = useRef(null);
   const prevActiveElRef = useRef(null);
+  const instructionTextareaRef = useRef(null);
 
   useEffect(() => {
     if (!isModalOpen) return;
@@ -781,8 +783,9 @@ const POS = () => {
     document.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const ta = document.getElementById("instruction-textarea");
-    if (ta) ta.focus();
+    requestAnimationFrame(() => {
+      instructionTextareaRef.current?.focus();
+    });
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
@@ -793,9 +796,13 @@ const POS = () => {
   }, [isModalOpen]);
 
   useEffect(() => {
-    if (!optionModalOpen) return;
-    optionNoteInputRef.current?.focus();
-  }, [optionModalOpen, activeProduct]);
+    if (!optionModalOpen || !focusOptionNote) return;
+
+    requestAnimationFrame(() => {
+      optionNoteInputRef.current?.focus();
+      setFocusOptionNote(false);
+    });
+  }, [optionModalOpen, focusOptionNote]);
 
   const fetchCategoriesForBusiness = async (businessId) => {
     setIsLoadingCategories(true);
@@ -2057,6 +2064,7 @@ const POS = () => {
       setOptionNote("");
       setOptionQuantity("1");
       setOptionValidationError("");
+      setFocusOptionNote(false);
       setOptionModalOpen(true);
       return;
     }
@@ -2170,6 +2178,7 @@ const POS = () => {
       setOptionSelections({});
       setOptionNote(existingNote);
       setOptionValidationError("");
+      setFocusOptionNote(true);
       setOptionModalOpen(true);
       return;
     }
@@ -3491,6 +3500,11 @@ const POS = () => {
           : editingOrder.orderStatus || orderStatus;
       orderPayload.table_status = deliveryMethod === "table" ? "ocupada" : null;
       orderPayload.is_reservation = false;
+      if (Boolean(editingOrder.isReservation)) {
+        orderPayload.created_at = new Date().toISOString();
+        orderPayload.fecha_reserva = null;
+        orderPayload.hora_reserva = null;
+      }
     }
 
     const orderItemsPayload = items.map((item) => ({
@@ -3526,6 +3540,21 @@ const POS = () => {
         );
 
         if (replaceOrderError) throw replaceOrderError;
+
+        if (Boolean(editingOrder.isReservation)) {
+          const activatedAt = new Date().toISOString();
+          const { error: activationError } = await supabase
+            .from("orders")
+            .update({
+              created_at: activatedAt,
+              fecha_reserva: null,
+              hora_reserva: null,
+              updated_at: activatedAt,
+            })
+            .eq("id", editingOrder.orderId);
+
+          if (activationError) throw activationError;
+        }
 
         const updatedOrderForInvoice = {
           ...orderPayload,
@@ -3900,7 +3929,10 @@ const POS = () => {
               <span className="material-symbols-outlined text-sm lg:text-base">
                 {paymentLabels[method].icon}
               </span>
-              <span className="text-[7px]  font-black uppercase">
+              <span
+                title={paymentLabels[method].label}
+                className="w-full truncate px-1 text-center text-[7px] font-black uppercase"
+              >
                 {paymentLabels[method].label}
               </span>
             </button>
@@ -4572,8 +4604,11 @@ const POS = () => {
                             </span>
                           </p>
                           <button
+                            type="button"
                             onClick={(e) => openNoteModal(e, product)}
-                            className="w-5 h-5 flex items-center justify-center text-on-surface-variant hover:text-primary-container transition-colors "
+                            className="w-5 h-5 flex items-center justify-center text-on-surface-variant hover:text-primary-container transition-colors"
+                            title="Agregar instrucciones especiales"
+                            aria-label={`Agregar instrucciones especiales a ${product.name}`}
                           >
                             <span className="material-symbols-outlined text-xl">
                               add_notes
@@ -5787,6 +5822,9 @@ const POS = () => {
                   <p className="text-primary font-label-caps text-lg font-black uppercase tracking-[0.15em] truncate">
                     {activeProduct?.name || "Producto"}
                   </p>
+                  <p className="mt-1 text-base font-black text-primary">
+                    $ {formatPrice(Number(activeProduct?.price || 0))}
+                  </p>
                   <h3 className="text-on-surface font-h2 font-black text-xs uppercase italic tracking-tight">
                     Instrucciones
                   </h3>
@@ -5808,7 +5846,7 @@ const POS = () => {
               {/* Textarea */}
               <div className="relative w-full mb-6">
                 <textarea
-                  autoFocus
+                  ref={instructionTextareaRef}
                   id="instruction-textarea"
                   className="w-full bg-background border border-outline rounded-lg p-4 text-on-surface text-base placeholder:text-on-surface-variant/40 outline-none min-h-[140px] resize-none transition-all duration-300 focus:border-primary focus:ring-1 focus:ring-primary/20"
                   value={instruction}
@@ -5856,11 +5894,15 @@ const POS = () => {
                     <h3 className="text-lg font-semibold tracking-tight text-on-surface truncate">
                       {activeProduct?.name || "Seleccionar opciones"}
                     </h3>
+                    <p className="mt-1 text-base font-black text-primary">
+                      $ {formatPrice(Number(activeProduct?.price || 0))}
+                    </p>
                   </div>
                 </div>
                 <button
                   onClick={() => {
                     setOptionModalOpen(false);
+                    setFocusOptionNote(false);
                     setActiveProduct(null);
                     setOptionSelections({});
                     setOptionNote("");
@@ -5905,7 +5947,7 @@ const POS = () => {
                     ref={optionNoteInputRef}
                     value={optionNote}
                     onChange={(e) => setOptionNote(e.target.value)}
-                    className="w-full min-h-[110px] rounded-[1.5rem] border border-white/10 bg-background/90 p-4 text-base text-on-surface outline-none resize-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    className="h-20 w-full rounded-[1.5rem] border border-white/10 bg-background/90 px-4 py-3 text-[17px] leading-6 text-on-surface outline-none resize-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                     placeholder="Añade una instrucción especial (opcional)"
                   />
                 </div>
