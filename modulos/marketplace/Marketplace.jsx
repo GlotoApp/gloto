@@ -337,7 +337,7 @@ const Marketplace = () => {
                     type="button"
                     onClick={() => {
                       setMenuOpen(false);
-                      navigate("/acceso?solicitud=gloto");
+                      navigate("/solicitar-negocio");
                     }}
                     className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-3 text-sm font-black text-white transition hover:bg-violet-400"
                   >

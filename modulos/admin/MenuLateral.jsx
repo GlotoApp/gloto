@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   X,
   Printer,
+  ClipboardList,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAdminRealtime } from "./useAdminRealtime";
@@ -47,6 +48,7 @@ const navItems = [
   { label: "Resumen", path: "/gestion/resumen", icon: LayoutDashboard },
   { label: "Marketplace", path: "/gestion/marketplace", icon: Tag },
   { label: "Tiendas", path: "/gestion/tiendas", icon: Store },
+  { label: "Solicitudes", path: "/gestion/solicitudes-negocio", icon: ClipboardList },
   {
     label: "Domiciliarios",
     path: "/gestion/domiciliarios",
@@ -77,6 +79,7 @@ const SuperAdminSidebar = ({
     location.pathname.startsWith("/gestion/finanzas"),
   );
   const [pendingCounts, setPendingCounts] = useState(null);
+  const [pendingBusinessRequests, setPendingBusinessRequests] = useState(0);
   const [paymentsOpen, setPaymentsOpen] = useState(() =>
     location.pathname.startsWith("/gestion/finanzas/pagos"),
   );
@@ -164,6 +167,22 @@ const SuperAdminSidebar = ({
     });
   }, []);
 
+  const loadPendingBusinessRequests = useCallback(async () => {
+    const { count, error } = await supabase
+      .from("business_join_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending");
+    if (!error) setPendingBusinessRequests(count || 0);
+  }, []);
+
+  useAdminRealtime(
+    [
+      "business_join_requests",
+    ],
+    loadPendingBusinessRequests,
+    true,
+  );
+
   useAdminRealtime(
     [
       "payment_records",
@@ -222,43 +241,47 @@ const SuperAdminSidebar = ({
         isExpanded ? "w-64" : "w-20"
       } flex h-screen flex-col border-r border-violet-400/20 bg-neutral-950 transition-all duration-300`}
     >
-      <div className="flex h-20 items-center justify-between border-b border-white/[0.06] px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300">
-            <Crown size={19} />
+      <div className="flex h-[72px] shrink-0 items-center border-b border-white/[0.06] px-3">
+        <div className={`flex w-full items-center ${isExpanded ? "gap-3" : "justify-center"}`}>
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-500/15 text-violet-300 shadow-[inset_0_1px_rgba(255,255,255,.06)]">
+            <Crown size={19} strokeWidth={2.25} />
           </span>
           {isExpanded && (
-            <div className="min-w-0">
-              <p className="truncate text-sm font-black text-white">Gloto</p>
-              <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-violet-300">
-                Administración
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[15px] font-extrabold leading-none text-white">Gloto</p>
+              <p className="mt-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-violet-300/80">
+                Superadministrador
               </p>
             </div>
           )}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className={`shrink-0 rounded-lg text-neutral-500 transition hover:bg-white/[0.06] hover:text-white ${isExpanded ? "h-9 w-9" : "absolute top-[84px] flex h-8 w-8 items-center justify-center"}`}
+            aria-label={isExpanded ? "Contraer menú" : "Expandir menú"}
+          >
+            {isExpanded ? <X size={17} /> : <Menu size={17} />}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          className="shrink-0 rounded-lg p-2 text-neutral-400 transition hover:bg-white/[0.06] hover:text-white"
-          aria-label={isExpanded ? "Contraer menú" : "Expandir menú"}
-        >
-          {isExpanded ? <X size={17} /> : <Menu size={17} />}
-        </button>
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-5">
+      <nav className="admin-sidebar-scroll flex-1 overflow-y-auto px-3 py-4">
+        {isExpanded && (
+          <p className="mb-2 px-3 text-[9px] font-bold uppercase tracking-[0.18em] text-neutral-600">Administración</p>
+        )}
+        <div className="space-y-1">
         {navItems.slice(0, 4).map(({ label, path, icon: Icon }) => (
           <NavLink
             key={path}
             to={path}
             title={isExpanded ? undefined : label}
             className={({ isActive }) =>
-              `group relative flex h-10 w-full items-center rounded-lg transition-all ${
+              `group relative flex h-11 w-full items-center rounded-xl transition-colors duration-150 ${
                 isExpanded ? "gap-3 px-3" : "justify-center px-0"
               } ${
                 isActive
-                  ? "bg-violet-500/15 text-violet-300"
-                  : "text-neutral-400 hover:bg-white/[0.05] hover:text-white"
+                  ? "border border-violet-400/10 bg-violet-500/[0.14] text-violet-300"
+                  : "border border-transparent text-neutral-400 hover:bg-white/[0.045] hover:text-neutral-100"
               }`
             }
           >
@@ -275,18 +298,27 @@ const SuperAdminSidebar = ({
                     {label}
                   </span>
                 )}
+                {path === "/gestion/solicitudes-negocio" && pendingBusinessRequests > 0 && (
+                  <span
+                    aria-label={`${pendingBusinessRequests} solicitudes nuevas`}
+                    className={isExpanded ? "ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-pink-500 px-1.5 py-0.5 text-[10px] font-black leading-none text-white shadow-[0_0_12px_rgba(236,72,153,.45)]" : "absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-neutral-950 bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,.8)]"}
+                  >
+                    {isExpanded ? (pendingBusinessRequests > 99 ? "99+" : pendingBusinessRequests) : null}
+                  </span>
+                )}
               </>
             )}
           </NavLink>
         ))}
-        <div className="flex flex-col">
+        </div>
+        <div className="mt-1 flex flex-col">
           <button
             type="button"
             onClick={handleFinanceToggle}
             aria-expanded={isExpanded && financesOpen}
             aria-controls="admin-finance-submenu"
             title={isExpanded ? undefined : "Finanzas"}
-            className={`group relative flex h-10 w-full items-center rounded-lg transition-all ${
+            className={`group relative flex h-11 w-full items-center rounded-xl transition-colors duration-150 ${
               isExpanded ? "gap-3 px-3" : "justify-center px-0"
             } ${
               isFinancesActive
@@ -396,18 +428,20 @@ const SuperAdminSidebar = ({
             </div>
           )}
         </div>
+        {isExpanded && <p className="mb-2 mt-5 px-3 text-[9px] font-bold uppercase tracking-[0.18em] text-neutral-600">Operación</p>}
+        <div className="space-y-1">
         {navItems.slice(4).map(({ label, path, icon: Icon }) => (
           <NavLink
             key={path}
             to={path}
             title={isExpanded ? undefined : label}
             className={({ isActive }) =>
-              `group relative flex h-10 w-full items-center rounded-lg transition-all ${
+              `group relative flex h-11 w-full items-center rounded-xl transition-colors duration-150 ${
                 isExpanded ? "gap-3 px-3" : "justify-center px-0"
               } ${
                 isActive
-                  ? "bg-violet-500/15 text-violet-300"
-                  : "text-neutral-400 hover:bg-white/[0.05] hover:text-white"
+                  ? "border border-violet-400/10 bg-violet-500/[0.14] text-violet-300"
+                  : "border border-transparent text-neutral-400 hover:bg-white/[0.045] hover:text-neutral-100"
               }`
             }
           >
@@ -428,9 +462,10 @@ const SuperAdminSidebar = ({
             )}
           </NavLink>
         ))}
+        </div>
       </nav>
 
-      <div className="border-t border-white/[0.06] p-3">
+      <div className="shrink-0 border-t border-white/[0.06] bg-neutral-950 p-3">
         {signOutError && (
           <p className="mb-2 text-xs text-rose-300" role="alert">
             {signOutError}
@@ -442,7 +477,7 @@ const SuperAdminSidebar = ({
           disabled={isSigningOut}
           title={isExpanded ? undefined : "Cerrar sesión"}
           aria-label="Cerrar sesión"
-          className={`group flex h-10 w-full items-center rounded-lg text-neutral-400 transition hover:bg-white/[0.05] hover:text-white disabled:cursor-wait disabled:opacity-60 ${
+          className={`group flex h-11 w-full items-center rounded-xl text-neutral-400 transition hover:bg-rose-500/[0.08] hover:text-rose-300 disabled:cursor-wait disabled:opacity-60 ${
             isExpanded ? "gap-3 px-3" : "justify-center"
           }`}
         >

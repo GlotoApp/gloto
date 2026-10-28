@@ -15,6 +15,7 @@ import SinConexion from "../modulos/pos/SinConexion";
 import Upss from "../modulos/pos/Upss";
 import { useAuth } from "./components/AuthContext";
 import Acceso from "../modulos/admin/Acceso";
+import SolicitudNegocio from "../modulos/marketplace/SolicitudNegocio";
 import { supabase } from "./lib/supabaseClient";
 import RequireDomiciliario from "../modulos/empleados/RequireDomiciliario";
 import {
@@ -57,6 +58,9 @@ const GestionCompleta = lazy(() => import("../modulos/admin/GestionCompleta"));
 const EstructuraAdmin = lazy(() => import("../modulos/admin/Estructura"));
 const Resumen = lazy(() => import("../modulos/admin/Resumen"));
 const Tiendas = lazy(() => import("../modulos/admin/Tiendas"));
+const SolicitudesNegocio = lazy(
+  () => import("../modulos/admin/SolicitudesNegocio"),
+);
 const CrearCuentaSuperAdmin = lazy(
   () => import("../modulos/admin/CrearCuenta"),
 );
@@ -587,6 +591,7 @@ function App() {
             }
           />
           <Route path="/acceso" element={<Acceso />} />
+          <Route path="/solicitar-negocio" element={<SolicitudNegocio />} />
           <Route
             path="/login-superadmin"
             element={<Navigate to="/acceso" replace />}
@@ -616,6 +621,10 @@ function App() {
             <Route index element={<Navigate to="resumen" replace />} />
             <Route path="resumen" element={<Resumen />} />
             <Route path="tiendas" element={<Tiendas />} />
+            <Route
+              path="solicitudes-negocio"
+              element={<SolicitudesNegocio />}
+            />
             <Route
               path="domiciliarios"
               element={<DomiciliariosPublicos />}

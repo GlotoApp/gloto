@@ -14,6 +14,21 @@ import { useAdminRealtime } from "./useAdminRealtime";
 const inputClass =
   "w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-violet-400";
 
+const COURIER_TOPUP_AMOUNTS = [5000, 10000, 20000, 30000, 40000, 50000];
+
+const PROMOTION_PACKAGES = [
+  { days: 7, label: "1 semana" },
+  { days: 14, label: "2 semanas" },
+  { days: 21, label: "3 semanas" },
+  { days: 30, label: "Mensual" },
+];
+
+const formatCurrency = (value) => new Intl.NumberFormat("es-CO", {
+  style: "currency",
+  currency: "COP",
+  maximumFractionDigits: 0,
+}).format(Number(value || 0));
+
 const isValidPaymentUrl = (value) => {
   try {
     return ["http:", "https:"].includes(new URL(value).protocol);
@@ -26,6 +41,9 @@ export default function LinksPagoSuscripciones() {
   const [periods, setPeriods] = useState([]);
   const [paymentLinks, setPaymentLinks] = useState({});
   const [savedPaymentLinks, setSavedPaymentLinks] = useState({});
+  const [promotionLinks, setPromotionLinks] = useState({});
+  const [savedPromotionLinks, setSavedPromotionLinks] = useState({});
+  const [courierTopupLinks, setCourierTopupLinks] = useState({});
   const [loading, setLoading] = useState(true);
   const [savingCode, setSavingCode] = useState("");
   const [error, setError] = useState("");
@@ -33,7 +51,7 @@ export default function LinksPagoSuscripciones() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const loadConfiguration = useCallback(async () => {
-    const [periodsResult, linksResult] = await Promise.all([
+    const [periodsResult, linksResult, promotionLinksResult, courierTopupLinksResult, pricingResult, tiersResult] = await Promise.all([
       supabase
         .from("billing_plan_periods")
         .select(
@@ -43,10 +61,40 @@ export default function LinksPagoSuscripciones() {
       supabase
         .from("billing_plan_payment_links")
         .select("period_id,payment_url"),
+      supabase
+        .from("promotion_payment_links")
+        .select("duration_days,payment_url,amount"),
+      supabase
+        .from("courier_topup_payment_links")
+        .select("amount,payment_url"),
+      supabase
+        .from("promotion_pricing_settings")
+        .select("daily_rate")
+        .eq("id", true)
+        .maybeSingle(),
+      supabase
+        .from("promotion_discount_tiers")
+        .select("min_days,discount_percent")
+        .eq("is_active", true),
     ]);
 
-    if (periodsResult.error || linksResult.error) {
-      return { error: periodsResult.error || linksResult.error };
+    if (
+      periodsResult.error ||
+      linksResult.error ||
+      promotionLinksResult.error ||
+      courierTopupLinksResult.error ||
+      pricingResult.error ||
+      tiersResult.error
+    ) {
+      return {
+        error:
+          periodsResult.error ||
+          linksResult.error ||
+          promotionLinksResult.error ||
+          courierTopupLinksResult.error ||
+          pricingResult.error ||
+          tiersResult.error,
+      };
     }
 
     const loadedLinks = Object.fromEntries(
@@ -55,9 +103,31 @@ export default function LinksPagoSuscripciones() {
         payment_url || "",
       ]),
     );
+    const configuredPromotionLinks = Object.fromEntries(
+      (promotionLinksResult.data || []).map((link) => [
+        link.duration_days,
+        { url: link.payment_url || "", amount: Number(link.amount || 0) },
+      ]),
+    );
+    const dailyRate = Number(pricingResult.data?.daily_rate || 0);
+    PROMOTION_PACKAGES.forEach(({ days }) => {
+      const tier = (tiersResult.data || []).find((item) => item.min_days === days);
+      const subtotal = Math.round(days * dailyRate);
+      const discount = Math.round(subtotal * Number(tier?.discount_percent || 0) / 100);
+      configuredPromotionLinks[days] ||= {
+        url: "",
+        amount: subtotal - discount,
+      };
+    });
+
+    const courierTopupLinks = Object.fromEntries(
+      (courierTopupLinksResult.data || []).map((link) => [link.amount, link.payment_url || ""]),
+    );
     return {
       periods: periodsResult.data || [],
       paymentLinks: loadedLinks,
+      promotionLinks: configuredPromotionLinks,
+      courierTopupLinks,
     };
   }, []);
 
@@ -68,7 +138,7 @@ export default function LinksPagoSuscripciones() {
   );
 
   useAdminRealtime(
-    ["billing_plan_periods", "billing_plan_payment_links"],
+    ["billing_plan_periods", "billing_plan_payment_links", "promotion_payment_links", "courier_topup_payment_links"],
     () => {
       if (!hasUnsavedChanges && !savingCode) {
         setRefreshKey((current) => current + 1);
@@ -98,6 +168,9 @@ export default function LinksPagoSuscripciones() {
           setPeriods(result.periods);
           setPaymentLinks(result.paymentLinks);
           setSavedPaymentLinks(result.paymentLinks);
+          setPromotionLinks(result.promotionLinks);
+          setSavedPromotionLinks(result.promotionLinks);
+          setCourierTopupLinks(result.courierTopupLinks);
         }
         setLoading(false);
       })
@@ -168,6 +241,61 @@ export default function LinksPagoSuscripciones() {
     setSavingCode("");
   };
 
+  const savePromotionLink = async (promotionPackage) => {
+    const configuration = promotionLinks[promotionPackage.days] || { url: "", amount: 0 };
+    const paymentUrl = String(configuration.url || "").trim();
+    const amount = Number(configuration.amount || 0);
+
+    if (paymentUrl && !isValidPaymentUrl(paymentUrl)) {
+      setMessage({ type: "error", text: "Ingresa un enlace válido que comience con http:// o https://." });
+      return;
+    }
+    if (!Number.isFinite(amount) || amount < 0) {
+      setMessage({ type: "error", text: "Ingresa un valor válido para la promoción." });
+      return;
+    }
+
+    setSavingCode(`promotion-${promotionPackage.days}`);
+    setMessage(null);
+    const result = paymentUrl
+      ? await supabase.from("promotion_payment_links").upsert(
+          { duration_days: promotionPackage.days, payment_url: paymentUrl, amount },
+          { onConflict: "duration_days" },
+        )
+      : await supabase.from("promotion_payment_links").delete().eq("duration_days", promotionPackage.days);
+
+    if (result.error) {
+      setMessage({ type: "error", text: result.error.message || "No se pudo guardar el pago de promoción." });
+    } else {
+      const savedConfiguration = { url: paymentUrl, amount };
+      setSavedPromotionLinks((current) => ({ ...current, [promotionPackage.days]: savedConfiguration }));
+      setMessage({ type: "success", text: `Pago de ${promotionPackage.label} guardado.` });
+    }
+    setSavingCode("");
+  };
+
+  const saveCourierTopupLink = async (amount) => {
+    const paymentUrl = String(courierTopupLinks[amount] || "").trim();
+    if (paymentUrl && !isValidPaymentUrl(paymentUrl)) {
+      setMessage({ type: "error", text: "Ingresa un enlace válido que comience con http:// o https://." });
+      return;
+    }
+    setSavingCode(`courier-${amount}`);
+    setMessage(null);
+    const result = paymentUrl
+      ? await supabase.from("courier_topup_payment_links").upsert(
+          { amount, payment_url: paymentUrl },
+          { onConflict: "amount" },
+        )
+      : await supabase.from("courier_topup_payment_links").delete().eq("amount", amount);
+    if (result.error) {
+      setMessage({ type: "error", text: result.error.message || "No se pudo guardar el link de recarga." });
+    } else {
+      setMessage({ type: "success", text: `Link de recarga de $${Number(amount).toLocaleString("es-CO")} guardado.` });
+    }
+    setSavingCode("");
+  };
+
   return (
     <SuperAdminSectionShell
       title="Links de pago y QR de pago"
@@ -196,6 +324,116 @@ export default function LinksPagoSuscripciones() {
         >
           {message.text}
         </p>
+      )}
+
+      {!loading && !error && (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-base font-bold text-white">Recargas de domiciliarios</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              Configura un link de pago para cada tarifa de saldo.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {COURIER_TOPUP_AMOUNTS.map((amount) => {
+              const url = courierTopupLinks[amount] || "";
+              const validUrl = isValidPaymentUrl(url);
+              const isSaving = savingCode === `courier-${amount}`;
+              return (
+                <section key={amount} className="rounded-2xl border border-white/10 bg-neutral-900/75 p-4">
+                  <p className="text-sm font-bold text-white">{formatCurrency(amount)}</p>
+                  <label className="mt-3 block">
+                    <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-neutral-400">Link de pago</span>
+                    <input
+                      type="url"
+                      value={url}
+                      onChange={(event) => setCourierTopupLinks((current) => ({ ...current, [amount]: event.target.value }))}
+                      placeholder="https://tu-proveedor.com/pagar"
+                      className={inputClass}
+                    />
+                  </label>
+                  <div className="mt-4 flex h-32 items-center justify-center rounded-lg bg-white p-3">
+                    {validUrl ? <QRCodeSVG value={url.trim()} size={104} bgColor="#ffffff" fgColor="#111111" level="M" /> : <p className="text-center text-xs text-neutral-500">Ingresa un link válido.</p>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => saveCourierTopupLink(amount)}
+                    disabled={isSaving}
+                    className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3 text-xs font-bold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
+                  >
+                    <Save size={15} /> Guardar
+                  </button>
+                </section>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {!loading && !error && (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-base font-bold text-white">Promociones</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              Configura el link y el valor exacto que aparecerá para cada duración.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {PROMOTION_PACKAGES.map((promotionPackage) => {
+              const configuration = promotionLinks[promotionPackage.days] || { url: "", amount: 0 };
+              const validUrl = isValidPaymentUrl(configuration.url);
+              const isSaving = savingCode === `promotion-${promotionPackage.days}`;
+              return (
+                <section key={promotionPackage.days} className="rounded-2xl border border-white/10 bg-neutral-900/75 p-4">
+                  <p className="text-sm font-bold text-white">{promotionPackage.label}</p>
+                  <p className="mt-1 text-xs text-neutral-500">{promotionPackage.days} días</p>
+                  <label className="mt-4 block">
+                    <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-neutral-400">Link de pago</span>
+                    <input
+                      type="url"
+                      value={configuration.url}
+                      onChange={(event) => setPromotionLinks((current) => ({
+                        ...current,
+                        [promotionPackage.days]: { ...current[promotionPackage.days], url: event.target.value },
+                      }))}
+                      placeholder="https://tu-proveedor.com/pagar"
+                      className={inputClass}
+                    />
+                  </label>
+                  <label className="mt-3 block">
+                    <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-neutral-400">Valor exacto</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={configuration.amount}
+                      onChange={(event) => setPromotionLinks((current) => ({
+                        ...current,
+                        [promotionPackage.days]: { ...current[promotionPackage.days], amount: event.target.value },
+                      }))}
+                      className={inputClass}
+                    />
+                  </label>
+                  <div className="mt-4 flex aspect-square items-center justify-center rounded-lg bg-white p-3">
+                    {validUrl ? (
+                      <QRCodeSVG value={configuration.url.trim()} size={128} bgColor="#ffffff" fgColor="#111111" level="M" />
+                    ) : (
+                      <p className="text-center text-xs text-neutral-500">Ingresa un link válido.</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => savePromotionLink(promotionPackage)}
+                    disabled={isSaving}
+                    className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 text-xs font-bold text-white hover:bg-violet-500 disabled:opacity-60"
+                  >
+                    <Save size={15} /> Guardar
+                  </button>
+                </section>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {loading ? (

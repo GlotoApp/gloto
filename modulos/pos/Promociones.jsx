@@ -49,8 +49,8 @@ const Promociones = () => {
   const [promotions, setPromotions] = useState([]);
   const [pricing, setPricing] = useState(null);
   const [discountTiers, setDiscountTiers] = useState([]);
+  const [paymentLinks, setPaymentLinks] = useState({});
   const [form, setForm] = useState(INITIAL_FORM);
-  const [paymentQr, setPaymentQr] = useState(null);
   const [paymentFile, setPaymentFile] = useState(null);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [retryingPromotion, setRetryingPromotion] = useState(null);
@@ -90,9 +90,9 @@ const Promociones = () => {
     const [
       { data: businessData, error: businessError },
       { data, error },
-      { data: qrData },
       { data: pricingData, error: pricingError },
       { data: tierData, error: tierError },
+      { data: promotionLinksData, error: promotionLinksError },
     ] = await Promise.all([
       supabase
         .from("businesses")
@@ -107,13 +107,6 @@ const Promociones = () => {
         .eq("business_id", profile.business_id)
         .order("created_at", { ascending: false }),
       supabase
-        .from("payment_qr_codes")
-        .select("id,label,storage_path")
-        .eq("is_active", true)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase
         .from("promotion_pricing_settings")
         .select("daily_rate")
         .eq("id", true)
@@ -123,6 +116,9 @@ const Promociones = () => {
         .select("id,min_days,discount_percent")
         .eq("is_active", true)
         .order("min_days", { ascending: true }),
+      supabase
+        .from("promotion_payment_links")
+        .select("duration_days,payment_url,amount"),
     ]);
 
     if (businessError || !businessData?.name) {
@@ -139,11 +135,15 @@ const Promociones = () => {
       setPricing(pricingData);
       setDiscountTiers(tierData || []);
     }
-    if (qrData?.storage_path) {
-      const { data: publicUrlData } = supabase.storage
-        .from("payment-qr")
-        .getPublicUrl(qrData.storage_path);
-      setPaymentQr({ ...qrData, publicUrl: publicUrlData.publicUrl });
+    if (!promotionLinksError) {
+      setPaymentLinks(
+        Object.fromEntries(
+          (promotionLinksData || []).map((link) => [
+            link.duration_days,
+            { url: link.payment_url, amount: Number(link.amount || 0) },
+          ]),
+        ),
+      );
     }
     setLoading(false);
   };
@@ -180,6 +180,24 @@ const Promociones = () => {
   const selectedPackageAvailable =
     PROMOTION_PACKAGES.some((option) => option.days === durationDays) &&
     discountTiers.some((tier) => tier.min_days === durationDays);
+  const selectedTier = discountTiers.find((tier) => tier.min_days === durationDays);
+  const selectedSubtotal = Math.round(durationDays * Number(pricing?.daily_rate || 0));
+  const selectedDiscountPercent = Number(selectedTier?.discount_percent || 0);
+  const selectedDiscount = Math.round(
+    selectedSubtotal * (selectedDiscountPercent / 100),
+  );
+  const calculatedPromotionAmount = selectedSubtotal - selectedDiscount;
+  const selectedPaymentConfiguration = paymentLinks[durationDays] || {};
+  const selectedPaymentUrl = String(selectedPaymentConfiguration.url || "").trim();
+  const configuredPromotionAmount = Number(selectedPaymentConfiguration.amount || 0);
+  const selectedPromotionAmount = configuredPromotionAmount > 0
+    ? configuredPromotionAmount
+    : calculatedPromotionAmount;
+  const openPaymentLink = () => {
+    if (/^https?:\/\//i.test(selectedPaymentUrl)) {
+      window.open(selectedPaymentUrl, "_blank", "noopener,noreferrer");
+    }
+  };
 
   const handleCoverChange = (event) => {
     const file = event.target.files?.[0];
@@ -649,24 +667,34 @@ const Promociones = () => {
                   <CreditCard className="text-violet-300" size={16} />
                 </div>
                 <div className="mt-3 flex aspect-square w-full max-w-[180px] items-center justify-center rounded-lg bg-white p-3">
-                  {paymentQr?.publicUrl ? (
-                    <img
-                      src={paymentQr.publicUrl}
-                      alt={paymentQr.label || "QR de pago"}
-                      className="h-full w-full object-contain"
-                    />
-                  ) : (
+                  {/^https?:\/\//i.test(selectedPaymentUrl) ? (
                     <QRCodeSVG
-                      value={`Entidad bancaria genérica | Referencia GLOTO-${businessId} | Promoción ${businessName || "nueva"}`}
+                      value={selectedPaymentUrl}
                       className="h-full w-full"
                       bgColor="#ffffff"
                       fgColor="#111111"
                       level="M"
                     />
+                  ) : (
+                    <p className="px-2 text-center text-xs font-semibold text-neutral-500">
+                      Configura el link de esta duración en el panel principal.
+                    </p>
                   )}
                 </div>
-                <p className="mt-3 text-xs text-neutral-500">
-                  Realiza el pago y adjunta el comprobante para validación.
+                <p className="mt-3 text-lg font-black text-amber-300">
+                  {selectedPromotionAmount > 0 ? formatCurrency(selectedPromotionAmount) : "Valor no disponible"}
+                </p>
+                <button
+                  type="button"
+                  onClick={openPaymentLink}
+                  disabled={!/^https?:\/\//i.test(selectedPaymentUrl) || saving}
+                  className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 text-sm font-bold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
+                >
+                  <CreditCard size={17} />
+                  Pagar {selectedPromotionAmount > 0 ? formatCurrency(selectedPromotionAmount) : "promoción"}
+                </button>
+                <p className="mt-2 text-xs text-neutral-500">
+                  Abre el link configurado por Gloto. Después adjunta el comprobante para validación.
                 </p>
               </div>
               <div className="rounded-2xl bg-neutral-950/70 p-5">

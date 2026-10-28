@@ -298,6 +298,7 @@ const PortalDomiciliario = () => {
   const [phone, setPhone] = useState(user?.user_metadata?.phone || "");
   const [topupAmount, setTopupAmount] = useState("");
   const [topupProof, setTopupProof] = useState(null);
+  const [courierTopupLinks, setCourierTopupLinks] = useState({});
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activityValuesVisible, setActivityValuesVisible] = useState(true);
@@ -497,13 +498,20 @@ const PortalDomiciliario = () => {
     const [
       { data, error },
       { data: profileName, error: profileNameError },
+      { data: topupLinksData },
     ] = await Promise.all([
       supabase.rpc("get_public_courier_portal_summary"),
       supabase.rpc("get_my_courier_profile_name"),
+      supabase.from("courier_topup_payment_links").select("amount,payment_url"),
     ]);
     if (error) throw error;
     if (profileNameError) throw profileNameError;
     setSummary(data || null);
+    setCourierTopupLinks(
+      Object.fromEntries(
+        (topupLinksData || []).map((link) => [link.amount, link.payment_url]),
+      ),
+    );
     if (data?.location_latitude != null && data?.location_longitude != null) {
       setMapLocation({
         latitude: Number(data.location_latitude),
@@ -1337,8 +1345,8 @@ const PortalDomiciliario = () => {
       return;
     }
     const amount = Number(topupAmount);
-    if (!Number.isFinite(amount) || amount <= 0 || amount > 10000000) {
-      setErrorMessage("Ingresa un valor de recarga válido.");
+    if (![5000, 10000, 20000, 30000, 40000, 50000].includes(amount)) {
+      setErrorMessage("Selecciona una de las tarifas disponibles de recarga.");
       return;
     }
     setBusy(true);
@@ -1962,19 +1970,47 @@ const PortalDomiciliario = () => {
                     {summary.deposit_instructions}
                   </p>
                 )}
-                <label className="mt-4 block text-xs font-semibold text-neutral-300">
-                  Valor a recargar (COP)
-                  <input
-                    required
-                    type="number"
-                    min="1"
-                    max="10000000"
-                    step="1"
-                    value={topupAmount}
-                    onChange={(event) => setTopupAmount(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-white outline-none focus:border-emerald-400/40"
-                  />
-                </label>
+                <div className="mt-4">
+                  <p className="text-xs font-semibold text-neutral-300">
+                    Valor a recargar (COP)
+                  </p>
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {[5000, 10000, 20000, 30000, 40000, 50000].map((amount) => (
+                      <button
+                        key={amount}
+                        type="button"
+                        onClick={() => setTopupAmount(String(amount))}
+                        className={`rounded-xl border px-2 py-3 text-xs font-black transition ${
+                          Number(topupAmount) === amount
+                            ? "border-emerald-400 bg-emerald-400/15 text-emerald-300"
+                            : "border-white/10 bg-black/20 text-white hover:border-emerald-400/40 hover:bg-emerald-400/[0.07]"
+                        }`}
+                      >
+                        {formatMoney(amount)}
+                      </button>
+                    ))}
+                  </div>
+                  {Number(topupAmount) >= 5000 && Number(topupAmount) <= 50000 && (
+                    /^https?:\/\//i.test(courierTopupLinks[Number(topupAmount)] || "") ? (
+                      <button
+                        type="button"
+                        onClick={() => window.open(
+                          courierTopupLinks[Number(topupAmount)],
+                          "_blank",
+                          "noopener,noreferrer",
+                        )}
+                        className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-black text-emerald-950 transition hover:bg-emerald-400"
+                      >
+                        <CircleDollarSign size={17} />
+                        Pagar {formatMoney(Number(topupAmount))}
+                      </button>
+                    ) : (
+                      <p className="mt-3 text-center text-xs text-neutral-500">
+                        El enlace de pago para este valor aún no está configurado.
+                      </p>
+                    )
+                  )}
+                </div>
                 <label className="mt-3 block text-xs font-semibold text-neutral-300">
                   Comprobante (imagen o PDF, máximo 5 MB)
                   <input
