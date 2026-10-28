@@ -257,6 +257,7 @@ const Productos = ({ section = "productos" }) => {
       business_id: category.business_id || businessId,
       name: category.name,
       order_index: Number(category.order_index || 0),
+      printer_id: category.printer_id || null,
     }));
     const { error } = await supabase.from("categories_shop").upsert(records);
     if (error) {
@@ -576,7 +577,7 @@ const Productos = ({ section = "productos" }) => {
       ] = await Promise.all([
         supabase
           .from("categories_shop")
-          .select("id, business_id, name, order_index, created_at")
+          .select("id, business_id, name, order_index, printer_id, created_at")
           .eq("business_id", profile.business_id)
           .order("order_index", { ascending: true })
           .order("created_at", { ascending: true }),

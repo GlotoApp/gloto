@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import ConfiguracionDatos from "./ConfiguracionDatos";
 import ConfiguracionEmpleados from "./ConfiguracionEmpleados";
 import ConfiguracionTienda from "./ConfiguracionTienda";
+import ConfiguracionImpresoras from "./ConfiguracionImpresoras";
 
 const sections = {
   tienda: {
@@ -20,6 +21,11 @@ const sections = {
     title: "Empleados",
     description: "Registra a las personas que forman parte de tu equipo.",
     component: ConfiguracionEmpleados,
+  },
+  impresoras: {
+    title: "Impresoras",
+    description: "Registra las impresoras térmicas de red disponibles para las categorías.",
+    component: ConfiguracionImpresoras,
   },
 };
 

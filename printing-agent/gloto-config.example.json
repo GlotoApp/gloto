@@ -1,0 +1,7 @@
+{
+  "supabaseUrl": "https://TU-PROYECTO.supabase.co",
+  "anonKey": "CLAVE_PUBLICA_ANON",
+  "businessId": "UUID_DE_LA_TIENDA",
+  "storeToken": "TOKEN_GENERADO_PARA_LA_TIENDA",
+  "deviceUuid": "UUID_UNICO_DE_ESTA_PC"
+}

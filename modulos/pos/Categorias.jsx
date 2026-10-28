@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "../../src/lib/supabaseClient";
 import { AnimatePresence, motion } from "framer-motion";
 import SubLoading from "./SubLoading";
 import {
@@ -84,7 +85,20 @@ const CategoriasAdmin = ({
   const [formData, setFormData] = useState({
     name: "",
     color: "violet",
+    printer_id: null,
   });
+
+  const [printers, setPrinters] = useState([]);
+  useEffect(() => {
+    if (!businessId) return;
+    supabase
+      .from("network_printers")
+      .select("id,name,ip_address,port,is_active")
+      .eq("business_id", businessId)
+      .eq("is_active", true)
+      .order("name")
+      .then(({ data, error }) => { if (!error) setPrinters(data || []); });
+  }, [businessId]);
 
   const colors = [
     "violet",
@@ -145,7 +159,7 @@ const CategoriasAdmin = ({
 
   const handleNewCategory = () => {
     setEditingIndex(null);
-    setFormData({ name: "", color: "violet" });
+    setFormData({ name: "", color: "violet", printer_id: null });
     setIsModalOpen(true);
   };
 
@@ -700,6 +714,25 @@ const CategoriasAdmin = ({
                       className="w-full rounded-xl border border-white/5 bg-neutral-950 px-3 py-2.5 text-[10px] font-mono uppercase text-neutral-200 outline-none transition-all placeholder:text-neutral-600 focus:border-violet-500/40"
                       placeholder="EJ: BARRA CAFE / FRITURAS"
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[8px] font-black uppercase tracking-widest text-neutral-400 sm:text-[9px]">
+                      Impresora para esta categoría
+                    </label>
+                    <select
+                      value={formData.printer_id || ""}
+                      onChange={(e) => setFormData({ ...formData, printer_id: e.target.value || null })}
+                      className="w-full rounded-xl border border-white/5 bg-neutral-950 px-3 py-2.5 text-[10px] text-neutral-200 outline-none focus:border-violet-500/40"
+                    >
+                      <option value="">Sin impresora</option>
+                      {printers.map((printer) => (
+                        <option key={printer.id} value={printer.id}>{printer.name} — {printer.ip_address}:{printer.port}</option>
+                      ))}
+                    </select>
+                    {printers.length === 0 && (
+                      <p className="text-[9px] text-amber-300/80">Primero registra una impresora en Configuración → Impresoras.</p>
+                    )}
                   </div>
 
                   <div className="space-y-2">

@@ -231,6 +231,7 @@ const Sidebar = ({
     { name: "Tienda", path: "/pos/configuracion/tienda" },
     { name: "Datos", path: "/pos/configuracion/datos" },
     { name: "Empleados", path: "/pos/configuracion/empleados" },
+    { name: "Impresoras", path: "/pos/configuracion/impresoras" },
   ];
   const visibleFinanzasSubMenu = finanzasSubMenu.filter((sub) =>
     canAccessPath(sub.path),

@@ -73,6 +73,7 @@ const LinksPagoSuscripciones = lazy(
 const Mercado = lazy(() => import("../modulos/admin/Mercado"));
 const Finanzas = lazy(() => import("../modulos/admin/Finanzas"));
 const Sistema = lazy(() => import("../modulos/admin/Sistema"));
+const GuiaImpresion = lazy(() => import("../modulos/admin/GuiaImpresion"));
 const DomiciliariosPublicos = lazy(
   () => import("../modulos/admin/DomiciliariosPublicos"),
 );
@@ -724,6 +725,7 @@ function App() {
               }
             />
             <Route path="sistema" element={<Sistema />} />
+            <Route path="impresion" element={<GuiaImpresion />} />
           </Route>
           <Route
             path="/gestion-general"

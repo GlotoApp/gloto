@@ -29,6 +29,7 @@ import SubLoading from "./SubLoading";
 const EMPTY_DATA = {
   name: "",
   category: "",
+  categoryIds: [],
   address: "",
   whatsapp_phone: "",
   delivery_time_min: "",
@@ -291,7 +292,7 @@ const ConfiguracionTienda = ({
         supabase
           .from("business_info")
           .select(
-            "address,whatsapp_phone,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,delivery_methods,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent,category_id,categoria,latitude,longitude",
+            "address,whatsapp_phone,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,delivery_methods,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent,category_id,category_ids,categoria,latitude,longitude",
           )
           .eq("business_id", profile.business_id)
           .maybeSingle(),
@@ -314,6 +315,9 @@ const ConfiguracionTienda = ({
           categoryData?.find((category) => category.name === info?.categoria)
             ?.id ||
           "",
+        categoryIds: Array.isArray(info?.category_ids)
+          ? info.category_ids.filter(Boolean)
+          : [],
         address: info?.address || "",
         whatsapp_phone: info?.whatsapp_phone || "",
         delivery_time_min: info?.delivery_time_min ?? "",
@@ -334,6 +338,9 @@ const ConfiguracionTienda = ({
         latitude: info?.latitude ?? "",
         longitude: info?.longitude ?? "",
       };
+      if (!loadedData.categoryIds.length && loadedData.category) {
+        loadedData.categoryIds = [loadedData.category];
+      }
       setCategories(categoryData || []);
       setData(loadedData);
       setInitialData(loadedData);
@@ -818,6 +825,7 @@ const ConfiguracionTienda = ({
               : null,
           tip_percent: data.tip_percent === "" ? 0 : tipPercent,
           category_id: selectedCategory?.id || null,
+          category_ids: Array.from(new Set([selectedCategory?.id, ...data.categoryIds].filter(Boolean))),
           categoria: selectedCategory?.name || "",
           latitude: data.latitude ? Number(data.latitude) : null,
           longitude: data.longitude ? Number(data.longitude) : null,
@@ -1355,26 +1363,89 @@ const ConfiguracionTienda = ({
                 value={data.name}
                 onChange={(e) => update("name", e.target.value)}
               />
-              <label className="flex flex-col gap-2">
-                <span className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-500">
-                  Categoría
-                </span>
-                <select
-                  value={data.category}
-                  onChange={(e) => update("category", e.target.value)}
-                  className={`w-full rounded-xl border bg-neutral-950/60 px-4 py-3 text-sm text-white outline-none transition ${saveAttempted && !data.category ? "border-red-500 focus:border-red-400" : "border-white/[0.1] focus:border-violet-500/60"}`}
-                >
-                  <option value="">Selecciona una categoría</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[10px] leading-4 text-neutral-600">
-                  Clasifica la tienda dentro del marketplace.
-                </span>
-              </label>
+              <div className="flex flex-col gap-3 md:col-span-2">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-500">
+                    Categorías del negocio
+                  </span>
+                  <p className="mt-1 text-xs leading-5 text-neutral-500">
+                    Define dónde aparece tu negocio para que los clientes puedan encontrarlo más fácilmente.
+                  </p>
+                </div>
+                <div className="grid gap-4 rounded-2xl border border-violet-400/10 bg-gradient-to-br from-neutral-950/70 to-violet-950/10 p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+                  <label className="flex flex-col gap-2 rounded-xl border border-white/[0.06] bg-neutral-950/50 p-3.5">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 text-sm text-violet-300">★</span>
+                      <div>
+                        <span className="block text-sm font-bold text-white">Categoría principal</span>
+                        <span className="text-[10px] text-neutral-500">La categoría más representativa</span>
+                      </div>
+                    </div>
+                    <select
+                      value={data.category}
+                      onChange={(e) => {
+                        const categoryId = e.target.value;
+                        setData((current) => ({
+                          ...current,
+                          category: categoryId,
+                          categoryIds: [
+                            ...current.categoryIds.filter((id) => id !== current.category),
+                            categoryId,
+                          ].filter(Boolean),
+                        }));
+                      }}
+                      className={`mt-1 w-full rounded-xl border bg-neutral-950 px-4 py-3 text-sm text-white outline-none transition ${saveAttempted && !data.category ? "border-red-500 focus:border-red-400" : "border-white/[0.1] focus:border-violet-500/60"}`}
+                    >
+                      <option value="">Selecciona la categoría principal</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="flex min-w-0 flex-col gap-2 rounded-xl border border-white/[0.06] bg-neutral-950/50 p-3.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <span className="block text-sm font-bold text-white">Categorías secundarias</span>
+                        <span className="text-[10px] text-neutral-500">Puedes seleccionar varias</span>
+                      </div>
+                      <span className="rounded-full bg-white/[0.05] px-2.5 py-1 text-[10px] font-bold text-neutral-400">
+                        {data.categoryIds.filter((id) => id !== data.category).length} seleccionadas
+                      </span>
+                    </div>
+                    <div className="grid max-h-52 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                      {categories.map((category) => {
+                        const primary = data.category === category.id;
+                        const selected = data.categoryIds.includes(category.id) && !primary;
+                        return (
+                          <label
+                            key={category.id}
+                            className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 text-sm transition ${primary ? "border-violet-400/30 bg-violet-500/10 text-violet-100" : selected ? "border-violet-400/40 bg-violet-500/[0.08] text-white" : "border-white/[0.07] bg-neutral-950/40 text-neutral-300 hover:border-white/[0.14] hover:bg-white/[0.03]"}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected || primary}
+                              disabled={primary}
+                              onChange={(e) => {
+                                setData((current) => ({
+                                  ...current,
+                                  categoryIds: e.target.checked
+                                    ? [...new Set([...current.categoryIds, category.id])]
+                                    : current.categoryIds.filter((id) => id !== category.id),
+                                }));
+                              }}
+                              className="h-4 w-4 shrink-0 accent-violet-500"
+                            />
+                            <span className="min-w-0 flex-1 truncate">{category.name}</span>
+                            {primary && <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[9px] font-black uppercase text-violet-300">Principal</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
               <ConfiguracionField
                 showError={saveAttempted}
                 label="Dirección física"

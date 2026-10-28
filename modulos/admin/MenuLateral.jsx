@@ -19,6 +19,7 @@ import {
   Megaphone,
   ShieldCheck,
   X,
+  Printer,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAdminRealtime } from "./useAdminRealtime";
@@ -58,6 +59,7 @@ const navItems = [
     icon: CreditCard,
   },
   { label: "Sistema", path: "/gestion/sistema", icon: Settings },
+  { label: "Guía de impresoras", path: "/gestion/impresion", icon: Printer },
 ];
 
 const SuperAdminSidebar = ({

@@ -1,0 +1,38 @@
+{
+  "name": "gloto-printing-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "agent.js",
+  "bin": {
+    "gloto-print-agent": "agent.js",
+    "gloto-print-setup": "setup.js"
+  },
+  "scripts": {
+    "start": "node agent.js",
+    "test-print": "node test-print.js",
+    "build-executables": "pkg agent.js --targets node18-win-x64 --output dist/gloto-print-agent.exe && pkg setup.js --targets node18-win-x64 --output dist/gloto-print-setup.exe",
+    "prepare-installer": "npm run build-executables && node prepare-installer.js"
+  },
+  "pkg": {
+    "scripts": [
+      "agent.js",
+      "setup.js"
+    ],
+    "assets": [
+      "package.json"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ]
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
+    "dotenv": "^16.4.7",
+    "escpos": "^3.0.0-alpha.6",
+    "escpos-network": "^3.0.0-alpha.5"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
+}

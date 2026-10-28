@@ -10,6 +10,7 @@ import {
   Clock3,
   Copy,
   Crop,
+  Download,
   FileSpreadsheet,
   Image as ImageIcon,
   KeyRound,
@@ -33,6 +34,7 @@ import {
 import { compressCanvasToImage } from "../../src/lib/imageCompression";
 import TiendaDetalle from "./TiendaDetalle";
 import ImageCropEditor from "../pos/ImageCropEditor";
+import { strToU8, unzipSync, zipSync } from "fflate";
 import { useAdminRealtime } from "./useAdminRealtime";
 
 const STORE_DETAIL_REALTIME_TABLES = [
@@ -228,6 +230,8 @@ const TiendaArchivo = () => {
   const [passwordResetCredentials, setPasswordResetCredentials] =
     useState(null);
   const [passwordResetLoading, setPasswordResetLoading] = useState(false);
+  const [printingInstallerLoading, setPrintingInstallerLoading] = useState(false);
+  const [printingInstallerMessage, setPrintingInstallerMessage] = useState("");
   const [passwordResetError, setPasswordResetError] = useState("");
   const [passwordCopied, setPasswordCopied] = useState(false);
   const [logoUrl, setLogoUrl] = useState("");
@@ -251,6 +255,7 @@ const TiendaArchivo = () => {
     name: "",
     slug: "",
     category: "",
+    categoryIds: [],
     address: "",
     phone: "",
     latitude: "",
@@ -269,6 +274,11 @@ const TiendaArchivo = () => {
       name: store.name || "",
       slug: store.slug || "",
       category: store.info?.category_id || store.info?.categoria || "",
+      categoryIds: Array.isArray(store.info?.category_ids) && store.info.category_ids.length
+        ? store.info.category_ids.filter(Boolean)
+        : store.info?.category_id
+          ? [store.info.category_id]
+          : [],
       address: store.address || "",
       phone: store.phone || "",
       latitude: store.info?.latitude ?? "",
@@ -465,7 +475,7 @@ const TiendaArchivo = () => {
         supabase
           .from("business_info")
           .select(
-            "business_id,category_id,categoria,address,whatsapp_phone,delivery_time_min,delivery_time_max,rating,rating_count,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,currency,tax_rate,latitude,longitude",
+            "business_id,category_id,category_ids,categoria,address,whatsapp_phone,delivery_time_min,delivery_time_max,rating,rating_count,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,currency,tax_rate,latitude,longitude",
           )
           .eq("business_id", id)
           .maybeSingle(),
@@ -619,6 +629,11 @@ const TiendaArchivo = () => {
         slug: businessResult.data.slug || "",
         category:
           infoResult.data?.category_id || infoResult.data?.categoria || "",
+        categoryIds: Array.isArray(infoResult.data?.category_ids) && infoResult.data.category_ids.length
+          ? infoResult.data.category_ids.filter(Boolean)
+          : infoResult.data?.category_id
+            ? [infoResult.data.category_id]
+            : [],
         address: infoResult.data?.address || "",
         phone: infoResult.data?.whatsapp_phone || "",
         latitude: infoResult.data?.latitude ?? "",
@@ -1126,6 +1141,10 @@ const TiendaArchivo = () => {
         categoria:
           categories.find((category) => category.id === formData.category)
             ?.name || formData.category.trim(),
+        category_ids: Array.from(new Set([
+          formData.category,
+          ...formData.categoryIds,
+        ].filter(Boolean))),
         address: formData.address.trim(),
         whatsapp_phone: formData.phone.trim(),
         latitude: formData.latitude === "" ? null : Number(formData.latitude),
@@ -1478,6 +1497,63 @@ const TiendaArchivo = () => {
     }
   };
 
+  const downloadPrintingInstaller = async () => {
+    if (!id || printingInstallerLoading) return;
+    setPrintingInstallerLoading(true);
+    setPrintingInstallerMessage("");
+    try {
+      let { data: agentConfig, error: configError } = await supabase.rpc("get_printing_agent_config", { p_business_id: id });
+      if (configError) throw configError;
+
+      let storeToken = agentConfig?.store_token || "";
+      if (!storeToken) {
+        const { data: newToken, error: tokenError } = await supabase.rpc("rotate_printing_agent_token", { p_business_id: id });
+        if (tokenError) throw tokenError;
+        storeToken = newToken;
+      }
+      if (!storeToken) throw new Error("No se pudo generar el token de impresión de la tienda.");
+
+      const templateResponse = await fetch("/descargas-impresion/Gloto-Agente-Impresion.zip");
+      if (!templateResponse.ok) throw new Error("No se encontró el instalador base de impresión.");
+      const templateBytes = new Uint8Array(await templateResponse.arrayBuffer());
+      const templateFiles = unzipSync(templateBytes);
+      const safeName = String(store?.name || "tienda")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .toLowerCase();
+      const folderName = `Gloto-Impresion-${safeName || "tienda"}`;
+      const files = {};
+      for (const [fileName, contents] of Object.entries(templateFiles)) {
+        files[`${folderName}/${fileName}`] = contents;
+      }
+
+      const config = {
+        supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
+        anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        businessId: id,
+        storeToken,
+        deviceUuid: crypto.randomUUID(),
+      };
+      files[`${folderName}/gloto-config.json`] = strToU8(JSON.stringify(config, null, 2));
+
+      const zipBytes = zipSync(files, { level: 6 });
+      const url = URL.createObjectURL(new Blob([zipBytes], { type: "application/zip" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Gloto-Impresion-${safeName || "tienda"}.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setPrintingInstallerMessage("Instalador descargado correctamente.");
+    } catch (error) {
+      console.error("No se pudo preparar el instalador de impresión:", error);
+      setPrintingInstallerMessage(error.message || "No se pudo preparar el instalador.");
+    } finally {
+      setPrintingInstallerLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 px-4 py-5 text-white md:px-8 md:py-8">
       <div className="mx-auto max-w-7xl">
@@ -1492,6 +1568,20 @@ const TiendaArchivo = () => {
           </button>
 
           <div className="flex flex-wrap items-center gap-2">
+            {store && !loading && (
+              <button
+                type="button"
+                onClick={downloadPrintingInstaller}
+                disabled={printingInstallerLoading}
+                className="inline-flex items-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-sm font-medium text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-wait disabled:opacity-60"
+              >
+                <Download size={16} />
+                {printingInstallerLoading ? "Preparando instalador..." : "Descargar impresión"}
+              </button>
+            )}
+            {printingInstallerMessage && (
+              <span className="text-xs text-neutral-400">{printingInstallerMessage}</span>
+            )}
             {store && !loading && (
               <button
                 type="button"
@@ -1772,33 +1862,85 @@ const TiendaArchivo = () => {
                 />
               </label>
 
-              <label className="space-y-2">
-                <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">
-                  Categoría
-                </span>
-                <select
-                  value={formData.category}
-                  onChange={(event) =>
-                    handleFieldChange("category", event.target.value)
-                  }
-                  className="w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-400"
-                >
-                  <option value="">Selecciona una categoría</option>
-                  {formData.category &&
-                    !categories.some(
-                      (category) => category.id === formData.category,
-                    ) && (
-                      <option value={formData.category}>
-                        {store?.category || formData.category}
-                      </option>
-                    )}
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="space-y-3 rounded-2xl border border-violet-400/10 bg-gradient-to-br from-neutral-950/70 to-violet-950/10 p-4 sm:col-span-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Categorías del negocio</h3>
+                  <p className="mt-1 text-xs text-neutral-500">
+                    La categoría principal identifica al negocio y las secundarias amplían dónde puede aparecer.
+                  </p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+                  <label className="space-y-3 rounded-xl border border-white/[0.06] bg-neutral-950/50 p-3.5">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 text-violet-300">★</span>
+                      <div>
+                        <span className="block text-sm font-bold text-white">Categoría principal</span>
+                        <span className="text-[10px] text-neutral-500">Categoría más representativa</span>
+                      </div>
+                    </div>
+                    <select
+                      value={formData.category}
+                      onChange={(event) => {
+                        const categoryId = event.target.value;
+                        setFormData((current) => ({
+                          ...current,
+                          category: categoryId,
+                          categoryIds: [
+                            ...current.categoryIds.filter((id) => id !== current.category),
+                            categoryId,
+                          ].filter(Boolean),
+                        }));
+                      }}
+                      className="w-full rounded-xl border border-white/10 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-400"
+                    >
+                      <option value="">Selecciona la categoría principal</option>
+                      {formData.category && !categories.some((category) => category.id === formData.category) && (
+                        <option value={formData.category}>{store?.category || formData.category}</option>
+                      )}
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>{category.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="space-y-2 rounded-xl border border-white/[0.06] bg-neutral-950/50 p-3.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <span className="block text-sm font-bold text-white">Categorías secundarias</span>
+                        <span className="text-[10px] text-neutral-500">Puedes seleccionar varias</span>
+                      </div>
+                      <span className="rounded-full bg-white/[0.05] px-2.5 py-1 text-[10px] font-bold text-neutral-400">
+                        {formData.categoryIds.filter((id) => id !== formData.category).length} seleccionadas
+                      </span>
+                    </div>
+                    <div className="grid max-h-52 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                      {categories.map((category) => {
+                        const isPrimary = category.id === formData.category;
+                        const checked = formData.categoryIds.includes(category.id) && !isPrimary;
+                        return (
+                          <label key={category.id} className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 text-sm transition ${isPrimary ? "border-violet-400/30 bg-violet-500/10 text-violet-100" : checked ? "border-violet-400/40 bg-violet-500/[0.08] text-white" : "border-white/[0.07] bg-neutral-950/40 text-neutral-300 hover:border-white/[0.14] hover:bg-white/[0.03]"}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked || isPrimary}
+                              disabled={isPrimary}
+                              onChange={(event) => {
+                                setFormData((current) => ({
+                                  ...current,
+                                  categoryIds: event.target.checked
+                                    ? [...new Set([...current.categoryIds, category.id])]
+                                    : current.categoryIds.filter((categoryId) => categoryId !== category.id),
+                                }));
+                              }}
+                              className="h-4 w-4 shrink-0 accent-violet-500"
+                            />
+                            <span className="min-w-0 flex-1 truncate">{category.name}</span>
+                            {isPrimary && <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[9px] font-black uppercase text-violet-300">Principal</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <label className="space-y-2">
                 <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">

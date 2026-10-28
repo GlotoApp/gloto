@@ -212,6 +212,7 @@ const Home = ({ userLocation }) => {
               created_at,
               business_info (
                 category_id,
+                category_ids,
                 categoria,
                 rating,
                 rating_count,
@@ -338,6 +339,19 @@ const Home = ({ userLocation }) => {
           const businessCategory =
             categoriasPorId.get(info?.category_id) ||
             categoriasPorNombre.get(normalizarTexto(info?.categoria));
+          const storedCategoryIds = Array.isArray(info?.category_ids)
+            ? info.category_ids
+            : [];
+          const businessCategoryIds = Array.from(new Set([
+            businessCategory?.id,
+            ...storedCategoryIds,
+          ].filter(Boolean)));
+          const businessCategories = businessCategoryIds
+            .map((categoryId) => categoriasPorId.get(categoryId))
+            .filter(Boolean);
+          const secondaryCategories = businessCategories.filter(
+            (category) => category.id !== businessCategory?.id,
+          );
           const ratingValue = info?.rating;
           const reviews = Number(info?.rating_count ?? 0);
           const ratingNumber =
@@ -381,6 +395,8 @@ const Home = ({ userLocation }) => {
                 ? null
                 : Number(info.longitude),
             tipo: businessCategory?.name || info?.categoria || "Tienda",
+            secondaryTypes: secondaryCategories.map((category) => category.name),
+            categoryIds: businessCategoryIds,
             categoryId: businessCategory?.id || null,
             // guardamos la ruta original en `logo` y la resolveremos abajo
             logo: negocio.logo_url || null,
@@ -518,7 +534,9 @@ const Home = ({ userLocation }) => {
         );
       })();
 
-    const pasaCategoria = !categoriaActiva || t.categoryId === categoriaActiva;
+    const pasaCategoria =
+      !categoriaActiva ||
+      (t.categoryIds || [t.categoryId]).includes(categoriaActiva);
 
     return pasaBusqueda && pasaCategoria;
   });
@@ -1176,7 +1194,9 @@ const Home = ({ userLocation }) => {
                       {t.nombre}
                     </h4>
                     <p className="text-[11px] text-on-surface-variant font-medium mt-0.5">
-                      {t.tipo}
+                      {t.secondaryTypes?.length
+                        ? `${t.tipo} · ${t.secondaryTypes.join(" · ")}`
+                        : t.tipo}
                     </p>
 
                     {(t.rating || t.tiempo || t.distanciaKm != null) && (
@@ -1296,7 +1316,9 @@ const Home = ({ userLocation }) => {
                       {t.nombre}
                     </h4>
                     <p className="mt-0.5 text-[11px] font-medium text-on-surface-variant">
-                      {t.tipo}
+                      {t.secondaryTypes?.length
+                        ? `${t.tipo} · ${t.secondaryTypes.join(" · ")}`
+                        : t.tipo}
                     </p>
                     {(t.rating ||
                       t.tiempo ||

@@ -6,12 +6,25 @@ import {
   useNavigate,
   Link,
 } from "react-router-dom";
-import { LoaderCircle, MapPin } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  ExternalLink,
+  FileText,
+  LoaderCircle,
+  MapPin,
+  Menu,
+  ShieldCheck,
+  Store,
+  X,
+} from "lucide-react";
 
 import Home from "./pages/Home";
 import Shop from "./pages/Shop";
 import SeguimientoPedido from "./pages/SeguimientoPedido";
 import { CartProvider } from "./pages/CartContext";
+import TerminosCondiciones from "./pages/TerminosCondiciones";
+import PoliticaPrivacidad from "./pages/PoliticaPrivacidad";
 
 const LOCATION_STORAGE_KEY = "gloto_marketplace_location";
 const LOCATION_PROMPT_KEY = "gloto_marketplace_location_prompt";
@@ -102,6 +115,8 @@ const Marketplace = () => {
   });
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [legalPanel, setLegalPanel] = useState(null);
 
   const requestLocation = () => {
     if (!navigator.geolocation) {
@@ -184,31 +199,45 @@ const Marketplace = () => {
               </Link>
             </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                setLocationDialogOpen(true);
-                setLocationError("");
-              }}
-              disabled={isLocating}
-              className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-xs font-bold transition-colors hover:bg-surface/80 disabled:cursor-wait disabled:opacity-70"
-              aria-label="Cambiar ubicación"
-              aria-busy={isLocating}
-            >
-              {isLocating ? (
-                <LoaderCircle
-                  size={14}
-                  className="animate-spin text-primary-container"
-                />
-              ) : (
-                <MapPin size={14} className="text-primary-container" />
-              )}
-              <span>
-                {isLocating
-                  ? "Buscando ubicación..."
-                  : userLocation?.city || "Elegir ubicación"}
-              </span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setLocationDialogOpen(true);
+                  setLocationError("");
+                }}
+                disabled={isLocating}
+                className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-xs font-bold transition-colors hover:bg-surface/80 disabled:cursor-wait disabled:opacity-70"
+                aria-label="Cambiar ubicación"
+                aria-busy={isLocating}
+              >
+                {isLocating ? (
+                  <LoaderCircle
+                    size={14}
+                    className="animate-spin text-primary-container"
+                  />
+                ) : (
+                  <MapPin size={14} className="text-primary-container" />
+                )}
+                <span>
+                  {isLocating
+                    ? "Buscando ubicación..."
+                    : userLocation?.city || "Elegir ubicación"}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLegalPanel(null);
+                  setMenuOpen(true);
+                }}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-outline/10 bg-surface text-on-surface transition hover:border-primary/30 hover:bg-surface/80"
+                aria-label="Abrir menú"
+                aria-expanded={menuOpen}
+              >
+                <Menu size={19} />
+              </button>
+            </div>
           </div>
         </header>
       )}
@@ -225,6 +254,102 @@ const Marketplace = () => {
           </Routes>
         </CartProvider>
       </main>
+
+      {menuOpen && (
+        <div className="fixed inset-0 z-[90]" role="presentation">
+          <button
+            type="button"
+            className="absolute inset-0 h-full w-full bg-black/60 backdrop-blur-sm"
+            onClick={() => setMenuOpen(false)}
+            aria-label="Cerrar menú"
+          />
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menú de Gloto"
+            className="absolute right-0 top-0 flex h-full w-[min(88vw,380px)] flex-col border-l border-white/10 bg-[#111114] shadow-2xl"
+          >
+            <div className="flex h-16 items-center justify-between border-b border-white/8 px-5">
+              <div className="flex items-center gap-2">
+                {legalPanel ? (
+                  <button
+                    type="button"
+                    onClick={() => setLegalPanel(null)}
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-300 hover:bg-white/5"
+                    aria-label="Volver al menú"
+                  >
+                    <ArrowLeft size={20} />
+                  </button>
+                ) : (
+                  <img src="/favicon.png" alt="" className="h-8 w-8 object-contain" />
+                )}
+                <span className="font-black tracking-tight text-white">
+                  {legalPanel === "terms"
+                    ? "Términos y condiciones"
+                    : legalPanel === "privacy"
+                      ? "Política de privacidad"
+                      : "Gloto"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMenuOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 transition hover:bg-white/5 hover:text-white"
+                aria-label="Cerrar menú"
+              >
+                <X size={21} />
+              </button>
+            </div>
+
+            {legalPanel ? (
+              <div className="overflow-y-auto px-6 py-6 text-sm leading-6 text-neutral-300">
+                {legalPanel === "terms" ? <TerminosCondiciones /> : <PoliticaPrivacidad />}
+              </div>
+            ) : (
+              <div className="flex flex-1 flex-col px-4 py-5">
+                <p className="px-2 text-[10px] font-black uppercase tracking-[0.16em] text-neutral-500">Información</p>
+                <div className="mt-3 space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setLegalPanel("terms")}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-neutral-200 transition hover:bg-white/[0.05]"
+                  >
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300"><FileText size={19} /></span>
+                    <span className="flex-1">Términos y condiciones</span>
+                    <ChevronRight size={18} className="text-neutral-600" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLegalPanel("privacy")}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-neutral-200 transition hover:bg-white/[0.05]"
+                  >
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/10 text-sky-300"><ShieldCheck size={19} /></span>
+                    <span className="flex-1">Política de privacidad</span>
+                    <ChevronRight size={18} className="text-neutral-600" />
+                  </button>
+                </div>
+
+                <div className="mt-auto rounded-2xl border border-violet-400/15 bg-gradient-to-br from-violet-500/15 to-violet-950/20 p-4">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-500 text-white shadow-lg shadow-violet-950/30"><Store size={22} /></div>
+                  <h2 className="mt-4 text-lg font-black text-white">¿Tienes un negocio?</h2>
+                  <p className="mt-1 text-sm leading-5 text-neutral-400">Lleva tu tienda a Gloto y llega a más clientes de tu ciudad.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      navigate("/acceso?solicitud=gloto");
+                    }}
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-3 text-sm font-black text-white transition hover:bg-violet-400"
+                  >
+                    Solicitar unirse a Gloto
+                    <ExternalLink size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </aside>
+        </div>
+      )}
 
       {isHomePage && locationDialogOpen && (
         <div

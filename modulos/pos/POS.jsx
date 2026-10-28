@@ -3515,6 +3515,11 @@ const POS = () => {
       kitchen_dispatched: false,
       order_batch_id: item.orderBatchId || null,
       product_id: item.productId,
+      category_id:
+        item.category_id ||
+        item.category ||
+        products.find((product) => product.id === item.productId)?.category ||
+        null,
       quantity: item.cantidad,
       unit_price: item.precio,
       init_price: item.initPrice || null,
