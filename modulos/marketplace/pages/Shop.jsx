@@ -2076,24 +2076,28 @@ const Shop = () => {
                               rowGap: "4px",
                             }}
                           >
-                            <span
-                              style={{
-                                fontWeight: 800,
-                                fontSize: "15px",
-                                color: "#fff",
-                              }}
-                            >
-                              {fmt(p.precio)}
-                            </span>
-                            <span
-                              style={{
-                                fontWeight: 600,
-                                fontSize: "9px",
-                                color: "rgba(255,255,255,0.45)",
-                              }}
-                            >
-                              {p.unit?.name || "UNIDAD"}
-                            </span>
+                            {Number(p.precio) > 0 && (
+                              <>
+                                <span
+                                  style={{
+                                    fontWeight: 800,
+                                    fontSize: "15px",
+                                    color: "#fff",
+                                  }}
+                                >
+                                  {fmt(p.precio)}
+                                </span>
+                                <span
+                                  style={{
+                                    fontWeight: 600,
+                                    fontSize: "9px",
+                                    color: "rgba(255,255,255,0.45)",
+                                  }}
+                                >
+                                  {p.unit?.name || "UNIDAD"}
+                                </span>
+                              </>
+                            )}
                             {precioExtraMax > 0 && (
                               <span
                                 style={{

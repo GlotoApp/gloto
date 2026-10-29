@@ -362,8 +362,9 @@ const ProductoDetalle = ({
         data-option-group-id={group.id}
         style={{
           marginBottom: depth > 0 ? "8px" : "14px",
+          marginTop: depth > 0 ? "8px" : "0",
           marginLeft: `${Math.min(depth, 3) * 12}px`,
-          padding: depth > 0 ? "9px 10px" : "12px",
+          padding: depth > 0 ? "14px 10px 9px" : "12px",
           borderRadius: depth > 0 ? "12px" : "14px",
           border:
             depth > 0 ? "none" : "none",
@@ -664,25 +665,27 @@ const ProductoDetalle = ({
           <h2 style={{ fontSize: "20px", fontWeight: 800, margin: "0 0 6px" }}>
             {producto.nombre}
           </h2>
-          <p
-            style={{
-              fontSize: "18px",
-              fontWeight: 800,
-              color: "#fff",
-              margin: "0 0 10px",
-            }}
-          >
-            {fmt(producto.precio)}{" "}
-            <span
+          {Number(producto.precio) > 0 && (
+            <p
               style={{
-                fontSize: "11px",
-                fontWeight: 600,
-                color: "rgba(255,255,255,0.58)",
+                fontSize: "18px",
+                fontWeight: 800,
+                color: "#fff",
+                margin: "0 0 10px",
               }}
             >
-              {unidadVenta.name}
-            </span>
-          </p>
+              {fmt(producto.precio)}{" "}
+              <span
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  color: "rgba(255,255,255,0.58)",
+                }}
+              >
+                {unidadVenta.name}
+              </span>
+            </p>
+          )}
           <p
             style={{
               fontSize: "13px",
