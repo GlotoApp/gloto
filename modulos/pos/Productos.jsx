@@ -428,7 +428,7 @@ const Productos = ({ section = "productos" }) => {
     return true;
   };
 
-  // ========== ESTADO PARA PRODUCTOS ==========arepasim
+  // ========== ESTADO PARA PRODUCTOS ==========
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [productType, setProductType] = useState(null);
   const [viewMode, setViewMode] = useState("grid");
@@ -1324,15 +1324,6 @@ const Productos = ({ section = "productos" }) => {
   };
 
   const addOptionGroup = (parentItemId = null) => {
-    if (
-      parentItemId &&
-      !optionGroups.some((group) =>
-        group.items.some((item) => item.id === parentItemId),
-      )
-    ) {
-      return;
-    }
-
     const newGroup = createOptionGroup();
     if (!parentItemId) {
       setOptionGroups((groups) => [
@@ -1355,7 +1346,10 @@ const Productos = ({ section = "productos" }) => {
                     },
                   ],
                 }
-              : item,
+              : {
+                  ...item,
+                  childGroups: addToItem(item.childGroups || []),
+                },
           ),
         }));
       setOptionGroups(addToItem);
@@ -1774,66 +1768,35 @@ const Productos = ({ section = "productos" }) => {
   );
 
   const saveProductOptions = async (productId) => {
-    const { error: deleteItemsError } = await supabase
-      .from("products_items")
-      .delete()
-      .eq("product_id", productId);
-    if (deleteItemsError) throw deleteItemsError;
+    const groupsPayload = optionGroups.map((group, groupIndex) => ({
+      name: formatStoredText(group.name),
+      description: formatStoredText(group.description),
+      is_required: Boolean(group.is_required),
+      selection_type: group.selection_type || "single",
+      min_selections: Number(group.min_selections) || 0,
+      max_selections:
+        group.selection_type === "multiple"
+          ? Number(group.max_selections) || null
+          : null,
+      price_mode: group.price_mode || "sum",
+      max_extra_price:
+        group.max_extra_price === "" || group.max_extra_price == null
+          ? null
+          : Number(group.max_extra_price) || 0,
+      order_index: groupIndex + 1,
+      items: (group.items || []).map((item, itemIndex) => ({
+        nombre: formatStoredText(item.nombre),
+        precio_extra: Number(item.precio_extra) || 0,
+        order_index: itemIndex + 1,
+        childGroups: item.childGroups || [],
+      })),
+    }));
 
-    const { error: deleteGroupsError } = await supabase
-      .from("product_option_groups")
-      .delete()
-      .eq("product_id", productId);
-    if (deleteGroupsError) throw deleteGroupsError;
-
-    const saveGroups = async (groups, parentItemId = null) => {
-      for (const [groupIndex, group] of groups.entries()) {
-        if (!group.name.trim()) continue;
-        const { data: savedGroup, error: groupError } = await supabase
-          .from("product_option_groups")
-          .insert({
-            product_id: productId,
-            parent_item_id: parentItemId,
-            name: formatStoredText(group.name),
-            description: formatStoredText(group.description),
-            is_required: Boolean(group.is_required),
-            selection_type: group.selection_type,
-            min_selections: Number(group.min_selections) || 0,
-            max_selections:
-              group.selection_type === "multiple"
-                ? Number(group.max_selections) || null
-                : null,
-            price_mode: group.price_mode || "sum",
-            max_extra_price:
-              group.max_extra_price === "" || group.max_extra_price == null
-                ? null
-                : Number(group.max_extra_price) || 0,
-            order_index: groupIndex + 1,
-          })
-          .select("id")
-          .single();
-        if (groupError) throw groupError;
-
-        for (const [itemIndex, item] of group.items.entries()) {
-          if (!item.nombre.trim()) continue;
-          const { data: savedItem, error: itemError } = await supabase
-            .from("products_items")
-            .insert({
-              product_id: productId,
-              option_group_id: savedGroup.id,
-              nombre: formatStoredText(item.nombre),
-              precio_extra: Number(item.precio_extra) || 0,
-              order_index: itemIndex + 1,
-            })
-            .select("id")
-            .single();
-          if (itemError) throw itemError;
-          await saveGroups(item.childGroups || [], savedItem.id);
-        }
-      }
-    };
-
-    await saveGroups(optionGroups);
+    const { error } = await supabase.rpc("replace_product_options", {
+      p_product_id: productId,
+      p_groups: groupsPayload,
+    });
+    if (error) throw error;
   };
 
   const openProductImageEditor = (file) => {
@@ -4367,7 +4330,7 @@ const Productos = ({ section = "productos" }) => {
                       </div>
                       <button
                         type="button"
-                        onClick={addOptionGroup}
+                        onClick={() => addOptionGroup()}
                         className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[10px] font-semibold text-violet-300 transition-colors hover:bg-violet-400/10 hover:text-violet-200"
                       >
                         <Plus size={13} />
