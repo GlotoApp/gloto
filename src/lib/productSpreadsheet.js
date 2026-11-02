@@ -58,6 +58,7 @@ export const downloadProductTemplate = async ({
   const XLSX = await import("@e965/xlsx");
   const workbook = XLSX.utils.book_new();
   const productHeaders = [
+    "ID producto",
     "Nombre del producto *",
     "Descripción",
     "Precio *",
@@ -84,6 +85,7 @@ export const downloadProductTemplate = async ({
   ];
   const productRows = [
     ...products.map((product) => ({
+      "ID producto": product.id || "",
       "Nombre del producto *": product.name || "",
       Descripción: product.description || "",
       "Precio *": Number(product.price) || 0,
@@ -142,6 +144,7 @@ export const downloadProductTemplate = async ({
     ["PLANTILLA PARA CARGAR PRODUCTOS"],
     ["Usa las hojas Productos y Opciones. No cambies los nombres de las columnas."],
     ["PRODUCTOS: una fila por producto. Nombre, precio, categoría y unidad son obligatorios."],
+    ["La columna ID producto permite actualizar el registro existente. Si el ID está vacío o no existe, el producto se buscará por nombre exacto; si tampoco coincide, se creará como nuevo."],
     ["OPCIONES: una fila por cada alternativa. Repite el nombre del grupo en cada alternativa del mismo grupo."],
     ["Para relacionar un grupo con un producto, escribe el mismo nombre exacto del producto en la columna Producto."],
     ["Para crear un grupo dependiente, completa Grupo padre y Opción padre. Solo se permite un nivel dependiente."],
@@ -152,8 +155,7 @@ export const downloadProductTemplate = async ({
     ["El Tope de precio limita el total solo cuando la regla es Sumar."],
     ["Las categorías y unidades tienen listas desplegables con los datos actuales del negocio. También puedes escribir el nombre de una categoría ya existente."],
     ["Stock es opcional. Se importará solo si el negocio tiene inventario habilitado."],
-    ["El Excel incluye los productos actuales para que puedas usarlos como referencia o editarlos. Al subirlo, cada fila con producto se agrega como nuevo."],
-    ["Si el nombre coincide o se parece a uno que ya existe, Gloto te avisará antes de permitir agregarlo."],
+    ["El Excel incluye los productos actuales con su ID para que puedas editarlos y actualizarlo al subirlo. Los productos sin ID coincidente se buscan por nombre y se actualizan."],
     ["Las imágenes se agregan después desde el editor."],
     ["Ejemplo de Productos: Pizza | Pizza individual | 20000 | Pizzas | UNIDAD | 0 | 0 | Sí"],
     ["Ejemplo de Opciones: Pizza | Tamaño | Elige el tamaño | Sí | Una opción | 1 | 1 | Sumar | | Pequeña | 0 | |"],
@@ -167,7 +169,7 @@ export const downloadProductTemplate = async ({
   productSheet["!cols"] = productHeaders.map((header) => ({
     wch: Math.max(16, Math.min(header.length + 4, 30)),
   }));
-  productSheet["!autofilter"] = { ref: `A1:H${productRows.length + 1}` };
+  productSheet["!autofilter"] = { ref: `A1:I${productRows.length + 1}` };
   productSheet["!freeze"] = { xSplit: 0, ySplit: 1 };
   const optionsSheet = XLSX.utils.json_to_sheet(optionRows, {
     header: optionHeaders,
@@ -316,6 +318,7 @@ export const parseProductWorkbook = async (
       errors.push(`Hoja Productos, fila ${rowNumber}: "Activo" debe ser Sí o No.`);
     }
     productsByName.set(normalized(name), {
+      id: text(row["ID producto"]),
       name,
       description: text(row.Descripción),
       price,

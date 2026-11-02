@@ -976,7 +976,6 @@ const TicketCard = ({
           {(() => {
             const renderItem = (item, quantity, key, delivered = false) => {
               const initialPrice = Number(item.initPrice ?? item.price ?? 0);
-              const displayAmount = initialPrice * Number(quantity || 0);
 
               return (
                 <div
@@ -1029,7 +1028,7 @@ const TicketCard = ({
                         >
                           {new Intl.NumberFormat("es-CO", {
                             maximumFractionDigits: 0,
-                          }).format(displayAmount)}
+                          }).format(initialPrice)}
                         </span>
                       )}
                     </div>

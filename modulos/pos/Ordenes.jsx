@@ -218,13 +218,26 @@ const getDateRange = (period) => {
 };
 
 // --- COMPONENTE DE BOTÓN REUTILIZABLE ---
-const ActionButton = ({ icon: Icon, label, color, onClick }) => (
+const ActionButton = ({
+  icon: Icon,
+  label,
+  loadingLabel,
+  color,
+  onClick,
+  loading = false,
+}) => (
   <button
     type="button"
     onClick={onClick}
-    className={`flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-[10px] font-black uppercase transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 lg:flex-none ${color}`}
+    disabled={loading}
+    className={`flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-[10px] font-black uppercase transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:cursor-wait disabled:opacity-70 lg:flex-none ${color}`}
   >
-    <Icon size={14} /> {label}
+    {loading ? (
+      <LoaderCircle className="animate-spin" size={14} />
+    ) : (
+      <Icon size={14} />
+    )}
+    {loading ? loadingLabel || "Cargando..." : label}
   </button>
 );
 
@@ -427,6 +440,16 @@ const OrderCard = memo(
     canDelete,
   }) => {
     const [isOpen, setIsOpen] = useState(false);
+    const [loadingAction, setLoadingAction] = useState("");
+    const runAction = async (action, callback) => {
+      if (loadingAction) return;
+      setLoadingAction(action);
+      try {
+        await callback();
+      } finally {
+        setLoadingAction("");
+      }
+    };
     const config = ORIGEN_CONFIG[orden.origen || "pos"];
     const Icon = config.icon;
     const showDeliveryStatus =
@@ -703,14 +726,18 @@ const OrderCard = memo(
                       icon={Trash2}
                       label="Eliminar"
                       color="bg-red-500/10 text-red-300 hover:bg-red-500 hover:text-white"
-                      onClick={() => onDelete(orden)}
+                      onClick={() => runAction("delete", () => onDelete(orden))}
+                      loading={loadingAction === "delete"}
+                      loadingLabel="Eliminando..."
                     />
                   )}
                   <ActionButton
                     icon={FileText}
                     label="Factura"
                     color="bg-white/5 text-neutral-300 hover:bg-white/10"
-                    onClick={() => onInvoice(orden)}
+                    onClick={() => runAction("invoice", () => onInvoice(orden))}
+                    loading={loadingAction === "invoice"}
+                    loadingLabel="Abriendo..."
                   />
 
                   {orden.trackingToken ? (
@@ -719,13 +746,23 @@ const OrderCard = memo(
                         icon={Eye}
                         label="Ver seguimiento"
                         color="bg-violet-500/10 text-violet-300 hover:bg-violet-500 hover:text-white"
-                        onClick={() => onOpenTracking(orden)}
+                        onClick={() =>
+                          runAction("tracking", () => onOpenTracking(orden))
+                        }
+                        loading={loadingAction === "tracking"}
+                        loadingLabel="Abriendo..."
                       />
                       <ActionButton
                         icon={Share2}
                         label="Compartir rastreo"
                         color="bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-white"
-                        onClick={() => onShareTracking(orden)}
+                        onClick={() =>
+                          runAction("share-tracking", () =>
+                            onShareTracking(orden),
+                          )
+                        }
+                        loading={loadingAction === "share-tracking"}
+                        loadingLabel="Compartiendo..."
                       />
                     </>
                   ) : (
@@ -737,25 +774,33 @@ const OrderCard = memo(
                     icon={Clipboard}
                     label="Compartir factura PDF"
                     color="bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500 hover:text-white"
-                    onClick={() => onShare(orden)}
+                    onClick={() => runAction("share-pdf", () => onShare(orden))}
+                    loading={loadingAction === "share-pdf"}
+                    loadingLabel="Preparando PDF..."
                   />
                   <ActionButton
                     icon={Save}
                     label="Guardar PDF"
                     color="bg-amber-500/10 text-amber-300 hover:bg-amber-500 hover:text-white"
-                    onClick={() => onSavePdf(orden)}
+                    onClick={() => runAction("save-pdf", () => onSavePdf(orden))}
+                    loading={loadingAction === "save-pdf"}
+                    loadingLabel="Guardando PDF..."
                   />
                   <ActionButton
                     icon={Printer}
                     label="Imprimir"
                     color="bg-violet-600/15 text-violet-300 hover:bg-violet-600 hover:text-white"
-                    onClick={() => onPrint(orden)}
+                    onClick={() => runAction("print", () => onPrint(orden))}
+                    loading={loadingAction === "print"}
+                    loadingLabel="Preparando..."
                   />
                   <ActionButton
                     icon={Edit3}
                     label="Editar"
                     color="bg-sky-500/10 text-sky-300 hover:bg-sky-500 hover:text-white"
-                    onClick={() => onEdit(orden)}
+                    onClick={() => runAction("edit", () => onEdit(orden))}
+                    loading={loadingAction === "edit"}
+                    loadingLabel="Abriendo..."
                   />
                 </div>
               </div>

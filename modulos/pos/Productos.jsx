@@ -2078,14 +2078,22 @@ const Productos = ({ section = "productos" }) => {
         categories: categoryRecords,
         units,
         products: products.map((product) => ({
+          id: product.id,
           name: product.name,
           description: product.description || "",
           price: product.price,
           category: categoryNames[product.categoryId] || product.category || "",
           unit:
-            units.find((unit) => unit.id === product.unitId)?.name ||
-            units.find((unit) => unit.id === product.unit_id)?.name ||
-            "",
+                units.find((unit) =>
+                  product.unitId &&
+                  String(unit.id) === String(product.unitId),
+                )?.name ||
+                units.find((unit) =>
+                  product.unit_id &&
+                  String(unit.id) === String(product.unit_id),
+                )?.name ||
+                product.unit ||
+                "",
           stock: product.stock,
           minStock: product.minStock,
           isActive: product.isActive,
@@ -2132,6 +2140,13 @@ const Productos = ({ section = "productos" }) => {
         errors.push("No se encontraron productos para importar.");
       }
       const similarProducts = parsed.products.flatMap((importedProduct) => {
+        const productId = String(importedProduct.id || "").trim();
+        if (
+          productId &&
+          products.some((product) => String(product.id) === productId)
+        ) {
+          return [];
+        }
         const importedName = normalizeProductMatchName(importedProduct.name);
         const matches = products
           .map((existingProduct) => {
@@ -2147,12 +2162,12 @@ const Productos = ({ section = "productos" }) => {
           })
           .filter(
             (match) =>
-              match.exact ||
-              (Math.min(
+              !match.exact &&
+              Math.min(
                 normalizeProductMatchName(match.importedName).length,
                 normalizeProductMatchName(match.existingName).length,
               ) >= 6 &&
-                match.similarity >= 0.82),
+              match.similarity >= 0.82,
           )
           .sort(
             (left, right) =>
@@ -2277,14 +2292,52 @@ const Productos = ({ section = "productos" }) => {
               }
             : {}),
         };
-        const { data: savedProduct, error: productError } = await supabase
-          .from("products")
-          .insert(payload)
-          .select("*")
-          .single();
+        const importedId = String(product.id || "").trim();
+        const existingProduct =
+          products.find((item) => String(item.id) === importedId) ||
+          products.find(
+            (item) =>
+              normalizeProductMatchName(item.name) ===
+              normalizeProductMatchName(product.name),
+          );
+        let savedProduct;
+        let productError;
+        if (existingProduct) {
+          const updatePayload = { ...payload };
+          delete updatePayload.image_url;
+          const response = await supabase
+            .from("products")
+            .update(updatePayload)
+            .eq("id", existingProduct.id)
+            .eq("business_id", businessId)
+            .select("*")
+            .single();
+          savedProduct = response.data;
+          productError = response.error;
+        } else {
+          const response = await supabase
+            .from("products")
+            .insert(payload)
+            .select("*")
+            .single();
+          savedProduct = response.data;
+          productError = response.error;
+        }
         if (productError) throw productError;
 
         try {
+          if (existingProduct) {
+            const { error: itemsDeleteError } = await supabase
+              .from("products_items")
+              .delete()
+              .eq("product_id", savedProduct.id);
+            if (itemsDeleteError) throw itemsDeleteError;
+            const { error: groupsDeleteError } = await supabase
+              .from("product_option_groups")
+              .delete()
+              .eq("product_id", savedProduct.id);
+            if (groupsDeleteError) throw groupsDeleteError;
+          }
           await saveImportedOptionGroups(
             savedProduct.id,
             product.optionGroups,
@@ -2302,11 +2355,15 @@ const Productos = ({ section = "productos" }) => {
               .eq("product_id", savedProduct.id);
             if (cleanupError) cleanupErrors.push(cleanupError);
           }
-          const { error: productCleanupError } = await supabase
-            .from("products")
-            .delete()
-            .eq("id", savedProduct.id)
-            .eq("business_id", businessId);
+          let productCleanupError = null;
+          if (!existingProduct) {
+            const response = await supabase
+              .from("products")
+              .delete()
+              .eq("id", savedProduct.id)
+              .eq("business_id", businessId);
+            productCleanupError = response.error;
+          }
           if (productCleanupError) cleanupErrors.push(productCleanupError);
           if (cleanupErrors.length) {
             console.error(
@@ -2329,12 +2386,22 @@ const Productos = ({ section = "productos" }) => {
         importedProducts.push(mapProduct(savedProduct, categoryMap));
       }
 
-      setProducts((current) => [...current, ...importedProducts]);
+      setProducts((current) => {
+        const nextProducts = [...current];
+        importedProducts.forEach((importedProduct) => {
+          const index = nextProducts.findIndex(
+            (product) => product.id === importedProduct.id,
+          );
+          if (index >= 0) nextProducts[index] = importedProduct;
+          else nextProducts.push(importedProduct);
+        });
+        return nextProducts;
+      });
       setSpreadsheetResult({
         fileName: spreadsheetResult.fileName,
         products: spreadsheetResult.products,
         errors: [],
-        outcome: `Se importaron ${importedCount} productos correctamente.`,
+        outcome: `Se importaron o actualizaron ${importedCount} productos correctamente.`,
         outcomeStatus: "success",
       });
     } catch (error) {
@@ -4962,12 +5029,12 @@ const Productos = ({ section = "productos" }) => {
         )}
 
         {spreadsheetResult && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-2 backdrop-blur-sm sm:p-4">
             <section
               role="dialog"
               aria-modal="true"
               aria-labelledby="product-spreadsheet-title"
-              className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-950 shadow-2xl"
+              className="flex h-[calc(100vh-1rem)] w-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-950 shadow-2xl sm:h-[calc(100vh-2rem)]"
             >
               <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5">
                 <div>
@@ -4995,7 +5062,7 @@ const Productos = ({ section = "productos" }) => {
                 </button>
               </div>
 
-              <div className="space-y-4 overflow-y-auto p-5">
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
                 {spreadsheetResult.parsing ? (
                   <div className="flex items-center gap-3 py-8 text-sm text-neutral-400">
                     <LoaderCircle
@@ -5032,8 +5099,8 @@ const Productos = ({ section = "productos" }) => {
                           {spreadsheetResult.similarProducts.map((match) => (
                             <li key={`${match.importedName}-${match.existingName}`}>
                               “{match.importedName}” se parece a “{match.existingName}”
-                              {match.exact ? " (mismo nombre)" : ""}. Si continúas,
-                              se agregará como un producto nuevo.
+                              . Confirma si son productos nuevos o si corresponden al
+                              mismo producto.
                             </li>
                           ))}
                         </ul>
@@ -5048,7 +5115,7 @@ const Productos = ({ section = "productos" }) => {
                           />
                           <span>
                             Revisé los nombres y confirmo que quiero agregar
-                            estos productos como nuevos.
+                            los nombres parecidos que siguen sin coincidir.
                           </span>
                         </label>
                       </div>
@@ -5062,7 +5129,7 @@ const Productos = ({ section = "productos" }) => {
                           encontrado
                           {spreadsheetResult.products.length === 1 ? "" : "s"}
                         </p>
-                        <div className="max-h-52 space-y-2 overflow-y-auto">
+                        <div className="space-y-2">
                           {spreadsheetResult.products.map((product) => {
                             const similarMatch =
                               spreadsheetResult.similarProducts?.find(
@@ -5163,7 +5230,7 @@ const Productos = ({ section = "productos" }) => {
                     {spreadsheetResult.similarProducts?.length > 0 &&
                     !similarProductsConfirmed
                       ? "Confirma los nombres para continuar"
-                      : "Agregar productos"}
+                      : "Agregar o actualizar productos"}
                   </button>
                 )}
               </div>

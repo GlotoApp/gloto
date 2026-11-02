@@ -107,10 +107,15 @@ const getOptionTotal = (item) =>
 const getProductUnitPrice = (item) => {
   const unitPrice = Number(item.unit_price || 0);
   const initialPrice = item.init_price ?? item.initPrice;
-
-  return initialPrice != null
-    ? Number(initialPrice)
-    : Math.max(0, unitPrice - getOptionTotal(item));
+  if (initialPrice != null && Number(initialPrice) > 0) {
+    return Number(initialPrice);
+  }
+  if (unitPrice > 0) return Math.max(0, unitPrice - getOptionTotal(item));
+  const quantity = Number(item.quantity || 0);
+  const subtotal = Number(item.subtotal || 0);
+  return quantity > 0 && subtotal > 0
+    ? Math.max(0, subtotal / quantity - getOptionTotal(item))
+    : 0;
 };
 
 const getTotalUnitPrice = (item) =>
@@ -227,7 +232,7 @@ export const getInvoiceHtml = (
   const tipPercent = Math.max(0, Number(order.tipPercent || 0));
   const totalWithoutTip = itemsSubtotal + deliveryFee;
   const tipAmount =
-    storedTipAmount > 0 && tipPercent > 0
+    tipPercent > 0 && storedTipAmount === 0
       ? calculateTipAmount(itemsSubtotal, deliveryFee, tipPercent)
       : storedTipAmount;
   const invoiceTotal = totalWithoutTip + tipAmount;

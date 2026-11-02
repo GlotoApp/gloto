@@ -719,6 +719,7 @@ const POS = () => {
     useState(false);
   const [createdReservation, setCreatedReservation] = useState(null);
   const [sentOrder, setSentOrder] = useState(null);
+  const [sentOrderActionLoading, setSentOrderActionLoading] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [optionModalOpen, setOptionModalOpen] = useState(false);
   const [focusOptionNote, setFocusOptionNote] = useState(false);
@@ -3712,26 +3713,57 @@ const POS = () => {
     logoUrl: deliveryBusinessLogoUrl,
   });
 
-  const handlePrintSentOrder = (order) => {
+  const prepareSentOrderAction = (order) => {
     const invoiceOrder = getSentOrderInvoice(order);
     if (!invoiceOrder) return;
+    if (!invoiceOrder.items.length) {
+      alert("No se puede generar la factura porque el pedido no tiene productos.");
+      return;
+    }
+    const invalidItem = invoiceOrder.items.find(
+      (item) =>
+        !item.product_name ||
+        !Number.isFinite(item.quantity) ||
+        item.quantity <= 0 ||
+        !Number.isFinite(item.unit_price) ||
+        item.unit_price < 0,
+    );
+    if (invalidItem) {
+      alert(
+        "No se puede generar la factura porque faltan datos de producto, cantidad o precio.",
+      );
+      return;
+    }
+    return invoiceOrder;
+  };
+
+  const handlePrintSentOrder = async (order) => {
+    const invoiceOrder = prepareSentOrderAction(order);
+    if (!invoiceOrder || sentOrderActionLoading) return;
+    setSentOrderActionLoading("print");
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
     printOrderInvoice(invoiceOrder, sentOrderInvoiceBusiness());
+    setSentOrderActionLoading(null);
   };
 
   const handleSavePdfSentOrder = async (order) => {
-    const invoiceOrder = getSentOrderInvoice(order);
-    if (!invoiceOrder) return;
+    const invoiceOrder = prepareSentOrderAction(order);
+    if (!invoiceOrder || sentOrderActionLoading) return;
+    setSentOrderActionLoading("pdf");
     try {
       await downloadOrderInvoicePdf(invoiceOrder, sentOrderInvoiceBusiness());
     } catch (error) {
       console.error("Error generando el PDF de la factura:", error);
       alert("No se pudo generar el PDF de la factura.");
+    } finally {
+      setSentOrderActionLoading(null);
     }
   };
 
   const handleShareSentOrder = async (order) => {
-    const invoiceOrder = getSentOrderInvoice(order);
-    if (!invoiceOrder) return;
+    const invoiceOrder = prepareSentOrderAction(order);
+    if (!invoiceOrder || sentOrderActionLoading) return;
+    setSentOrderActionLoading("share");
     try {
       const result = await shareOrderInvoicePdf(
         invoiceOrder,
@@ -3744,6 +3776,8 @@ const POS = () => {
       if (error?.name === "AbortError") return;
       console.error("Error compartiendo el PDF de la factura:", error);
       alert("No se pudo generar o compartir el PDF de la factura.");
+    } finally {
+      setSentOrderActionLoading(null);
     }
   };
 
@@ -6244,33 +6278,43 @@ const POS = () => {
             <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 onClick={() => handleShareSentOrder(sentOrder)}
-                className="flex items-center justify-center gap-3 py-3 px-6 bg-surface border border-outline hover:bg-surface-hover text-on-surface font-bold rounded-2xl shadow-sm hover:shadow-md transition-all text-sm sm:text-base ring-1 ring-transparent focus:ring-offset-2 focus:ring-primary/20"
+                disabled={Boolean(sentOrderActionLoading)}
+                className="flex items-center justify-center gap-3 py-3 px-6 bg-surface border border-outline hover:bg-surface-hover text-on-surface font-bold rounded-2xl shadow-sm hover:shadow-md transition-all text-sm sm:text-base ring-1 ring-transparent focus:ring-offset-2 focus:ring-primary/20 disabled:opacity-60"
                 aria-label="Compartir pedido"
               >
-                <span className="material-symbols-outlined">share</span>
-                <span>Compartir</span>
+                <span className={`material-symbols-outlined ${sentOrderActionLoading === "share" ? "animate-spin" : ""}`}>
+                  {sentOrderActionLoading === "share" ? "progress_activity" : "share"}
+                </span>
+                <span>{sentOrderActionLoading === "share" ? "Compartiendo..." : "Compartir"}</span>
               </button>
 
               <button
                 onClick={() => handleSavePdfSentOrder(sentOrder)}
-                className="flex items-center justify-center gap-3 py-3 px-6 bg-surface border border-outline hover:bg-surface-hover text-on-surface font-bold rounded-2xl shadow-sm hover:shadow-md transition-all text-sm sm:text-base ring-1 ring-transparent focus:ring-offset-2 focus:ring-primary/20"
+                disabled={Boolean(sentOrderActionLoading)}
+                className="flex items-center justify-center gap-3 py-3 px-6 bg-surface border border-outline hover:bg-surface-hover text-on-surface font-bold rounded-2xl shadow-sm hover:shadow-md transition-all text-sm sm:text-base ring-1 ring-transparent focus:ring-offset-2 focus:ring-primary/20 disabled:opacity-60"
                 aria-label="Guardar PDF"
               >
-                <span className="material-symbols-outlined">save</span>
-                <span>Guardar PDF</span>
+                <span className={`material-symbols-outlined ${sentOrderActionLoading === "pdf" ? "animate-spin" : ""}`}>
+                  {sentOrderActionLoading === "pdf" ? "progress_activity" : "save"}
+                </span>
+                <span>{sentOrderActionLoading === "pdf" ? "Generando PDF..." : "Guardar PDF"}</span>
               </button>
 
               <button
                 onClick={() => handlePrintSentOrder(sentOrder)}
-                className="flex items-center justify-center gap-3 py-3 px-6 bg-primary-container/50 hover:bg-primary-container text-on-primary font-bold rounded-2xl shadow-lg hover:shadow-xl transform hover:transition-all text-sm sm:text-base ring-1 ring-transparent focus:ring-offset-2 focus:ring-primary/40"
+                disabled={Boolean(sentOrderActionLoading)}
+                className="flex items-center justify-center gap-3 py-3 px-6 bg-primary-container/50 hover:bg-primary-container text-on-primary font-bold rounded-2xl shadow-lg hover:shadow-xl transform hover:transition-all text-sm sm:text-base ring-1 ring-transparent focus:ring-offset-2 focus:ring-primary/40 disabled:opacity-60"
                 aria-label="Imprimir pedido"
               >
-                <span className="material-symbols-outlined">print</span>
-                <span>Imprimir</span>
+                <span className={`material-symbols-outlined ${sentOrderActionLoading === "print" ? "animate-spin" : ""}`}>
+                  {sentOrderActionLoading === "print" ? "progress_activity" : "print"}
+                </span>
+                <span>{sentOrderActionLoading === "print" ? "Preparando..." : "Imprimir"}</span>
               </button>
 
               <button
                 onClick={handleCloseSentOrderModal}
+                disabled={Boolean(sentOrderActionLoading)}
                 className="flex items-center justify-center gap-3 py-3 px-6 bg-primary/20 hover:bg-primary/50 text-on-surface font-bold rounded-2xl shadow-sm hover:shadow-md transition-all text-sm sm:text-base ring-1 ring-transparent focus:ring-offset-2 focus:ring-primary/20"
                 aria-label="Cerrar modal"
               >
@@ -6301,29 +6345,38 @@ const POS = () => {
               <button
                 type="button"
                 onClick={() => handleShareSentOrder(sentOrder)}
-                className="flex items-center justify-center gap-3 rounded-2xl border border-outline bg-surface px-6 py-3 text-sm font-bold text-on-surface shadow-sm transition-all hover:bg-surface-hover sm:text-base"
+                disabled={Boolean(sentOrderActionLoading)}
+                className="flex items-center justify-center gap-3 rounded-2xl border border-outline bg-surface px-6 py-3 text-sm font-bold text-on-surface shadow-sm transition-all hover:bg-surface-hover disabled:opacity-60 sm:text-base"
                 aria-label="Compartir factura"
               >
-                <span className="material-symbols-outlined">share</span>
-                <span>Compartir</span>
+                <span className={`material-symbols-outlined ${sentOrderActionLoading === "share" ? "animate-spin" : ""}`}>
+                  {sentOrderActionLoading === "share" ? "progress_activity" : "share"}
+                </span>
+                <span>{sentOrderActionLoading === "share" ? "Compartiendo..." : "Compartir"}</span>
               </button>
               <button
                 type="button"
                 onClick={() => handleSavePdfSentOrder(sentOrder)}
-                className="flex items-center justify-center gap-3 rounded-2xl border border-outline bg-surface px-6 py-3 text-sm font-bold text-on-surface shadow-sm transition-all hover:bg-surface-hover sm:text-base"
+                disabled={Boolean(sentOrderActionLoading)}
+                className="flex items-center justify-center gap-3 rounded-2xl border border-outline bg-surface px-6 py-3 text-sm font-bold text-on-surface shadow-sm transition-all hover:bg-surface-hover disabled:opacity-60 sm:text-base"
                 aria-label="Guardar factura en PDF"
               >
-                <span className="material-symbols-outlined">save</span>
-                <span>Guardar PDF</span>
+                <span className={`material-symbols-outlined ${sentOrderActionLoading === "pdf" ? "animate-spin" : ""}`}>
+                  {sentOrderActionLoading === "pdf" ? "progress_activity" : "save"}
+                </span>
+                <span>{sentOrderActionLoading === "pdf" ? "Generando PDF..." : "Guardar PDF"}</span>
               </button>
               <button
                 type="button"
                 onClick={() => handlePrintSentOrder(sentOrder)}
-                className="flex items-center justify-center gap-3 rounded-2xl bg-primary-container/50 px-6 py-3 text-sm font-bold text-on-primary shadow-lg transition-all hover:bg-primary-container sm:text-base"
+                disabled={Boolean(sentOrderActionLoading)}
+                className="flex items-center justify-center gap-3 rounded-2xl bg-primary-container/50 px-6 py-3 text-sm font-bold text-on-primary shadow-lg transition-all hover:bg-primary-container disabled:opacity-60 sm:text-base"
                 aria-label="Imprimir factura"
               >
-                <span className="material-symbols-outlined">print</span>
-                <span>Imprimir</span>
+                <span className={`material-symbols-outlined ${sentOrderActionLoading === "print" ? "animate-spin" : ""}`}>
+                  {sentOrderActionLoading === "print" ? "progress_activity" : "print"}
+                </span>
+                <span>{sentOrderActionLoading === "print" ? "Preparando..." : "Imprimir"}</span>
               </button>
               <button
                 type="button"

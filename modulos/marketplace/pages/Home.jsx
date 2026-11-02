@@ -1194,9 +1194,7 @@ const Home = ({ userLocation }) => {
                       {t.nombre}
                     </h4>
                     <p className="text-[11px] text-on-surface-variant font-medium mt-0.5">
-                      {t.secondaryTypes?.length
-                        ? `${t.tipo} · ${t.secondaryTypes.join(" · ")}`
-                        : t.tipo}
+                      {t.tipo}
                     </p>
 
                     {(t.rating || t.tiempo || t.distanciaKm != null) && (
@@ -1316,9 +1314,7 @@ const Home = ({ userLocation }) => {
                       {t.nombre}
                     </h4>
                     <p className="mt-0.5 text-[11px] font-medium text-on-surface-variant">
-                      {t.secondaryTypes?.length
-                        ? `${t.tipo} · ${t.secondaryTypes.join(" · ")}`
-                        : t.tipo}
+                      {t.tipo}
                     </p>
                     {(t.rating ||
                       t.tiempo ||

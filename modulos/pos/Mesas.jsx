@@ -1533,6 +1533,7 @@ export default function MesasPOS() {
     return () => window.clearInterval(refreshAtDateBoundary);
   }, [loadMesasFromDB]);
 
+
   // Suscribirse a cambios en órdenes
   useEffect(() => {
     if (!user?.id || !businessId) return;
@@ -1657,6 +1658,7 @@ export default function MesasPOS() {
     },
     [businessId, loadMesasFromDB, showToast],
   );
+
 
   const changeFloorTableGuestCount = async (table, change) => {
     const currentCount = getFloorTableGuestCount(table);
@@ -1841,7 +1843,12 @@ export default function MesasPOS() {
 
   const handleFloorWheel = (event) => {
     event.preventDefault();
-    if (event.target.closest('[aria-label="Herramientas del plano"]')) return;
+    if (
+      event.target.closest(
+        '[aria-label="Herramientas principales del plano"], [aria-label="Herramientas del plano"]',
+      )
+    )
+      return;
 
     const bounds = floorRef.current?.getBoundingClientRect();
     if (!bounds) return;
@@ -2562,10 +2569,15 @@ export default function MesasPOS() {
                   </p>
                 </div>
               )}
+              <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden px-6">
+                <h2 className="select-none text-center text-5xl font-black uppercase tracking-[0.12em] text-white/[0.008] sm:text-7xl lg:text-8xl">
+                  {activeFloorArea?.name || "Sin espacio seleccionado"}
+                </h2>
+              </div>
               <div
                 role="group"
-                aria-label="Herramientas del plano"
-                className="absolute bottom-3 right-3 z-20 flex flex-col items-center gap-1 rounded-2xl border border-white/10 bg-neutral-950/90 p-1.5 shadow-xl backdrop-blur"
+                aria-label="Herramientas principales del plano"
+                className="absolute right-3 top-3 z-20 flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-neutral-950/90 p-1.5 shadow-xl backdrop-blur"
               >
                 <button
                   type="button"
@@ -2584,7 +2596,6 @@ export default function MesasPOS() {
                 >
                   {isEditingFloor ? <Check size={16} /> : <Pencil size={15} />}
                 </button>
-                <div className="h-px w-6 bg-white/10" />
                 <button
                   type="button"
                   onClick={handleAddFloorTable}
@@ -2595,7 +2606,12 @@ export default function MesasPOS() {
                 >
                   <Plus size={16} />
                 </button>
-                <div className="h-px w-6 bg-white/10" />
+              </div>
+              <div
+                role="group"
+                aria-label="Herramientas del plano"
+                className="absolute bottom-3 right-3 z-20 flex flex-col items-center gap-1 rounded-2xl border border-white/10 bg-neutral-950/90 p-1.5 shadow-xl backdrop-blur"
+              >
                 <button
                   type="button"
                   onClick={() =>
@@ -2655,6 +2671,7 @@ export default function MesasPOS() {
         onToast={showToast}
         products={products}
       />
+
 
       {/* ── Toast ── */}
       <AnimatePresence>
