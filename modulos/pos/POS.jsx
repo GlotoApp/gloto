@@ -369,6 +369,24 @@ const getInitialCartPrice = (item) => {
   return Math.max(0, derivedInitialPrice);
 };
 
+const getCartItemUnitPrice = (item) => {
+  const initialPrice = Number(item?.initPrice ?? item?.init_price ?? 0);
+  const storedPrice = Number(item?.price ?? item?.precio ?? 0);
+  const extraPrice = getOptionExtraPrice(
+    Array.isArray(item?.selectedOptions) ? item.selectedOptions : [],
+  );
+
+  if (initialPrice > 0) {
+    return initialPrice + extraPrice;
+  }
+
+  if (extraPrice > 0) {
+    return storedPrice >= extraPrice ? storedPrice : extraPrice;
+  }
+
+  return storedPrice;
+};
+
 const createCartItemFromSelection = (
   product,
   selectedOptions,
@@ -2983,7 +3001,7 @@ const POS = () => {
       ? null
       : Number(deliveryRouteDistanceMeters) / 1000;
   const itemsSubtotal = cart.reduce(
-    (sum, item) => sum + item.price * item.qty,
+    (sum, item) => sum + getCartItemUnitPrice(item) * item.qty,
     0,
   );
   const deliveryFee =
@@ -3388,7 +3406,7 @@ const POS = () => {
         id: item.cartId,
         productId: item.productId || item.id,
         nombre: item.name || "Producto",
-        precio: Number(item.price || 0),
+        precio: getCartItemUnitPrice(item),
         initPrice: Number(item.initPrice || 0),
         unit_name: item.unit?.name || item.unit_name || "UNIDAD",
         notas: item.note || "",
@@ -5341,7 +5359,7 @@ const POS = () => {
                   </div>
 
                   <p className="font-black text-[12px] text-white">
-                    $ {formatPrice(item.price * item.qty)}
+                    $ {formatPrice(getCartItemUnitPrice(item) * item.qty)}
                   </p>
                 </div>
 
@@ -5708,7 +5726,7 @@ const POS = () => {
                     </div>
 
                     <p className="font-black text-[12px] text-white">
-                      $ {formatPrice(item.price * item.qty)}
+                      $ {formatPrice(getCartItemUnitPrice(item) * item.qty)}
                     </p>
                   </div>
 

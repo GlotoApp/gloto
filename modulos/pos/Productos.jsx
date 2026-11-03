@@ -451,6 +451,7 @@ const Productos = ({ section = "productos" }) => {
   const [similarProductsConfirmed, setSimilarProductsConfirmed] =
     useState(false);
   const productSpreadsheetInputRef = useRef(null);
+  const productModalScrollRef = useRef(null);
 
   // Estado del formulario
   const [formData, setFormData] = useState({
@@ -492,6 +493,27 @@ const Productos = ({ section = "productos" }) => {
   const [quickInventoryError, setQuickInventoryError] = useState("");
   const stockInputRef = useRef(null);
   const focusStockOnOpen = useRef(false);
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+
+    const backgroundMain = document.querySelector("main.overflow-y-auto");
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousMainOverflow = backgroundMain?.style.overflowY;
+
+    document.body.style.overflow = "hidden";
+    if (backgroundMain) backgroundMain.style.overflowY = "hidden";
+    if (productModalScrollRef.current) {
+      productModalScrollRef.current.scrollTop = 0;
+    }
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      if (backgroundMain) {
+        backgroundMain.style.overflowY = previousMainOverflow || "";
+      }
+    };
+  }, [isModalOpen]);
 
   // Estado inicial del catálogo
   const [products, setProducts] = useState([]);
@@ -1396,6 +1418,15 @@ const Productos = ({ section = "productos" }) => {
     setOptionGroups(updateTree);
   };
 
+  const updateRequiredOptionGroup = (group) => {
+    updateOptionGroup(group.id, {
+      is_required: !group.is_required,
+      min_selections: !group.is_required
+        ? Math.max(1, Number(group.min_selections) || 0)
+        : 0,
+    });
+  };
+
   const removeOptionGroup = (groupId) => {
     const removeFromTree = (groups) =>
       groups
@@ -1541,20 +1572,8 @@ const Productos = ({ section = "productos" }) => {
         </label>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        <label className="flex items-center gap-2 text-[10px] text-neutral-300">
-          <input
-            type="checkbox"
-            checked={group.is_required}
-            onChange={(event) =>
-              updateOptionGroup(group.id, {
-                is_required: event.target.checked,
-                min_selections: event.target.checked
-                  ? Math.max(1, Number(group.min_selections) || 0)
-                  : 0,
-              })
-            }
-          />
-          <span>
+        <div className="flex items-center gap-2 text-[10px] text-neutral-300">
+          <span className="flex items-center gap-2">
             <span className="flex items-center gap-1">
               Obligatorio
               <FieldHelp
@@ -1564,7 +1583,24 @@ const Productos = ({ section = "productos" }) => {
               />
             </span>
           </span>
-        </label>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Grupo obligatorio"
+            aria-checked={group.is_required}
+            onClick={() => updateRequiredOptionGroup(group)}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+              group.is_required ? "bg-violet-500" : "bg-neutral-700"
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`inline-block h-4 w-4 rounded-full bg-white shadow-md transition-transform ${
+                group.is_required ? "translate-x-4" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
         <label className="space-y-1 text-[9px] text-neutral-500">
           <OptionFieldLabel
             title="Tipo de selección"
@@ -3460,7 +3496,7 @@ const Productos = ({ section = "productos" }) => {
         {/* MODAL DE EDICIÓN / NUEVO PRODUCTO */}
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-black/95 backdrop-blur-xl">
-            <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-neutral-900">
+            <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-neutral-900">
               {/* Header Premium - Responsive */}
               <div className="relative overflow-hidden flex-shrink-0">
                 <div className="relative mx-auto flex w-full max-w-7xl items-center justify-between gap-3 border-b border-white/5 px-4 py-4 sm:px-6 md:px-8 lg:px-10">
@@ -3494,7 +3530,7 @@ const Productos = ({ section = "productos" }) => {
               </div>
 
               {/* Contenido Principal - Responsive */}
-              <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-5 overflow-y-auto p-4 sm:gap-6 sm:p-6 md:flex-row md:items-start md:gap-8 md:p-8 lg:p-10">
+              <div ref={productModalScrollRef} className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-5 overflow-y-auto overscroll-contain p-4 sm:gap-6 sm:p-6 md:flex-row md:items-start md:gap-8 md:p-8 lg:p-10">
                 {/* Panel Izquierdo: Imagen y Estado */}
                 <div className="flex w-full flex-shrink-0 flex-col gap-5 rounded-2xl border border-white/5 bg-neutral-950/40 p-4 sm:p-5 md:w-[30%] md:max-w-sm">
                   <div className="border-b border-white/5 pb-3">
@@ -4514,26 +4550,7 @@ const Productos = ({ section = "productos" }) => {
                                       className="w-full rounded-lg border border-white/10 bg-neutral-800/60 px-3 py-2.5 text-xs font-medium text-white outline-none transition-colors focus:border-violet-400/50"
                                     />
                                   </div>
-                                  <label className="inline-flex cursor-pointer items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-neutral-400 transition-colors justify-self-end">
-                                    <input
-                                      type="checkbox"
-                                      checked={group.is_required}
-                                      onChange={(event) =>
-                                        updateOptionGroup(group.id, {
-                                          is_required: event.target.checked,
-                                          min_selections:
-                                            event.target.checked
-                                              ? Math.max(
-                                                  1,
-                                                  Number(group.min_selections) ||
-                                                    0,
-                                                )
-                                              : 0,
-                                        })
-                                      }
-                                      aria-label="Grupo obligatorio"
-                                      className="peer sr-only"
-                                    />
+                                  <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-neutral-400 transition-colors justify-self-end">
                                     <span>
                                       <span className="flex items-center gap-1">
                                         Obligatorio
@@ -4544,8 +4561,30 @@ const Productos = ({ section = "productos" }) => {
                                         />
                                       </span>
                                     </span>
-                                    <span className="relative inline-flex h-6 w-10 items-center rounded-full bg-neutral-700  transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-violet-400/50 peer-checked:bg-violet-500 peer-checked:shadow-violet-500/50 sm:h-7 sm:w-12 after:inline-block after:h-4 after:w-4 after:translate-x-0.5 after:transform after:rounded-full after:bg-white after:shadow-md after:transition-all peer-checked:after:translate-x-5 sm:after:h-5 sm:after:w-5 sm:after:translate-x-1 sm:peer-checked:after:translate-x-5.5" />
-                                  </label>
+                                    <button
+                                      type="button"
+                                      role="switch"
+                                      aria-label="Grupo obligatorio"
+                                      aria-checked={group.is_required}
+                                      onClick={() =>
+                                        updateRequiredOptionGroup(group)
+                                      }
+                                      className={`relative inline-flex h-6 w-10 items-center rounded-full transition-all sm:h-7 sm:w-12 ${
+                                        group.is_required
+                                          ? "bg-violet-500 shadow-violet-500/50"
+                                          : "bg-neutral-700"
+                                      }`}
+                                    >
+                                      <span
+                                        aria-hidden="true"
+                                        className={`inline-block h-4 w-4 rounded-full bg-white shadow-md transition-transform sm:h-5 sm:w-5 ${
+                                          group.is_required
+                                            ? "translate-x-5 sm:translate-x-6"
+                                            : "translate-x-0.5 sm:translate-x-1"
+                                        }`}
+                                      />
+                                    </button>
+                                  </div>
                                 </div>
 
                                 <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_200px] sm:items-start">
