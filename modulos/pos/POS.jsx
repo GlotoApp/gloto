@@ -274,6 +274,80 @@ const getOptionNames = (selectedOptions) =>
 
 const getOptionExtraPrice = getSelectedOptionsExtraPrice;
 
+const normalizeStoredCartOption = (option, fallbackId = null) => {
+  const value = typeof option === "string" ? { nombre: option } : option || {};
+  const nombre =
+    value.nombre || value.name || value.label || value.title || "";
+
+  return {
+    ...value,
+    id: value.id ?? fallbackId,
+    nombre,
+    precio_extra: Number(
+      value.precio_extra ??
+        value.precioExtra ??
+        value.price_extra ??
+        value.extra_price ??
+        value.extraPrice ??
+        value.price ??
+        0,
+    ),
+    grupoId: value.grupoId ?? value.grupo_id ?? null,
+    grupoNombre: value.grupoNombre ?? value.grupo ?? null,
+    priceMode: value.priceMode ?? value.price_mode ?? "sum",
+    maxExtraPrice: value.maxExtraPrice ?? value.max_extra_price ?? null,
+  };
+};
+
+const resolveStoredCartOptions = (item, product) => {
+  const catalogOptions = [];
+  const collectOptions = (groups = []) => {
+    groups.forEach((group) => {
+      (group.opciones || []).forEach((option) => {
+        catalogOptions.push(option);
+        collectOptions(option.grupos || []);
+      });
+    });
+  };
+  collectOptions(product?.optionGroups || []);
+
+  const rawOptions = Array.isArray(item.selectedOptions)
+    ? item.selectedOptions
+    : Array.isArray(item.options)
+      ? item.options
+      : Array.isArray(item.optionNames)
+        ? item.optionNames
+        : [];
+
+  return rawOptions.map((option, index) => {
+    const storedOption = normalizeStoredCartOption(option, `stored-option-${index}`);
+    const catalogOption = catalogOptions.find(
+      (candidate) =>
+        String(candidate.id) === String(storedOption.id) ||
+        String(candidate.nombre || candidate.name || "").toLowerCase() ===
+          String(storedOption.nombre || "").toLowerCase(),
+    );
+    return normalizeStoredCartOption(
+      {
+        ...(catalogOption || {}),
+        ...(storedOption.nombre ? { nombre: storedOption.nombre } : {}),
+        precio_extra:
+          Number(storedOption.precio_extra || 0) > 0
+            ? storedOption.precio_extra
+            : catalogOption?.precio_extra,
+        grupoId: storedOption.grupoId ?? catalogOption?.grupoId ?? null,
+        grupoNombre:
+          storedOption.grupoNombre ?? catalogOption?.grupoNombre ?? null,
+        priceMode:
+          storedOption.priceMode ?? catalogOption?.priceMode ?? "sum",
+        maxExtraPrice:
+          storedOption.maxExtraPrice ?? catalogOption?.maxExtraPrice ?? null,
+      },
+      storedOption.id,
+    );
+  });
+};
+
 const getInitialCartPrice = (item) => {
   const storedInitialPrice = Number(item?.initPrice || 0);
   if (storedInitialPrice > 0) return storedInitialPrice;
@@ -282,7 +356,17 @@ const getInitialCartPrice = (item) => {
   const extraPrice = getOptionExtraPrice(
     Array.isArray(item?.selectedOptions) ? item.selectedOptions : [],
   );
-  return Math.max(0, finalPrice - extraPrice);
+  const derivedInitialPrice = finalPrice - extraPrice;
+
+  if (
+    Number(item?.initPrice || 0) === 0 &&
+    extraPrice > 0 &&
+    derivedInitialPrice === 0
+  ) {
+    return finalPrice;
+  }
+
+  return Math.max(0, derivedInitialPrice);
 };
 
 const createCartItemFromSelection = (
@@ -1701,8 +1785,8 @@ const POS = () => {
           note: item.note || item.notes || "",
           notas: item.note || item.notes || "",
           optionNames: item.optionNames || item.options || [],
-          selectedOptions: item.selectedOptions || [],
-          options: item.selectedOptions || item.options || [],
+          selectedOptions: resolveStoredCartOptions(item),
+          options: resolveStoredCartOptions(item),
           unit: item.unit || {
             name: item.unit_name || "UNIDAD",
             allows_fraction: false,
@@ -1732,6 +1816,11 @@ const POS = () => {
           unit: product?.unit || item.unit,
           unit_name: product?.unit?.name || item.unit_name || "UNIDAD",
           image_url: item.image_url || imageUrl,
+          selectedOptions: resolveStoredCartOptions(item, product),
+          options: resolveStoredCartOptions(item, product),
+          optionNames: resolveStoredCartOptions(item, product).map(
+            (option) => option.nombre,
+          ),
         };
       }),
     );
@@ -1750,9 +1839,17 @@ const POS = () => {
         const extraPrice = getOptionExtraPrice(
           Array.isArray(item.selectedOptions) ? item.selectedOptions : [],
         );
+        const storedInitialPrice = Number(item.initPrice || 0);
 
         if (basePrice > 0 && storedPrice === basePrice && extraPrice > 0) {
           return { ...item, price: storedPrice + extraPrice };
+        }
+        if (basePrice === 0 && storedPrice === 0 && extraPrice > 0) {
+          return {
+            ...item,
+            initPrice: storedInitialPrice,
+            price: extraPrice,
+          };
         }
 
         return item;
