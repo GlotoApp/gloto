@@ -75,6 +75,7 @@ const CategoriasAdmin = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [moveCategoryId, setMoveCategoryId] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("order");
   const [draggedCategoryId, setDraggedCategoryId] = useState(null);
@@ -291,6 +292,20 @@ const CategoriasAdmin = ({
 
     if (onDeleteCategoryCascade) {
       onDeleteCategoryCascade(categoryToDelete.id);
+    }
+  };
+
+  const handleMoveCategoryProducts = (index) => {
+    const categoryToDelete = categoriesList[index];
+    if (!categoryToDelete || !moveCategoryId) return;
+
+    const updated = categoriesList.filter((_, i) => i !== index);
+    setCategoriesList(updated);
+    setDeleteConfirm(null);
+    setMoveCategoryId("");
+
+    if (onDeleteCategoryCascade) {
+      onDeleteCategoryCascade(categoryToDelete.id, moveCategoryId);
     }
   };
 
@@ -778,6 +793,7 @@ const CategoriasAdmin = ({
                     type="button"
                     onClick={() => {
                       setDeleteConfirm(editingIndex);
+                      setMoveCategoryId("");
                       setIsModalOpen(false);
                     }}
                     className="mr-auto inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-red-300 transition-colors hover:bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
@@ -859,6 +875,40 @@ const CategoriasAdmin = ({
                     )}
                   </div>
 
+                  {associatedProds.length > 0 && (
+                    <div className="mb-4 rounded-xl border border-violet-500/20 bg-violet-500/5 p-3">
+                          <label
+                            htmlFor="move-category-products"
+                            className="mb-2 block text-[10px] font-black uppercase tracking-widest text-violet-200"
+                          >
+                            Mover productos a otra categoría
+                          </label>
+                          <select
+                            id="move-category-products"
+                            value={moveCategoryId}
+                            onChange={(event) => setMoveCategoryId(event.target.value)}
+                            className="min-h-10 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 text-xs text-white outline-none focus:border-violet-400/60"
+                          >
+                            <option value="">Selecciona una categoría</option>
+                            {categoriesList
+                              .filter((category) => category.id !== catObj?.id)
+                              .map((category) => (
+                                <option key={category.id} value={category.id}>
+                                  {category.name}
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={!moveCategoryId}
+                            onClick={() => handleMoveCategoryProducts(deleteConfirm)}
+                            className="mt-3 min-h-10 w-full rounded-xl border border-violet-400/30 bg-violet-500/15 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-violet-200 transition-colors hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            Mover productos y eliminar categoría
+                          </button>
+                    </div>
+                  )}
+
                   <div className="flex flex-col-reverse gap-2 sm:flex-row">
                     <button
                       type="button"
@@ -869,7 +919,10 @@ const CategoriasAdmin = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setDeleteConfirm(null)}
+                      onClick={() => {
+                        setDeleteConfirm(null);
+                        setMoveCategoryId("");
+                      }}
                       className="min-h-10 flex-1 rounded-xl border border-white/10 px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-neutral-300 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                     >
                       Cancelar

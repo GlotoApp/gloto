@@ -347,7 +347,7 @@ const Productos = ({ section = "productos" }) => {
   };
 
   // ======= NUEVA FUNCIÓN AGREGADA PARA LA ELIMINACIÓN EN CASCADA =======
-  const handleDeleteCategoryCascade = async (categoryId) => {
+  const handleDeleteCategoryCascade = async (categoryId, targetCategoryId = null) => {
     const category = categoryRecords.find((item) => item.id === categoryId);
     const { data: categoryProducts, error: productsError } = await supabase
       .from("products")
@@ -364,7 +364,32 @@ const Productos = ({ section = "productos" }) => {
       return;
     }
     const productIds = (categoryProducts || []).map((product) => product.id);
-    if (productIds.length > 0) {
+    if (targetCategoryId) {
+      const targetCategory = categoryRecords.find(
+        (item) => item.id === targetCategoryId,
+      );
+      if (!targetCategory) {
+        alert("La categoría destino ya no existe.");
+        return;
+      }
+
+      if (productIds.length > 0) {
+        const { error: moveProductsError } = await supabase
+          .from("products")
+          .update({ category_id: targetCategoryId })
+          .in("id", productIds)
+          .eq("business_id", businessId);
+
+        if (moveProductsError) {
+          console.error(
+            "Error moviendo productos a otra categoría:",
+            moveProductsError,
+          );
+          alert("No se pudieron mover los productos a la categoría seleccionada");
+          return;
+        }
+      }
+    } else if (productIds.length > 0) {
       const { error: deleteProductsError } = await supabase
         .from("products")
         .delete()
@@ -417,7 +442,13 @@ const Productos = ({ section = "productos" }) => {
     }
 
     setProducts((current) =>
-      current.filter((product) => product.categoryId !== categoryId),
+      targetCategoryId
+        ? current.map((product) =>
+            product.categoryId === categoryId
+              ? { ...product, categoryId: targetCategoryId }
+              : product,
+          )
+        : current.filter((product) => product.categoryId !== categoryId),
     );
     setCategoryRecords((current) =>
       current.filter((item) => item.id !== categoryId),
