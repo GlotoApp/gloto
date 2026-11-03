@@ -1309,6 +1309,8 @@ const Sidebar = ({
                 type="button"
                 onClick={handleColorModeToggle}
                 disabled={!colorModeReady || savingColorMode || !user?.id}
+                role="switch"
+                aria-checked={colorMode === "dark"}
                 aria-label={
                   colorMode === "dark"
                     ? "Cambiar a modo claro"
@@ -1319,16 +1321,33 @@ const Sidebar = ({
                     ? "Cambiar a modo claro"
                     : "Cambiar a modo oscuro"
                 }
-                className={`relative flex h-10 w-full items-center rounded-default transition-colors hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 ${isExpanded ? "gap-3 px-3" : "w-10 justify-center"}`}
+                className={`relative flex h-10 w-full items-center rounded-default transition-colors hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 ${isExpanded ? "gap-3 px-3" : "justify-center"}`}
               >
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center text-on-surface-variant">
-                  {colorMode === "dark" ? <Sun size={19} /> : <Moon size={19} />}
-                </span>
                 {isExpanded && (
                   <span className="truncate text-left font-label-caps text-xs font-bold uppercase tracking-tight text-on-surface-variant">
                     Apariencia: {colorMode === "dark" ? "Oscuro" : "Claro"}
                   </span>
                 )}
+                <span
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                    colorMode === "dark" ? "bg-violet-500" : "bg-neutral-600"
+                  } ${isExpanded ? "ml-auto" : ""}`}
+                  aria-hidden="true"
+                >
+                  <span
+                    className={`absolute top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-white text-neutral-800 shadow transition-transform ${
+                      colorMode === "dark" ? "translate-x-[22px]" : "translate-x-0.5"
+                    }`}
+                  >
+                    {savingColorMode ? (
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-neutral-400 border-t-violet-500" />
+                    ) : colorMode === "dark" ? (
+                      <Moon size={12} />
+                    ) : (
+                      <Sun size={12} />
+                    )}
+                  </span>
+                </span>
               </button>
             </div>
 
