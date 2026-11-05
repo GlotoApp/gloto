@@ -21,6 +21,7 @@ import {
   X,
   Printer,
   ClipboardList,
+  WandSparkles,
 } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAdminRealtime } from "./useAdminRealtime";
@@ -62,6 +63,7 @@ const navItems = [
   },
   { label: "Sistema", path: "/gestion/sistema", icon: Settings },
   { label: "Guía de impresoras", path: "/gestion/impresion", icon: Printer },
+  { label: "Utilidades", path: "/gestion/utilidades", icon: WandSparkles },
 ];
 
 const SuperAdminSidebar = ({
