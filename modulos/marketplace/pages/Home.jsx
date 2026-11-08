@@ -112,7 +112,9 @@ const getBusinessHoursStatus = (rows, now) => {
         !Number.isInteger(day) ||
         day < 1 ||
         day > 7 ||
-        ![openHours, openMinutes, closeHours, closeMinutes].every(Number.isFinite)
+        ![openHours, openMinutes, closeHours, closeMinutes].every(
+          Number.isFinite,
+        )
       ) {
         return null;
       }
@@ -134,12 +136,15 @@ const getBusinessHoursStatus = (rows, now) => {
     .filter(Boolean);
 
   const activeInterval = intervals.find((interval) =>
-    [interval.start - minutesPerWeek, interval.start, interval.start + minutesPerWeek]
-      .some(
-        (start) =>
-          currentWeekMinute >= start &&
-          currentWeekMinute < start + interval.duration,
-      ),
+    [
+      interval.start - minutesPerWeek,
+      interval.start,
+      interval.start + minutesPerWeek,
+    ].some(
+      (start) =>
+        currentWeekMinute >= start &&
+        currentWeekMinute < start + interval.duration,
+    ),
   );
   if (activeInterval) return { isOpen: true, opensAt: null };
 
@@ -147,16 +152,14 @@ const getBusinessHoursStatus = (rows, now) => {
     .map((interval) => ({
       ...interval,
       distance:
-        (interval.start - currentWeekMinute + minutesPerWeek) % minutesPerWeek ||
-        minutesPerWeek,
+        (interval.start - currentWeekMinute + minutesPerWeek) %
+          minutesPerWeek || minutesPerWeek,
     }))
     .sort((a, b) => a.distance - b.distance)[0];
 
   return {
     isOpen: false,
-    opensAt: nextInterval
-      ? formatHourLabel(nextInterval.row.open_time)
-      : null,
+    opensAt: nextInterval ? formatHourLabel(nextInterval.row.open_time) : null,
   };
 };
 
@@ -342,10 +345,11 @@ const Home = ({ userLocation }) => {
           const storedCategoryIds = Array.isArray(info?.category_ids)
             ? info.category_ids
             : [];
-          const businessCategoryIds = Array.from(new Set([
-            businessCategory?.id,
-            ...storedCategoryIds,
-          ].filter(Boolean)));
+          const businessCategoryIds = Array.from(
+            new Set(
+              [businessCategory?.id, ...storedCategoryIds].filter(Boolean),
+            ),
+          );
           const businessCategories = businessCategoryIds
             .map((categoryId) => categoriasPorId.get(categoryId))
             .filter(Boolean);
@@ -395,7 +399,9 @@ const Home = ({ userLocation }) => {
                 ? null
                 : Number(info.longitude),
             tipo: businessCategory?.name || info?.categoria || "Tienda",
-            secondaryTypes: secondaryCategories.map((category) => category.name),
+            secondaryTypes: secondaryCategories.map(
+              (category) => category.name,
+            ),
             categoryIds: businessCategoryIds,
             categoryId: businessCategory?.id || null,
             // guardamos la ruta original en `logo` y la resolveremos abajo
@@ -444,9 +450,7 @@ const Home = ({ userLocation }) => {
               logo: tienda.logo
                 ? await resolveImageUrl(tienda.logo)
                 : "/default.png",
-              cover: tienda.cover
-                ? await resolveImageUrl(tienda.cover)
-                : null,
+              cover: tienda.cover ? await resolveImageUrl(tienda.cover) : null,
             };
           }),
         );
@@ -624,9 +628,7 @@ const Home = ({ userLocation }) => {
           return tarifaA - tarifaB || compararDistancia(a, b);
         });
       default:
-        return userLocation
-          ? copia.sort(compararDistancia)
-          : copia;
+        return userLocation ? copia.sort(compararDistancia) : copia;
     }
   })();
   const tiendasVisibles = tiendasOrdenadas.slice(0, cantidadTiendasVisibles);
@@ -786,7 +788,11 @@ const Home = ({ userLocation }) => {
       >
         <div className="flex max-w-sm flex-col items-center text-center">
           <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-primary/10 text-primary shadow-lg shadow-primary/10">
-            <LoaderCircle size={34} strokeWidth={2.5} className="animate-spin" />
+            <LoaderCircle
+              size={34}
+              strokeWidth={2.5}
+              className="animate-spin"
+            />
           </div>
           <p className="text-lg font-black tracking-tight text-on-surface sm:text-xl">
             Gloto está buscando algo bueno para ti
@@ -982,7 +988,7 @@ const Home = ({ userLocation }) => {
 
       {/* FILTROS (STICKY SE COMPORTA COMO PARTE DEL HEADER, se oculta mientras se busca) */}
       {!buscando && !modoCategoria && !verTodasPromos && (
-        <section className="sticky top-[52px] z-40 bg-background px-2 sm:top-[54px]">
+        <section className="sticky top-[60px] z-40 bg-background px-2 sm:top-[60px]">
           <div className="mb-2 flex gap-1.5 overflow-x-auto pb-2 no-scrollbar sm:gap-2">
             {FILTROS.map((f) => (
               <button

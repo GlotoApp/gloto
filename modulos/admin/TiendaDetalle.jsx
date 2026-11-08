@@ -71,6 +71,7 @@ const TiendaDetalle = ({ store, detail }) => {
     taxRate: store.info?.tax_rate ?? "",
   };
   const subscription = store.subscription;
+  const ticketUsage = store.ticketUsage || null;
   const subscriptionEnd = subscription?.ends_at
     ? new Date(subscription.ends_at)
     : null;
@@ -103,6 +104,12 @@ const TiendaDetalle = ({ store, detail }) => {
   ]
     .filter(Boolean)
     .join(" · ");
+  const ticketPlanDetails =
+    ticketUsage?.limit === null
+      ? "Sin límite de tickets"
+      : ticketUsage
+        ? `${Number(ticketUsage.used || 0).toLocaleString("es-CO")} / ${Number(ticketUsage.limit || 0).toLocaleString("es-CO")} tickets consumidos`
+        : null;
   const businessHoursByDay = [
     ...new Set(businessHours.map((slot) => slot.day_of_week)),
   ]
@@ -167,7 +174,13 @@ const TiendaDetalle = ({ store, detail }) => {
     {
       label: "Plan",
       value: store.planName || "Sin plan",
-      detail: [subscriptionStatus, planDetails].filter(Boolean).join(" · "),
+      detail: [
+        subscriptionStatus,
+        planDetails,
+        ticketPlanDetails,
+      ]
+        .filter(Boolean)
+        .join(" · "),
       icon: ShieldCheck,
       accent: "text-violet-200",
     },

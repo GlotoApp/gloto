@@ -562,7 +562,8 @@ const TiendaArchivo = () => {
           (category) => category.id === infoResult.data?.category_id,
         )?.name || storeNormalized.category;
 
-      const [productsResult, inventoryResult, hoursResult] = await Promise.all([
+      const [productsResult, inventoryResult, hoursResult, ticketAccessResult] =
+        await Promise.all([
         supabase
           .from("products")
               .select("id,name,price,stock,is_active,category_id")
@@ -582,11 +583,90 @@ const TiendaArchivo = () => {
           )
           .eq("business_id", id)
           .order("day_of_week", { ascending: true }),
+        supabase.rpc("get_business_plan_access", {
+          p_business_id: id,
+        }),
       ]);
 
       if (productsResult.error) throw productsResult.error;
       if (inventoryResult.error) throw inventoryResult.error;
       if (hoursResult.error) throw hoursResult.error;
+      let ticketUsage = null;
+
+      if (!ticketAccessResult.error && ticketAccessResult.data) {
+        ticketUsage = {
+          used: Number(ticketAccessResult.data.tickets_used || 0),
+          limit: ticketAccessResult.data.ticket_limit ?? null,
+        };
+      } else {
+        const subscription = subscriptionsResult.data;
+        const planText = `${subscription?.plan_code || ""} ${subscription?.plan_name || ""}`.toLowerCase();
+        const fallbackLimit = planText.includes("premium")
+          ? null
+          : planText.includes("pro")
+            ? 2000
+            : 1000;
+        const cycleStart = subscription?.starts_at;
+        const cycleEnd = subscription?.ends_at || new Date().toISOString();
+        let activeOrdersQuery = supabase
+          .from("orders")
+          .select("id,created_at,status,is_reservation")
+          .eq("business_id", id);
+        if (cycleStart) activeOrdersQuery = activeOrdersQuery.gte("created_at", cycleStart);
+        activeOrdersQuery = activeOrdersQuery.lte("created_at", cycleEnd);
+
+        const [activeOrdersResult, deletedOrdersResult] = await Promise.all([
+          activeOrdersQuery,
+          supabase
+            .from("deleted_orders")
+            .select("order_id,deleted_at,order_snapshot")
+            .eq("business_id", id),
+        ]);
+
+        if (!activeOrdersResult.error && !deletedOrdersResult.error) {
+          const consumedOrderIds = new Set();
+
+          (activeOrdersResult.data || []).forEach((order) => {
+            const status = String(order.status || "").trim().toLowerCase();
+            if (!order.is_reservation && !["cancelled", "cancelado"].includes(status)) {
+              consumedOrderIds.add(String(order.id));
+            }
+          });
+
+          (deletedOrdersResult.data || []).forEach((deletedOrder) => {
+            const snapshot = deletedOrder.order_snapshot || {};
+            const status = String(snapshot.status || "").trim().toLowerCase();
+            const createdAt =
+              snapshot.created_at || deletedOrder.deleted_at;
+            const isReservation =
+              snapshot.is_reservation === true ||
+              snapshot.is_reservation === "true";
+            if (
+              (!cycleStart || createdAt >= cycleStart) &&
+              createdAt <= cycleEnd &&
+              !isReservation &&
+              !["cancelled", "cancelado"].includes(status)
+            ) {
+              consumedOrderIds.add(String(deletedOrder.order_id));
+            }
+          });
+
+          ticketUsage = {
+            used: consumedOrderIds.size,
+            limit: fallbackLimit,
+          };
+        } else {
+          console.warn("No se pudo cargar el consumo persistente de tickets", {
+            ticketAccess: ticketAccessResult.error,
+            orders: activeOrdersResult.error,
+            deletedOrders: deletedOrdersResult.error,
+          });
+        }
+      }
+
+      if (ticketUsage) {
+        storeNormalized.ticketUsage = ticketUsage;
+      }
 
       setStore(storeNormalized);
       setCategories(categoriesResult.data || []);

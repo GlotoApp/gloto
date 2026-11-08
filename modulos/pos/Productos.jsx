@@ -501,6 +501,9 @@ const Productos = ({ section = "productos" }) => {
   const [imageEditor, setImageEditor] = useState(null);
   const [imageEditorError, setImageEditorError] = useState("");
   const [isProductImageDragging, setIsProductImageDragging] = useState(false);
+  const [draggingCardImageId, setDraggingCardImageId] = useState(null);
+  const [directImageProductId, setDirectImageProductId] = useState(null);
+  const [savingCardImage, setSavingCardImage] = useState(false);
   const [optionGroups, setOptionGroups] = useState([]);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [expandedOptionGroups, setExpandedOptionGroups] = useState(new Set());
@@ -1898,6 +1901,28 @@ const Productos = ({ section = "productos" }) => {
     openProductImageEditor(event.dataTransfer.files?.[0]);
   };
 
+  const handleCardImageDragEnter = (event, product) => {
+    if (product.image) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDraggingCardImageId(product.id);
+  };
+
+  const handleCardImageDrop = (event, product) => {
+    if (product.image) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDraggingCardImageId(null);
+    const file = event.dataTransfer.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+      alert("Selecciona una imagen de máximo 5 MB.");
+      return;
+    }
+    setDirectImageProductId(product.id);
+    openProductImageEditor(file);
+  };
+
   const applyProductImageCrop = async (crop) => {
     if (!imageEditor) return;
 
@@ -1933,7 +1958,43 @@ const Productos = ({ section = "productos" }) => {
         reader.readAsDataURL(blob);
       });
 
+      if (directImageProductId) {
+        setSavingCardImage(true);
+        const imageBlob = await fetch(dataUrl).then((response) =>
+          response.blob(),
+        );
+        const extension = imageBlob.type === "image/png" ? "png" : "webp";
+        const uploadedImagePath = `${businessId}/productos-imagenes/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage
+          .from("business-assets")
+          .upload(uploadedImagePath, imageBlob, {
+            contentType: imageBlob.type,
+            upsert: false,
+          });
+        if (uploadError) throw uploadError;
+
+        const { data: publicUrlData } = supabase.storage
+          .from("business-assets")
+          .getPublicUrl(uploadedImagePath);
+        const { error: updateError } = await supabase
+          .from("products")
+          .update({ image_url: publicUrlData.publicUrl })
+          .eq("id", directImageProductId)
+          .eq("business_id", businessId);
+        if (updateError) throw updateError;
+
+        setProducts((current) =>
+          current.map((product) =>
+            product.id === directImageProductId
+              ? { ...product, image: publicUrlData.publicUrl }
+              : product,
+          ),
+        );
+        setSavingCardImage(false);
+        setDirectImageProductId(null);
+      } else {
       setFormData((current) => ({ ...current, image: dataUrl }));
+      }
       setImageEditor(null);
       setImageEditorError("");
     } catch (error) {
@@ -1941,6 +2002,7 @@ const Productos = ({ section = "productos" }) => {
       setImageEditorError(
         error.message || "No se pudo preparar la imagen del producto.",
       );
+      setSavingCardImage(false);
     }
   };
 
@@ -2338,6 +2400,68 @@ const Productos = ({ section = "productos" }) => {
     });
 
     try {
+      let nextCategoryRecords = [...categoryRecords];
+      const categoriesByNormalizedName = new Map(
+        nextCategoryRecords.map((category) => [
+          String(category.name || "").trim().toLowerCase(),
+          category,
+        ]),
+      );
+      let nextCategoryOrder = Math.max(
+        -1,
+        ...nextCategoryRecords.map((category) =>
+          Number(category.order_index ?? 0),
+        ),
+      );
+
+      for (const product of spreadsheetResult.products) {
+        const normalizedCategoryName = String(
+          product.categoryName || product.category?.name || "",
+        )
+          .trim()
+          .toLowerCase();
+        if (!normalizedCategoryName) continue;
+
+        let category = product.category;
+        if (!category?.id) {
+          category = categoriesByNormalizedName.get(normalizedCategoryName);
+        }
+        if (!category?.id) {
+          const name = formatProductNameForStorage(
+            product.categoryName || product.category?.name,
+          );
+          nextCategoryOrder += 1;
+          const { data, error } = await supabase
+            .from("categories_shop")
+            .insert({
+              business_id: businessId,
+              name,
+              order_index: nextCategoryOrder,
+            })
+            .select("id,business_id,name,order_index,created_at")
+            .single();
+          if (error) throw error;
+          category = data;
+          nextCategoryRecords = [...nextCategoryRecords, data];
+          categoriesByNormalizedName.set(normalizedCategoryName, data);
+        }
+        product.category = category;
+        categoryMap[category.id] = category.name;
+      }
+
+      if (nextCategoryRecords.length !== categoryRecords.length) {
+        setCategoryRecords(nextCategoryRecords);
+        setCategories(nextCategoryRecords.map((category) => category.name));
+        const cachedCatalog = readCatalogCache(businessId);
+        if (cachedCatalog) {
+          writeCatalogCache(businessId, {
+            ...cachedCatalog,
+            categories: nextCategoryRecords.map((category) => category.name),
+            categoryRecords: nextCategoryRecords,
+          });
+        }
+      }
+
       for (const product of spreadsheetResult.products) {
         const categoryId = product.category?.id;
         const orderIndex = (categoryOrder.get(categoryId) || 0) + 1;
@@ -3278,7 +3402,25 @@ const Productos = ({ section = "productos" }) => {
                 }`}
               >
                 {/* SECCIÓN SUPERIOR: Imagen fija */}
-                <div className="relative w-full h-32 sm:h-40 overflow-hidden bg-neutral-800 flex-shrink-0">
+                <div
+                  className={`relative w-full h-32 sm:h-40 overflow-hidden bg-neutral-800 flex-shrink-0 ${
+                    !item.image && draggingCardImageId === item.id
+                      ? "ring-2 ring-inset ring-violet-400"
+                      : ""
+                  }`}
+                  onDragEnter={(event) => handleCardImageDragEnter(event, item)}
+                  onDragOver={(event) => {
+                    if (item.image) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "copy";
+                  }}
+                  onDragLeave={(event) => {
+                    if (!item.image && !event.currentTarget.contains(event.relatedTarget)) {
+                      setDraggingCardImageId(null);
+                    }
+                  }}
+                  onDrop={(event) => handleCardImageDrop(event, item)}
+                >
                   <img
                     src={item.image || defaultImg} // Si no hay string de imagen, usa el default de inmediato
                     alt={item.name}
@@ -4979,7 +5121,7 @@ const Productos = ({ section = "productos" }) => {
           </div>
         )}
 
-        {isModalOpen && (
+        {(isModalOpen || (imageEditor && directImageProductId)) && (
           <ImageCropEditor
             key={imageEditor?.url || "product-image-editor-closed"}
             imageEditor={imageEditor}
@@ -4987,8 +5129,9 @@ const Productos = ({ section = "productos" }) => {
             onClose={() => {
               setImageEditor(null);
               setImageEditorError("");
+              setDirectImageProductId(null);
             }}
-            saving={savingProduct}
+            saving={savingProduct || savingCardImage}
             error={imageEditorError}
             confirmLabel="Usar imagen"
           />

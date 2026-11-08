@@ -153,7 +153,7 @@ export const downloadProductTemplate = async ({
     ["Mínimo y Máximo solo aplican a Varias opciones. Deja Máximo vacío para no limitar."],
     ["Regla de precio: Sumar agrega los precios extras; Más caro cobra solo el extra más alto."],
     ["El Tope de precio limita el total solo cuando la regla es Sumar."],
-    ["Las categorías y unidades tienen listas desplegables con los datos actuales del negocio. También puedes escribir el nombre de una categoría ya existente."],
+    ["Las unidades tienen una lista desplegable con los datos actuales. Las categorías nuevas se crearán automáticamente al importar el Excel."],
     ["Stock es opcional. Se importará solo si el negocio tiene inventario habilitado."],
     ["El Excel incluye los productos actuales con su ID para que puedas editarlos y actualizarlo al subirlo. Los productos sin ID coincidente se buscan por nombre y se actualizan."],
     ["Las imágenes se agregan después desde el editor."],
@@ -304,8 +304,8 @@ export const parseProductWorkbook = async (
     const minStock = cellNumber(row["Stock mínimo"], "Stock mínimo", rowNumber, errors, {
       optional: true,
     });
-    if (!category) {
-      errors.push(`Hoja Productos, fila ${rowNumber}: la categoría "${categoryName || "(vacía)"}" no existe. Usa una categoría actual del negocio.`);
+    if (!categoryName) {
+      errors.push(`Hoja Productos, fila ${rowNumber}: la categoría es obligatoria.`);
     }
     if (!unit) {
       errors.push(`Hoja Productos, fila ${rowNumber}: la unidad "${unitName || "(vacía)"}" no existe.`);
@@ -323,6 +323,7 @@ export const parseProductWorkbook = async (
       description: text(row.Descripción),
       price,
       category,
+      categoryName,
       unit,
       stock,
       minStock,

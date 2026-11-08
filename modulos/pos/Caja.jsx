@@ -106,7 +106,17 @@ const obtenerMetodosPago = (metadata, paymentMethod, total) => {
         .filter((item) => item.metodo && item.monto > 0)
     : [];
 
-  if (metodos.length > 0) return metodos;
+  if (metodos.length > 0) {
+    const montoDeclarado = metodos.reduce((sum, item) => sum + item.monto, 0);
+    if (total > 0 && montoDeclarado > total) {
+      const factor = total / montoDeclarado;
+      return metodos.map((item) => ({
+        ...item,
+        monto: item.monto * factor,
+      }));
+    }
+    return metodos;
+  }
   if (paymentMethod) {
     return [{ metodo: String(paymentMethod).toLowerCase(), monto: total }];
   }
@@ -266,7 +276,7 @@ export default function Caja() {
           supabase
             .from("orders")
             .select(
-              "id, order_number, created_at, total, payment_method, payment_status, status, mesa, metadata",
+              "id, order_number, created_at, total, tip_amount, payment_method, payment_status, status, mesa, metadata",
             )
             .gte("created_at", start.toISOString())
             .lte("created_at", end.toISOString())
@@ -290,7 +300,15 @@ export default function Caja() {
       } else {
         setTransacciones(
           (data || []).map((order) => {
-            const total = Number(order.total || 0);
+            const totalConPropina = Number(order.total || 0);
+            const propina = Math.max(
+              0,
+              Math.min(Number(order.tip_amount || 0), totalConPropina),
+            );
+            const total = Math.max(0, totalConPropina - propina);
+            const metodoPrincipal = String(order.payment_method || "")
+              .trim()
+              .toLowerCase();
             const paymentStatus = String(
               order.payment_status || "pending",
             ).toLowerCase();
@@ -312,6 +330,8 @@ export default function Caja() {
                 order.payment_method || "sin especificar",
               ).toLowerCase(),
               total,
+              propina,
+              propinaEfectivo: metodoPrincipal === "efectivo" ? propina : 0,
               metodosPago,
               montoPagado: metodosPago.reduce(
                 (sum, item) => sum + item.monto,
@@ -388,6 +408,15 @@ export default function Caja() {
         .reduce((sum, item) => sum + item.monto, 0),
     0,
   );
+  const totalPropinas = transaccionesValidas.reduce(
+    (total, transaction) => total + (Number(transaction.propina) || 0),
+    0,
+  );
+  const totalPropinasEfectivo = transaccionesValidas.reduce(
+    (total, transaction) =>
+      total + (Number(transaction.propinaEfectivo) || 0),
+    0,
+  );
 
   const totalIngresosManuales = novedades
     .filter((n) => n.tipo === "ingreso")
@@ -407,6 +436,7 @@ export default function Caja() {
   const enCajaEsperado =
     fondoInicial +
     totalEfectivoVentas +
+    totalPropinasEfectivo +
     totalIngresosManuales -
     totalEgresosManuales;
 
@@ -578,6 +608,7 @@ export default function Caja() {
       cajero: nombreCajero,
       fondoInicial,
       totalVentas,
+      totalPropinas,
       totalEfectivo: totalEfectivoVentas,
       totalTarjeta,
       totalTransferencia,
@@ -911,7 +942,7 @@ export default function Caja() {
                 }
               >
                 {/* Grid KPIs Modificado */}
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                   <KPICard
                     label="TOTAL DE VENTAS"
                     value={fmt(totalVentas)}
@@ -945,6 +976,13 @@ export default function Caja() {
                     value={fmt(totalVariado)}
                     sub="Pagado, método sin registrar"
                     color="text-fuchsia-400"
+                    loading={cargandoInicial}
+                  />
+                  <KPICard
+                    label="PROPINA"
+                    value={fmt(totalPropinas)}
+                    sub="No incluye ventas ni efectivo real"
+                    color="text-pink-400"
                     loading={cargandoInicial}
                   />
                 </div>
@@ -1380,6 +1418,17 @@ export default function Caja() {
                 <p className="mt-1 text-xs text-neutral-400">
                   {cierreConfirmado.transacciones}{" "}
                   {cierreConfirmado.transacciones === 1 ? "venta" : "ventas"}
+                </p>
+              </div>
+              <div className="rounded-xl bg-pink-400/[0.08] p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-pink-300">
+                  Propina
+                </p>
+                <p className="mt-1 font-mono text-lg font-black text-white">
+                  {fmt(cierreConfirmado.totalPropinas || 0)}
+                </p>
+                <p className="mt-1 text-xs text-neutral-400">
+                  No incluye ventas ni efectivo real
                 </p>
               </div>
               <div className="rounded-xl bg-black/20 p-3">
