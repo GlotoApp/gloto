@@ -105,7 +105,7 @@ const Layout = () => {
         .neq("table_status", "clean");
       if (error || cancelled) return;
 
-      const limit = 24 * 60 * 60 * 1000;
+      const limit = 12 * 60 * 60 * 1000;
       const now = Date.now();
       const inactiveTables = (orders || []).flatMap((order) => {
         if (!order.mesa) return [];
@@ -223,7 +223,7 @@ const Layout = () => {
                   </span>
                 )}
                 <p className="mt-1 text-sm leading-relaxed text-slate-400">
-                  Hay {inactiveTablesPrompt.length} mesa{inactiveTablesPrompt.length === 1 ? "" : "s"} sin actividad desde hace al menos un día.
+                  Hay {inactiveTablesPrompt.length} mesa{inactiveTablesPrompt.length === 1 ? "" : "s"} sin actividad desde hace al menos 12 horas.
                 </p>
               </div>
             </div>
