@@ -801,6 +801,8 @@ const POS = () => {
   const [posColumnRatios, setPosColumnRatios] = useState([40, 30, 30]);
   const posLayoutRef = useRef(null);
   const columnResizeRef = useRef(null);
+  const [categoryColumnWidth, setCategoryColumnWidth] = useState(160);
+  const categoryResizeRef = useRef(null);
   const [quantityDrafts, setQuantityDrafts] = useState({});
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
@@ -833,6 +835,10 @@ const POS = () => {
   const optionGroupsContainerRef = useRef(null);
   const [instruction, setInstruction] = useState("");
   const [showInfo, setShowInfo] = useState(null);
+  const [productImageZoomPosition, setProductImageZoomPosition] = useState({
+    x: 50,
+    y: 50,
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [mobilePanel, setMobilePanel] = useState("products");
   const [toastItems, setToastItems] = useState([]);
@@ -4405,7 +4411,7 @@ const POS = () => {
   );
 
   const handleColumnResizeStart = (boundary, event) => {
-    if (window.innerWidth < 1280) return;
+    if (window.innerWidth < 1024) return;
     event.preventDefault();
     columnResizeRef.current = { boundary, pointerId: event.pointerId };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -4447,11 +4453,41 @@ const POS = () => {
     }
   };
 
+  const handleCategoryResizeStart = (event) => {
+    if (window.innerWidth < 1024) return;
+    event.preventDefault();
+    categoryResizeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: categoryColumnWidth,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleCategoryResizeMove = (event) => {
+    const drag = categoryResizeRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    const nextWidth = Math.min(
+      320,
+      Math.max(96, drag.startWidth + event.clientX - drag.startX),
+    );
+    setCategoryColumnWidth(nextWidth);
+  };
+
+  const handleCategoryResizeEnd = (event) => {
+    if (categoryResizeRef.current?.pointerId !== event.pointerId) return;
+    categoryResizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   return (
     <>
       <div
         ref={posLayoutRef}
-        className="relative grid grid-cols-1 lg:grid-cols-4 xl:grid-cols-[minmax(0,var(--pos-products-column))_minmax(0,var(--pos-delivery-column))_minmax(0,var(--pos-cart-column))] h-screen bg-background font-sans selection:bg-primary-container/30 pb-20 lg:pb-0"
+        className="relative grid grid-cols-1 lg:grid-cols-[minmax(0,var(--pos-products-column))_minmax(0,var(--pos-delivery-column))_minmax(0,var(--pos-cart-column))] h-screen bg-background font-sans selection:bg-primary-container/30 pb-20 lg:pb-0"
         style={{
           "--pos-products-column": `${posColumnRatios[0]}fr`,
           "--pos-delivery-column": `${posColumnRatios[1]}fr`,
@@ -4463,7 +4499,7 @@ const POS = () => {
             <div
               key={`column-resizer-${index}`}
               aria-hidden="true"
-              className="absolute bottom-0 top-0 z-30 hidden w-3 -translate-x-1/2 touch-none cursor-col-resize xl:block"
+              className="absolute bottom-0 top-0 z-30 hidden w-3 -translate-x-1/2 touch-none cursor-col-resize lg:block"
               style={{ left: `${position}%` }}
               onPointerDown={(event) => handleColumnResizeStart(index, event)}
               onPointerMove={handleColumnResizeMove}
@@ -4575,7 +4611,7 @@ const POS = () => {
         `}</style>
         {/* Listado de Productos */}
         <div
-          className={`${mobilePanel !== "products" ? "hidden" : "flex"} lg:flex lg:col-span-2 xl:col-span-1 h-full min-h-0 flex-col overflow-hidden`}
+          className={`${mobilePanel !== "products" ? "hidden" : "flex"} lg:flex h-full min-h-0 flex-col overflow-hidden`}
         >
           {/* Buscador Inteligente */}
           <div className="z-20 shrink-0 bg-background/90 p-4 pb-0 backdrop-blur-md">
@@ -4609,10 +4645,11 @@ const POS = () => {
             </div>
           </div>
 
-          <div className="flex min-h-0 min-w-0 flex-1 items-stretch">
+          <div className="relative flex min-h-0 min-w-0 flex-1 items-stretch">
             <aside
               aria-label="Categorías de productos"
-              className="flex h-full min-h-0 w-24 shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-outline/50 px-2 py-3 custom-sidebar min-[420px]:w-28 sm:w-32 lg:w-36 lg:py-4 xl:w-40"
+              className="relative flex h-full min-h-0 shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-outline/50 px-2 py-3 custom-sidebar min-[420px]:w-28 sm:w-32 lg:px-2 lg:py-4"
+              style={{ width: categoryColumnWidth }}
             >
               {isLoadingCategories
                 ? [...Array(4)].map((_, idx) => (
@@ -4640,6 +4677,15 @@ const POS = () => {
                     </button>
                   ))}
             </aside>
+            <div
+              aria-hidden="true"
+              className="absolute bottom-0 top-0 z-20 hidden w-px touch-none cursor-col-resize bg-transparent transition-colors hover:bg-outline lg:block"
+              style={{ left: categoryColumnWidth }}
+              onPointerDown={handleCategoryResizeStart}
+              onPointerMove={handleCategoryResizeMove}
+              onPointerUp={handleCategoryResizeEnd}
+              onPointerCancel={handleCategoryResizeEnd}
+            />
             <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-2 custom-sidebar min-[420px]:p-3 lg:p-4">
               {isLoadingProducts && filteredProducts.length === 0 ? (
                 <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3">
@@ -4808,12 +4854,59 @@ const POS = () => {
                     <X className="h-5 w-5" />
                   </button>
 
-                  <p className="text-xs font-bold text-primary uppercase tracking-widest mb-2">
-                    Descripción
-                  </p>
-                  <p className="text-sm text-on-surface leading-relaxed italic">
-                    {prod.desc}
-                  </p>
+                  <div className="grid grid-cols-1 gap-5 pr-8 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:items-center">
+                    {hasUsableProductImage(prod.image_url) && (
+                      <div
+                        className="group/image flex max-h-[45vh] cursor-zoom-in items-center justify-center overflow-hidden rounded-2xl bg-background"
+                        onMouseMove={(event) => {
+                          const bounds =
+                            event.currentTarget.getBoundingClientRect();
+                          const x = Math.min(
+                            100,
+                            Math.max(
+                              0,
+                              ((event.clientX - bounds.left) / bounds.width) *
+                                100,
+                            ),
+                          );
+                          const y = Math.min(
+                            100,
+                            Math.max(
+                              0,
+                              ((event.clientY - bounds.top) / bounds.height) *
+                                100,
+                            ),
+                          );
+                          setProductImageZoomPosition({ x, y });
+                        }}
+                        onMouseLeave={() =>
+                          setProductImageZoomPosition({ x: 50, y: 50 })
+                        }
+                      >
+                        <img
+                          src={prod.image_url}
+                          alt={prod.name}
+                          className="max-h-[45vh] w-full scale-100 object-contain transition-transform duration-200 ease-out group-hover/image:scale-[2]"
+                          style={{
+                            transformOrigin: `${productImageZoomPosition.x}% ${productImageZoomPosition.y}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <h2 className="break-words text-xl font-black text-on-surface sm:text-2xl">
+                        {prod.name}
+                      </h2>
+
+                      <p className="mb-2 mt-4 text-xs font-bold uppercase tracking-widest text-primary">
+                        Descripción
+                      </p>
+                      <p className="whitespace-pre-line text-sm leading-relaxed text-on-surface-variant sm:text-base">
+                        {prod.desc || "Este producto no tiene descripción."}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             );

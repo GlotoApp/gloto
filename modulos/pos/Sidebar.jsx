@@ -60,6 +60,7 @@ const Sidebar = ({
   const [selectedMenuGroup, setSelectedMenuGroup] = useState(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [hasNewKitchenOrders, setHasNewKitchenOrders] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [businessName, setBusinessName] = useState("Gloto");
   const [businessLogo, setBusinessLogo] = useState(logoPng);
@@ -70,6 +71,7 @@ const Sidebar = ({
   const [colorMode, setColorMode] = useState(getStoredColorMode);
   const [colorModeReady, setColorModeReady] = useState(false);
   const [savingColorMode, setSavingColorMode] = useState(false);
+  const seenKitchenOrderIdsRef = useRef(new Set());
   const isOrdersActive = location.pathname.startsWith("/pos/ordenes");
   const accountPlanStyles = planName.toLowerCase().includes("premium")
     ? {
@@ -546,6 +548,186 @@ const Sidebar = ({
       if (channel) supabase.removeChannel(channel);
     };
   }, [isEmployee, permissions.notificaciones]);
+
+  useEffect(() => {
+    let isMounted = true;
+    let channel;
+    let refreshTimeout;
+
+    const loadNewKitchenOrders = async () => {
+      if (!user?.id) {
+        setHasNewKitchenOrders(false);
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!profile?.business_id) {
+        if (!isMounted || profileError) {
+          if (profileError) {
+            console.error(
+              "No se pudo cargar el negocio para nuevos pedidos de cocina:",
+              profileError,
+            );
+          }
+          return;
+        }
+        setHasNewKitchenOrders(false);
+        return;
+      }
+
+      const { data: orders, error } = await supabase
+        .from("orders")
+        .select("id, status, order_type, table_status")
+        .eq("business_id", profile.business_id)
+        .eq("is_reservation", false)
+        .in("status", ["pending", "confirmed"]);
+
+      if (!isMounted) return;
+      if (error) {
+        console.error(
+          "No se pudieron cargar los nuevos pedidos de cocina:",
+          error,
+        );
+        return;
+      }
+
+      const activeNewOrders = (orders || []).filter((order) => {
+        if (String(order.order_type || "").toLowerCase() !== "table") return true;
+        if (
+          order.table_status === null ||
+          order.table_status === undefined ||
+          String(order.table_status).trim() === ""
+        ) {
+          return true;
+        }
+
+        const tableStatus = String(order.table_status).trim().toLowerCase();
+        return !["clean", "limpia", "cerrada"].includes(tableStatus);
+      });
+
+      const activeNewOrderIds = activeNewOrders.map((order) => order.id);
+      const isKitchenRoute = location.pathname === "/pos/cocina";
+      if (isKitchenRoute) {
+        activeNewOrderIds.forEach((id) =>
+          seenKitchenOrderIdsRef.current.add(id),
+        );
+        setHasNewKitchenOrders(false);
+        return;
+      }
+
+      setHasNewKitchenOrders(
+        activeNewOrderIds.some(
+          (id) => !seenKitchenOrderIdsRef.current.has(id),
+        ),
+      );
+    };
+
+    const subscribeToKitchenOrders = async () => {
+      if (!user?.id) return;
+
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (error || !profile?.business_id || !isMounted) {
+        if (error) {
+          console.error(
+            "No se pudo suscribir a los nuevos pedidos de cocina:",
+            error,
+          );
+        }
+        return;
+      }
+
+      channel = supabase
+        .channel(`sidebar-kitchen-new-orders-${profile.business_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "orders",
+            filter: `business_id=eq.${profile.business_id}`,
+          },
+          () => {
+            if (refreshTimeout) window.clearTimeout(refreshTimeout);
+            refreshTimeout = window.setTimeout(loadNewKitchenOrders, 150);
+          },
+        )
+        .subscribe((status, channelError) => {
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.error(
+              "Realtime de nuevos pedidos de cocina no disponible:",
+              status,
+              channelError,
+            );
+          }
+        });
+
+      await loadNewKitchenOrders();
+    };
+
+    subscribeToKitchenOrders();
+
+    return () => {
+      isMounted = false;
+      if (refreshTimeout) window.clearTimeout(refreshTimeout);
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [location.pathname, user?.id]);
+
+  useEffect(() => {
+    if (location.pathname !== "/pos/cocina" || !user?.id) return undefined;
+
+    let isMounted = true;
+
+    const markKitchenOrdersAsSeen = async () => {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!isMounted || profileError || !profile?.business_id) return;
+
+      const { data: orders, error } = await supabase
+        .from("orders")
+        .select("id, status, order_type, table_status")
+        .eq("business_id", profile.business_id)
+        .eq("is_reservation", false)
+        .in("status", ["pending", "confirmed"]);
+
+      if (!isMounted || error) return;
+
+      (orders || []).forEach((order) => {
+        if (String(order.order_type || "").toLowerCase() === "table") {
+          const tableStatus = String(order.table_status || "")
+            .trim()
+            .toLowerCase();
+          if (
+            tableStatus &&
+            ["clean", "limpia", "cerrada"].includes(tableStatus)
+          ) {
+            return;
+          }
+        }
+        seenKitchenOrderIdsRef.current.add(order.id);
+      });
+      setHasNewKitchenOrders(false);
+    };
+
+    markKitchenOrdersAsSeen();
+    return () => {
+      isMounted = false;
+    };
+  }, [location.pathname, user?.id]);
 
   const handleLogout = async () => {
     setShowLogoutConfirm(false);
@@ -1067,7 +1249,7 @@ const Sidebar = ({
                 />
 
                 <div
-                  className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
+                  className={`relative flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
                     !isExpanded && "group-hover:scale-110"
                   } ${isActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
                 >
@@ -1077,6 +1259,12 @@ const Sidebar = ({
                     </span>
                   ) : (
                     <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+                  )}
+                  {item.name === "Cocina" && hasNewKitchenOrders && (
+                    <span
+                      className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500"
+                      aria-hidden="true"
+                    />
                   )}
                 </div>
 
