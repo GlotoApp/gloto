@@ -4615,9 +4615,17 @@ const POS = () => {
         >
           {/* Buscador Inteligente */}
           <div className="z-20 shrink-0 bg-background/90 p-4 pb-0 backdrop-blur-md">
-            <h2 className="text-base font-black uppercase tracking-tighter mb-2 ml-2 text-on-surface">
-              Productos
-            </h2>
+            <div className="mb-2 ml-2 flex items-center justify-between gap-2">
+              <h2 className="text-base font-black uppercase tracking-tighter text-on-surface">
+                Productos
+              </h2>
+              {(!isLoadingProducts || filteredProducts.length > 0) && (
+                <span className="rounded-full bg-surface px-2.5 py-1 text-[10px] font-bold text-on-surface-variant">
+                  {filteredProducts.length}{" "}
+                  {filteredProducts.length === 1 ? "resultado" : "resultados"}
+                </span>
+              )}
+            </div>
             <div className="relative group">
               <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant group-focus-within:text-primary transition-colors">
                 search
