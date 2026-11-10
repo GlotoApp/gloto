@@ -2225,23 +2225,34 @@ const Productos = ({ section = "productos" }) => {
       let rawGroups = [];
       let rawItems = [];
       if (productIds.length) {
+        const fetchRelatedRows = async (table, ids) => {
+          const rows = [];
+          for (let offset = 0; offset < ids.length; offset += 100) {
+            const idChunk = ids.slice(offset, offset + 100);
+            let pageOffset = 0;
+            while (true) {
+              const { data, error } = await supabase
+                .from(table)
+                .select("*")
+                .in("product_id", idChunk)
+                .order("product_id", { ascending: true })
+                .order("order_index", { ascending: true })
+                .order("id", { ascending: true })
+                .range(pageOffset, pageOffset + 999);
+              if (error) throw error;
+              rows.push(...(data || []));
+              if ((data || []).length < 1000) break;
+              pageOffset += 1000;
+            }
+          }
+          return rows;
+        };
         const [groupsResponse, itemsResponse] = await Promise.all([
-          supabase
-            .from("product_option_groups")
-            .select("*")
-            .in("product_id", productIds)
-            .order("order_index", { ascending: true }),
-          supabase
-            .from("products_items")
-            .select("*")
-            .in("product_id", productIds)
-            .order("order_index", { ascending: true }),
+          fetchRelatedRows("product_option_groups", productIds),
+          fetchRelatedRows("products_items", productIds),
         ]);
-        if (groupsResponse.error || itemsResponse.error) {
-          throw groupsResponse.error || itemsResponse.error;
-        }
-        rawGroups = groupsResponse.data || [];
-        rawItems = itemsResponse.data || [];
+        rawGroups = groupsResponse;
+        rawItems = itemsResponse;
       }
       const categoryNames = Object.fromEntries(
         categoryRecords.map((category) => [category.id, category.name]),
@@ -2290,7 +2301,11 @@ const Productos = ({ section = "productos" }) => {
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
       console.error("No se pudo generar la plantilla de productos:", error);
-      alert("No se pudo descargar la plantilla de Excel. Intenta nuevamente.");
+      alert(
+        `No se pudo descargar la plantilla de Excel. ${
+          error?.message || "Intenta nuevamente."
+        }`,
+      );
     } finally {
       setIsDownloadingProductTemplate(false);
     }

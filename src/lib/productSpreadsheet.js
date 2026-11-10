@@ -230,7 +230,7 @@ export const downloadProductTemplate = async ({
     `<definedName name="ListaSiNo">&apos;Listas&apos;!$C$2:$C$3</definedName>`,
     `<definedName name="ListaSeleccion">&apos;Listas&apos;!$D$2:$D$3</definedName>`,
     `<definedName name="ListaPrecio">&apos;Listas&apos;!$E$2:$E$3</definedName>`,
-    `<definedName name="ListaProductos">&apos;Productos&apos;!$A$2:$A$${productEnd}</definedName>`,
+    `<definedName name="ListaProductos">&apos;Productos&apos;!$B$2:$B$${productEnd}</definedName>`,
   ].join("");
   archive["xl/workbook.xml"] = strToU8(
     workbookXml.includes("</definedNames>")
@@ -242,9 +242,9 @@ export const downloadProductTemplate = async ({
   );
   archive["xl/worksheets/sheet2.xml"] = strToU8(
     addValidations(strFromU8(archive["xl/worksheets/sheet2.xml"]), [
-      { range: `D2:D${productEnd}`, formula: "ListaCategorias" },
-      { range: `E2:E${productEnd}`, formula: "ListaUnidades" },
-      { range: `H2:H${productEnd}`, formula: "ListaSiNo" },
+      { range: `E2:E${productEnd}`, formula: "ListaCategorias" },
+      { range: `F2:F${productEnd}`, formula: "ListaUnidades" },
+      { range: `I2:I${productEnd}`, formula: "ListaSiNo" },
     ]),
   );
   archive["xl/worksheets/sheet3.xml"] = strToU8(
