@@ -4656,7 +4656,7 @@ const POS = () => {
           <div className="relative flex min-h-0 min-w-0 flex-1 items-stretch">
             <aside
               aria-label="Categorías de productos"
-              className="relative flex h-full min-h-0 shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-outline/50 px-2 py-3 custom-sidebar min-[420px]:w-28 sm:w-32 lg:px-2 lg:py-4"
+              className="relative flex h-full min-h-0 shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-outline/50 px-2 pt-3 pb-8 custom-sidebar min-[420px]:w-28 sm:w-32 lg:px-2 lg:py-4"
               style={{ width: categoryColumnWidth }}
             >
               {isLoadingCategories
@@ -4800,7 +4800,7 @@ const POS = () => {
 
                       {/* Información de Producto */}
                       <div className="px-2 pt-1">
-                        <p className="font-bold text-on-surface text-sm group-hover:text-primary transition-colors">
+                        <p className="line-clamp-2 min-w-0 break-words font-bold text-on-surface text-sm group-hover:text-primary transition-colors">
                           {product.name}
                         </p>
 
