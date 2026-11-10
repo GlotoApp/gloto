@@ -116,6 +116,45 @@ const getNameSimilarity = (left, right) => {
   return 1 - previous[right.length] / Math.max(left.length, right.length);
 };
 
+const findSimilarProducts = (importedProducts, products) =>
+  importedProducts.flatMap((importedProduct) => {
+    const productId = String(importedProduct.id || "").trim();
+    if (
+      productId &&
+      products.some((product) => String(product.id) === productId)
+    ) {
+      return [];
+    }
+    const importedName = normalizeProductMatchName(importedProduct.name);
+    const matches = products
+      .map((existingProduct) => {
+        const existingName = normalizeProductMatchName(existingProduct.name);
+        const exact = importedName === existingName;
+        const similarity = getNameSimilarity(importedName, existingName);
+        return {
+          importedName: importedProduct.name,
+          existingName: existingProduct.name,
+          exact,
+          similarity,
+        };
+      })
+      .filter(
+        (match) =>
+          !match.exact &&
+          Math.min(
+            normalizeProductMatchName(match.importedName).length,
+            normalizeProductMatchName(match.existingName).length,
+          ) >= 6 &&
+          match.similarity >= 0.82,
+      )
+      .sort(
+        (left, right) =>
+          Number(right.exact) - Number(left.exact) ||
+          right.similarity - left.similarity,
+      );
+    return matches.slice(0, 1);
+  });
+
 function mapLoadedOptionGroup(group) {
   return {
     id: group.id,
@@ -479,6 +518,10 @@ const Productos = ({ section = "productos" }) => {
     useState(false);
   const [isImportingProducts, setIsImportingProducts] = useState(false);
   const [spreadsheetResult, setSpreadsheetResult] = useState(null);
+  const [spreadsheetCategoryFilter, setSpreadsheetCategoryFilter] =
+    useState("todas");
+  const [spreadsheetCategoryEdit, setSpreadsheetCategoryEdit] = useState(null);
+  const [spreadsheetSearchQuery, setSpreadsheetSearchQuery] = useState("");
   const [similarProductsConfirmed, setSimilarProductsConfirmed] =
     useState(false);
   const productSpreadsheetInputRef = useRef(null);
@@ -2226,6 +2269,13 @@ const Productos = ({ section = "productos" }) => {
           stock: product.stock,
           minStock: product.minStock,
           isActive: product.isActive,
+          imageUrl: product.image_url
+            ? /^https?:\/\//i.test(product.image_url)
+              ? product.image_url
+              : supabase.storage
+                  .from("business-assets")
+                  .getPublicUrl(product.image_url).data.publicUrl
+            : "",
           optionGroups: buildProductOptionGroups(
             rawGroups.filter((group) => group.product_id === product.id),
             rawItems.filter((item) => item.product_id === product.id),
@@ -2251,6 +2301,7 @@ const Productos = ({ section = "productos" }) => {
     event.target.value = "";
     if (!file) return;
 
+    setSpreadsheetCategoryEdit(null);
     setSpreadsheetResult({
       fileName: file.name,
       products: [],
@@ -2258,6 +2309,8 @@ const Productos = ({ section = "productos" }) => {
       similarProducts: [],
       parsing: true,
     });
+    setSpreadsheetCategoryFilter("todas");
+    setSpreadsheetSearchQuery("");
     setSimilarProductsConfirmed(false);
     try {
       const parsed = await parseProductWorkbook(file, {
@@ -2268,43 +2321,7 @@ const Productos = ({ section = "productos" }) => {
       if (parsed.products.length === 0) {
         errors.push("No se encontraron productos para importar.");
       }
-      const similarProducts = parsed.products.flatMap((importedProduct) => {
-        const productId = String(importedProduct.id || "").trim();
-        if (
-          productId &&
-          products.some((product) => String(product.id) === productId)
-        ) {
-          return [];
-        }
-        const importedName = normalizeProductMatchName(importedProduct.name);
-        const matches = products
-          .map((existingProduct) => {
-            const existingName = normalizeProductMatchName(existingProduct.name);
-            const exact = importedName === existingName;
-            const similarity = getNameSimilarity(importedName, existingName);
-            return {
-              importedName: importedProduct.name,
-              existingName: existingProduct.name,
-              exact,
-              similarity,
-            };
-          })
-          .filter(
-            (match) =>
-              !match.exact &&
-              Math.min(
-                normalizeProductMatchName(match.importedName).length,
-                normalizeProductMatchName(match.existingName).length,
-              ) >= 6 &&
-              match.similarity >= 0.82,
-          )
-          .sort(
-            (left, right) =>
-              Number(right.exact) - Number(left.exact) ||
-              right.similarity - left.similarity,
-          );
-        return matches.slice(0, 1);
-      });
+      const similarProducts = findSimilarProducts(parsed.products, products);
       setSpreadsheetResult({
         fileName: file.name,
         products: parsed.products,
@@ -2325,6 +2342,161 @@ const Productos = ({ section = "productos" }) => {
         parsing: false,
       });
     }
+  };
+
+  const handleOpenCatalogEditor = () => {
+    if (!products.length) {
+      alert("No hay productos para editar.");
+      return;
+    }
+
+    const categoryById = new Map(
+      categoryRecords.map((category) => [String(category.id), category]),
+    );
+    setSpreadsheetCategoryEdit(null);
+    setSpreadsheetCategoryFilter("todas");
+    setSpreadsheetSearchQuery("");
+    setSimilarProductsConfirmed(false);
+    setSpreadsheetResult({
+      fileName: "Edición rápida del catálogo",
+      source: "catalog",
+      editedProductIds: new Set(),
+      products: products.map((product) => {
+        const category = categoryById.get(String(product.categoryId));
+        const imageUrl = product.image_url
+          ? /^https?:\/\//i.test(product.image_url)
+            ? product.image_url
+            : supabase.storage
+                .from("business-assets")
+                .getPublicUrl(product.image_url).data.publicUrl
+          : "";
+        return {
+          id: product.id,
+          name: product.name || "",
+          originalName: product.name || "",
+          description: product.description || "",
+          price: product.price ?? 0,
+          category,
+          categoryName: category?.name || product.category || "",
+          unit: units.find(
+            (unit) => String(unit.id) === String(product.unitId),
+          ) || { id: product.unitId || null },
+          stock: product.stock ?? 0,
+          minStock: product.minStock ?? 0,
+          isActive: product.isActive,
+          imageUrl,
+          imageUrlOriginalValue: imageUrl,
+          imageUrlStorageValue: product.image_url || "",
+          preserveExistingImage: true,
+          hasImageUrlColumn: true,
+          optionGroups: [],
+        };
+      }),
+      errors: [],
+      similarProducts: [],
+      parsing: false,
+    });
+  };
+
+  const updateSpreadsheetProduct = (productIndex, field, value) => {
+    if (field === "name") setSimilarProductsConfirmed(false);
+    setSpreadsheetResult((current) => {
+      if (!current) return current;
+      const importedProduct = current.products[productIndex];
+      const productsToSave = current.products.map((product, index) => {
+        if (index !== productIndex) return product;
+        if (field === "categoryName") {
+          const category = categoryRecords.find(
+            (record) =>
+              String(record.name || "").trim().toLowerCase() ===
+              String(value || "").trim().toLowerCase(),
+          );
+          return { ...product, categoryName: value, category: category || null };
+        }
+        return {
+          ...product,
+          [field]: value,
+          ...(field === "imageUrl"
+            ? {
+                preserveExistingImage:
+                  value === product.imageUrlOriginalValue,
+                hasImageUrlColumn: true,
+              }
+            : {}),
+        };
+      });
+      let errors = current.errors;
+      if (importedProduct) {
+        const rowNumber = productIndex + 2;
+        const fieldError =
+          field === "price"
+            ? '"Precio"'
+            : field === "categoryName"
+              ? "la categoría es obligatoria"
+              : field === "imageUrl"
+                ? '"imagen_url"'
+                : null;
+        if (fieldError) {
+          errors = errors.filter(
+            (error) =>
+              !error.includes(`fila ${rowNumber}:`) ||
+              !error.includes(fieldError),
+          );
+        }
+      }
+      return {
+        ...current,
+        products: productsToSave,
+        editedProductIds:
+          current.source === "catalog"
+            ? new Set([
+                ...(current.editedProductIds || []),
+                String(importedProduct?.id || ""),
+              ])
+            : current.editedProductIds,
+        errors,
+        similarProducts: findSimilarProducts(productsToSave, products),
+      };
+    });
+  };
+
+  const renameSpreadsheetCategory = (currentName, nextName) => {
+    if (isImportingProducts || spreadsheetResult?.outcome) return;
+    const categoryName = String(nextName || "").trim();
+    if (!categoryName) {
+      alert("El nombre de la categoría no puede quedar vacío.");
+      return;
+    }
+
+    setSpreadsheetResult((current) => {
+      if (!current) return current;
+      const category = categoryRecords.find(
+        (record) =>
+          String(record.name || "").trim().toLowerCase() ===
+          categoryName.toLowerCase(),
+      );
+      return {
+        ...current,
+        products: current.products.map((product) =>
+          product.categoryName === currentName
+            ? { ...product, categoryName, category: category || null }
+            : product,
+        ),
+        editedProductIds:
+          current.source === "catalog"
+            ? new Set([
+                ...(current.editedProductIds || []),
+                ...current.products
+                  .filter((product) => product.categoryName === currentName)
+                  .map((product) => String(product.id)),
+              ])
+            : current.editedProductIds,
+      };
+    });
+    if (spreadsheetCategoryFilter === currentName) {
+      setSpreadsheetCategoryFilter(categoryName);
+    }
+    setSpreadsheetCategoryEdit(null);
   };
 
   const saveImportedOptionGroups = async (
@@ -2381,10 +2553,17 @@ const Productos = ({ section = "productos" }) => {
   };
 
   const handleImportProducts = async () => {
-    if (!businessId || !spreadsheetResult?.products?.length) return;
+    const productsToImport =
+      spreadsheetResult?.source === "catalog"
+        ? spreadsheetResult.products.filter((product) =>
+            spreadsheetResult.editedProductIds?.has(String(product.id)),
+          )
+        : spreadsheetResult?.products || [];
+    if (!businessId || productsToImport.length === 0) return;
     setIsImportingProducts(true);
     let importedCount = 0;
     const importedProducts = [];
+    const imageCleanupFailures = [];
     const categoryMap = Object.fromEntries(
       categoryRecords.map((category) => [category.id, category.name]),
     );
@@ -2414,7 +2593,7 @@ const Productos = ({ section = "productos" }) => {
         ),
       );
 
-      for (const product of spreadsheetResult.products) {
+      for (const product of productsToImport) {
         const normalizedCategoryName = String(
           product.categoryName || product.category?.name || "",
         )
@@ -2462,7 +2641,7 @@ const Productos = ({ section = "productos" }) => {
         }
       }
 
-      for (const product of spreadsheetResult.products) {
+      for (const product of productsToImport) {
         const categoryId = product.category?.id;
         const orderIndex = (categoryOrder.get(categoryId) || 0) + 1;
         const payload = {
@@ -2474,7 +2653,9 @@ const Productos = ({ section = "productos" }) => {
           unit_id: product.unit?.id || null,
           is_active: product.isActive,
           order_index: orderIndex,
-          image_url: null,
+          image_url: product.preserveExistingImage
+            ? product.imageUrlStorageValue || null
+            : product.imageUrl || null,
           ...(inventoryEnabled
             ? {
                 stock: product.stock,
@@ -2495,7 +2676,7 @@ const Productos = ({ section = "productos" }) => {
         let productError;
         if (existingProduct) {
           const updatePayload = { ...payload };
-          delete updatePayload.image_url;
+          if (!product.hasImageUrlColumn) delete updatePayload.image_url;
           const response = await supabase
             .from("products")
             .update(updatePayload)
@@ -2517,7 +2698,7 @@ const Productos = ({ section = "productos" }) => {
         if (productError) throw productError;
 
         try {
-          if (existingProduct) {
+          if (existingProduct && spreadsheetResult.source !== "catalog") {
             const { error: itemsDeleteError } = await supabase
               .from("products_items")
               .delete()
@@ -2529,10 +2710,12 @@ const Productos = ({ section = "productos" }) => {
               .eq("product_id", savedProduct.id);
             if (groupsDeleteError) throw groupsDeleteError;
           }
-          await saveImportedOptionGroups(
-            savedProduct.id,
-            product.optionGroups,
-          );
+          if (spreadsheetResult.source !== "catalog") {
+            await saveImportedOptionGroups(
+              savedProduct.id,
+              product.optionGroups,
+            );
+          }
         } catch (optionsError) {
           console.error(
             `No se pudieron guardar las opciones de "${product.name}":`,
@@ -2572,6 +2755,25 @@ const Productos = ({ section = "productos" }) => {
           );
         }
 
+        if (
+          existingProduct?.image_url &&
+          existingProduct.image_url !== savedProduct.image_url &&
+          product.hasImageUrlColumn
+        ) {
+          try {
+            await removeStorageObjectIfUnused(
+              "business-assets",
+              existingProduct.image_url,
+            );
+          } catch (cleanupError) {
+            console.error(
+              `No se pudo limpiar la imagen anterior de "${product.name}":`,
+              cleanupError,
+            );
+            imageCleanupFailures.push(product.name);
+          }
+        }
+
         importedCount += 1;
         categoryOrder.set(categoryId, orderIndex);
         importedProducts.push(mapProduct(savedProduct, categoryMap));
@@ -2592,17 +2794,27 @@ const Productos = ({ section = "productos" }) => {
         fileName: spreadsheetResult.fileName,
         products: spreadsheetResult.products,
         errors: [],
-        outcome: `Se importaron o actualizaron ${importedCount} productos correctamente.`,
+        outcome: `Se importaron o actualizaron ${importedCount} productos correctamente.${imageCleanupFailures.length ? ` No se pudieron limpiar ${imageCleanupFailures.length} imágenes anteriores de Supabase.` : ""}`,
         outcomeStatus: "success",
       });
     } catch (error) {
       console.error("Se detuvo la importación masiva de productos:", error);
       if (importedProducts.length) {
-        setProducts((current) => [...current, ...importedProducts]);
+        setProducts((current) => {
+          const nextProducts = [...current];
+          importedProducts.forEach((importedProduct) => {
+            const index = nextProducts.findIndex(
+              (product) => product.id === importedProduct.id,
+            );
+            if (index >= 0) nextProducts[index] = importedProduct;
+            else nextProducts.push(importedProduct);
+          });
+          return nextProducts;
+        });
       }
       setSpreadsheetResult((current) => ({
         ...current,
-        outcome: `Se importaron ${importedCount} de ${spreadsheetResult.products.length} productos. La importación se detuvo: ${error.message || "error al guardar en Supabase"}`,
+        outcome: `Se importaron ${importedCount} de ${productsToImport.length} productos. La importación se detuvo: ${error.message || "error al guardar en Supabase"}`,
         outcomeStatus: importedCount ? "partial" : "error",
       }));
     } finally {
@@ -3008,6 +3220,70 @@ const Productos = ({ section = "productos" }) => {
 
   // ========== RENDERIZADO CONDICIONAL ==========
 
+  const spreadsheetCategoryOptions = Array.from(
+    new Set(
+      [
+        ...categoryRecords.map((category) => category.name),
+        ...(spreadsheetResult?.products || []).map(
+          (product) => product.categoryName,
+        ),
+      ]
+        .map((category) => String(category || "").trim())
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right, "es"));
+  const spreadsheetFilteredProducts = (spreadsheetResult?.products || [])
+    .map((product, index) => ({ product, index }))
+    .filter(({ product }) => {
+      const matchesCategory =
+        spreadsheetCategoryFilter === "todas"
+          ? true
+          : spreadsheetCategoryFilter === "__sin_categoria__"
+            ? !String(product.categoryName || "").trim()
+            : product.categoryName === spreadsheetCategoryFilter;
+      const matchesSearch = normalizeProductMatchName(product.name).includes(
+        normalizeProductMatchName(spreadsheetSearchQuery),
+      );
+      return matchesCategory && matchesSearch;
+    });
+  const spreadsheetEditErrors = [];
+  const spreadsheetNames = new Set();
+  (spreadsheetResult?.products || []).forEach((product, index) => {
+    const rowNumber = index + 2;
+    const normalizedName = normalizeProductMatchName(product.name);
+    if (!String(product.name || "").trim()) {
+      spreadsheetEditErrors.push(`Fila ${rowNumber}: el nombre es obligatorio.`);
+    } else if (
+      spreadsheetNames.has(normalizedName) &&
+      (spreadsheetResult.source !== "catalog" ||
+        product.name !== product.originalName)
+    ) {
+      spreadsheetEditErrors.push(`Fila ${rowNumber}: el nombre del producto está repetido.`);
+    }
+    if (normalizedName) spreadsheetNames.add(normalizedName);
+    if (
+      product.price === "" ||
+      product.price == null ||
+      !Number.isFinite(Number(product.price)) ||
+      Number(product.price) < 0
+    ) {
+      spreadsheetEditErrors.push(`Fila ${rowNumber}: el precio debe ser un número igual o mayor que cero.`);
+    }
+    if (!String(product.categoryName || "").trim()) {
+      spreadsheetEditErrors.push(`Fila ${rowNumber}: selecciona una categoría.`);
+    }
+    if (String(product.imageUrl || "").trim()) {
+      try {
+        const imageUrl = new URL(String(product.imageUrl).trim());
+        if (!["http:", "https:"].includes(imageUrl.protocol)) {
+          throw new Error("URL no válida");
+        }
+      } catch {
+        spreadsheetEditErrors.push(`Fila ${rowNumber}: la imagen debe tener una URL válida que comience con http:// o https://.`);
+      }
+    }
+  });
+
   if (section === "categorias") {
     return (
       <Categorias
@@ -3030,6 +3306,15 @@ const Productos = ({ section = "productos" }) => {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-black tracking-tighter">Productos</h1>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleOpenCatalogEditor}
+              disabled={loadingProducts || isImportingProducts || !products.length}
+              className="flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[9px] font-black uppercase text-amber-200 transition-all hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Edit3 size={13} />
+              Editar catálogo
+            </button>
             <button
               type="button"
               onClick={handleDownloadProductTemplate}
@@ -5242,195 +5527,508 @@ const Productos = ({ section = "productos" }) => {
         )}
 
         {spreadsheetResult && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-2 backdrop-blur-sm sm:p-4">
+          <div className="fixed inset-0 z-[70] bg-neutral-950">
             <section
               role="dialog"
               aria-modal="true"
               aria-labelledby="product-spreadsheet-title"
-              className="flex h-[calc(100vh-1rem)] w-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-950 shadow-2xl sm:h-[calc(100vh-2rem)]"
+              className="flex h-full w-full flex-col overflow-hidden bg-neutral-950"
             >
-              <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5">
-                <div>
-                  <div className="mb-2 flex items-center gap-2 text-emerald-300">
-                    <FileSpreadsheet size={18} />
-                    <h2
-                      id="product-spreadsheet-title"
-                      className="text-lg font-black"
-                    >
-                      Carga masiva de productos
-                    </h2>
+              <div className="flex shrink-0 items-center justify-between gap-4 border-b border-white/10 px-4 py-3 sm:px-6">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300 sm:flex">
+                    <FileSpreadsheet size={19} />
                   </div>
-                  <p className="break-all text-xs text-neutral-500">
-                    {spreadsheetResult.fileName}
-                  </p>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-emerald-300">
+                      <FileSpreadsheet size={16} className="sm:hidden" />
+                      <h2
+                        id="product-spreadsheet-title"
+                        className="truncate text-base font-black sm:text-lg"
+                      >
+                        {spreadsheetResult.source === "catalog"
+                          ? "Editar catálogo de productos"
+                          : "Revisar carga de productos"}
+                      </h2>
+                    </div>
+                    <p className="truncate text-[11px] text-neutral-500 sm:text-xs">
+                      {spreadsheetResult.fileName}
+                    </p>
+                  </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setSpreadsheetResult(null)}
                   disabled={isImportingProducts}
                   aria-label="Cerrar carga masiva"
-                  className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                  className="shrink-0 rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white disabled:opacity-40"
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-                {spreadsheetResult.parsing ? (
-                  <div className="flex items-center gap-3 py-8 text-sm text-neutral-400">
-                    <LoaderCircle
-                      size={18}
-                      className="animate-spin text-violet-400"
-                    />
-                    Revisando el archivo y sus opciones...
+              <div className="flex min-h-0 flex-1">
+                <aside className="flex w-44 shrink-0 flex-col border-r border-white/10 bg-white/[0.015] sm:w-56 xl:w-64">
+                  <div className="border-b border-white/[0.06] p-3 sm:p-4">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-neutral-400">
+                      Categorías
+                    </p>
+                    <p className="mt-1 text-[10px] text-neutral-600">
+                      Filtra el catálogo rápidamente
+                    </p>
                   </div>
-                ) : (
-                  <>
-                    {spreadsheetResult.errors.length > 0 && (
-                      <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4">
-                        <p className="mb-2 flex items-center gap-2 text-sm font-bold text-rose-300">
-                          <AlertTriangle size={16} />
-                          Corrige estos problemas en Excel antes de importar
-                        </p>
-                        <ul className="max-h-48 space-y-1 overflow-y-auto pl-5 text-xs text-rose-200/80">
-                          {spreadsheetResult.errors.map((error, index) => (
-                            <li key={`${index}-${error}`} className="list-disc">
-                              {error}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {spreadsheetResult.similarProducts?.length > 0 && (
-                      <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
-                        <p className="mb-2 flex items-center gap-2 text-sm font-bold text-amber-200">
-                          <AlertTriangle size={16} />
-                          Hay nombres iguales o parecidos en tu catálogo
-                        </p>
-                        <ul className="space-y-1 text-xs text-amber-100/80">
-                          {spreadsheetResult.similarProducts.map((match) => (
-                            <li key={`${match.importedName}-${match.existingName}`}>
-                              “{match.importedName}” se parece a “{match.existingName}”
-                              . Confirma si son productos nuevos o si corresponden al
-                              mismo producto.
-                            </li>
-                          ))}
-                        </ul>
-                        <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-amber-100">
-                          <input
-                            type="checkbox"
-                            checked={similarProductsConfirmed}
-                            onChange={(event) =>
-                              setSimilarProductsConfirmed(event.target.checked)
-                            }
-                            className="mt-0.5 accent-amber-400"
-                          />
-                          <span>
-                            Revisé los nombres y confirmo que quiero agregar
-                            los nombres parecidos que siguen sin coincidir.
-                          </span>
-                        </label>
-                      </div>
-                    )}
-
-                    {spreadsheetResult.products.length > 0 && (
-                      <div>
-                        <p className="mb-2 text-sm font-bold text-neutral-200">
-                          {spreadsheetResult.products.length} producto
-                          {spreadsheetResult.products.length === 1 ? "" : "s"}{" "}
-                          encontrado
-                          {spreadsheetResult.products.length === 1 ? "" : "s"}
-                        </p>
-                        <div className="space-y-2">
-                          {spreadsheetResult.products.map((product) => {
-                            const similarMatch =
-                              spreadsheetResult.similarProducts?.find(
-                                (match) => match.importedName === product.name,
-                              );
-                            const optionCount = product.optionGroups.reduce(
-                              (count, group) =>
-                                count +
-                                1 +
-                                group.items.reduce(
-                                  (itemCount, item) =>
-                                    itemCount +
-                                    (item.childGroups?.length || 0),
-                                  0,
-                                ),
-                              0,
-                            );
-                            return (
-                              <div
-                                key={product.name}
-                                className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2"
+                  <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2 sm:p-3" aria-label="Filtrar por categoría">
+                    <button
+                      type="button"
+                      onClick={() => setSpreadsheetCategoryFilter("todas")}
+                      className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${
+                        spreadsheetCategoryFilter === "todas"
+                          ? "bg-violet-500/15 font-bold text-violet-200"
+                          : "text-neutral-400 hover:bg-white/5 hover:text-white"
+                      }`}
+                    >
+                      <span className="truncate">Todas</span>
+                      <span className="text-[10px] text-neutral-500">
+                        {spreadsheetResult.products.length}
+                      </span>
+                    </button>
+                    {spreadsheetCategoryOptions.map((category) => {
+                      const count = spreadsheetResult.products.filter(
+                        (product) => product.categoryName === category,
+                      ).length;
+                      const editingCategory =
+                        spreadsheetCategoryEdit?.category === category;
+                      return (
+                        <div
+                          key={category}
+                          className={`flex w-full items-center gap-1 rounded-lg px-1 ${
+                            spreadsheetCategoryFilter === category
+                              ? "bg-violet-500/15"
+                              : "hover:bg-white/5"
+                          }`}
+                        >
+                          {editingCategory ? (
+                            <>
+                              <input
+                                autoFocus
+                                value={spreadsheetCategoryEdit.draft}
+                                disabled={
+                                  isImportingProducts ||
+                                  Boolean(spreadsheetResult.outcome)
+                                }
+                                onChange={(event) =>
+                                  setSpreadsheetCategoryEdit((current) => ({
+                                    ...current,
+                                    draft: event.target.value,
+                                  }))
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    renameSpreadsheetCategory(
+                                      category,
+                                      spreadsheetCategoryEdit.draft,
+                                    );
+                                  }
+                                  if (event.key === "Escape") {
+                                    setSpreadsheetCategoryEdit(null);
+                                  }
+                                }}
+                                aria-label={`Nuevo nombre para ${category}`}
+                                className="min-w-0 flex-1 rounded-md border border-violet-500/40 bg-neutral-900 px-2 py-1.5 text-[10px] text-white outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  renameSpreadsheetCategory(
+                                    category,
+                                    spreadsheetCategoryEdit.draft,
+                                  )
+                                }
+                                disabled={
+                                  isImportingProducts ||
+                                  Boolean(spreadsheetResult.outcome)
+                                }
+                                aria-label={`Guardar nombre de categoría ${category}`}
+                                className="rounded-md p-1.5 text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40"
                               >
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-semibold text-white">
-                                    {product.name}
-                                  </p>
-                                  <p className="text-[11px] text-neutral-500">
-                                    {product.category?.name} · {product.unit?.name}
-                                    {optionCount
-                                      ? ` · ${optionCount} grupo${optionCount === 1 ? "" : "s"} de opciones`
-                                      : ""}
-                                  </p>
-                                  {similarMatch && (
-                                    <p className="mt-1 text-[10px] font-semibold text-amber-300">
-                                      Coincide con “{similarMatch.existingName}”
-                                      · se agregará como nuevo
-                                    </p>
-                                  )}
-                                </div>
-                                <span className="shrink-0 text-sm font-bold text-emerald-300">
-                                  ${Number(product.price).toLocaleString("es-CO")}
+                                <Save size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSpreadsheetCategoryEdit(null)}
+                                disabled={isImportingProducts}
+                                aria-label="Cancelar cambio de nombre"
+                                className="rounded-md p-1.5 text-neutral-400 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                              >
+                                <X size={13} />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSpreadsheetCategoryFilter(category)
+                                }
+                                className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-1.5 py-2 text-left text-xs transition-colors ${
+                                  spreadsheetCategoryFilter === category
+                                    ? "font-bold text-violet-200"
+                                    : "text-neutral-400 hover:text-white"
+                                }`}
+                                title={category}
+                              >
+                                <span className="truncate">{category}</span>
+                                <span className="shrink-0 text-[10px] text-neutral-500">
+                                  {count}
                                 </span>
-                              </div>
-                            );
-                          })}
+                              </button>
+                              {count > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setSpreadsheetCategoryEdit({
+                                      category,
+                                      draft: category,
+                                    })
+                                  }
+                                  disabled={
+                                    isImportingProducts ||
+                                    Boolean(spreadsheetResult.outcome)
+                                  }
+                                  aria-label={`Editar nombre de categoría ${category}`}
+                                  title="Renombrar categoría solo en esta carga"
+                                  className="shrink-0 rounded-md p-1.5 text-neutral-500 hover:bg-white/10 hover:text-violet-200 disabled:opacity-40"
+                                >
+                                  <Edit3 size={12} />
+                                </button>
+                              )}
+                            </>
+                          )}
                         </div>
-                      </div>
-                    )}
-
-                    {spreadsheetResult.outcome && (
-                      <p
-                        role="status"
-                        className={`rounded-lg border p-3 text-sm ${
-                          spreadsheetResult.outcomeStatus === "success"
-                            ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-200"
-                            : "border-amber-500/20 bg-amber-500/5 text-amber-200"
+                      );
+                    })}
+                    {spreadsheetResult.products.some(
+                      (product) => !String(product.categoryName || "").trim(),
+                    ) && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSpreadsheetCategoryFilter("__sin_categoria__")
+                        }
+                        className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${
+                          spreadsheetCategoryFilter === "__sin_categoria__"
+                            ? "bg-violet-500/15 font-bold text-violet-200"
+                            : "text-neutral-400 hover:bg-white/5 hover:text-white"
                         }`}
                       >
-                        {spreadsheetResult.outcome}
-                      </p>
+                        <span className="truncate">Sin categoría</span>
+                        <span className="text-[10px] text-neutral-500">
+                          {
+                            spreadsheetResult.products.filter(
+                              (product) =>
+                                !String(product.categoryName || "").trim(),
+                            ).length
+                          }
+                        </span>
+                      </button>
                     )}
-                    {!inventoryEnabled && (
-                      <p className="text-[11px] text-neutral-500">
-                        El stock de la plantilla se omitirá porque el inventario
-                        no está habilitado para este negocio.
-                      </p>
-                    )}
-                  </>
-                )}
+                  </nav>
+                </aside>
+
+                <div className="flex min-w-0 flex-1 flex-col">
+                  {spreadsheetResult.parsing ? (
+                    <div className="flex flex-1 items-center justify-center gap-3 text-sm text-neutral-400">
+                      <LoaderCircle
+                        size={18}
+                        className="animate-spin text-violet-400"
+                      />
+                      Revisando el archivo y sus opciones...
+                    </div>
+                  ) : (
+                    <>
+                      <div className="shrink-0 space-y-3 border-b border-white/[0.06] p-3 sm:p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold text-white">
+                              {spreadsheetFilteredProducts.length} de{" "}
+                              {spreadsheetResult.products.length} productos
+                            </p>
+                            <p className="text-[10px] text-neutral-500">
+                              Edita nombre, precio, categoría e imagen antes de guardar.
+                            </p>
+                          </div>
+                          <input
+                            type="search"
+                            value={spreadsheetSearchQuery}
+                            onChange={(event) =>
+                              setSpreadsheetSearchQuery(event.target.value)
+                            }
+                            placeholder="Buscar producto..."
+                            aria-label="Buscar producto en la carga"
+                            className="w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-xs text-white outline-none placeholder:text-neutral-600 focus:border-violet-500/50 sm:w-64"
+                          />
+                        </div>
+
+                        {(spreadsheetResult.errors.length > 0 ||
+                          spreadsheetEditErrors.length > 0) && (
+                          <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-3">
+                            <p className="mb-1 flex items-center gap-2 text-xs font-bold text-rose-300">
+                              <AlertTriangle size={14} />
+                              Hay problemas que debes corregir antes de importar
+                            </p>
+                            <ul className="max-h-24 space-y-1 overflow-y-auto pl-5 text-[10px] text-rose-200/80">
+                              {[...spreadsheetResult.errors, ...spreadsheetEditErrors]
+                                .slice(0, 30)
+                                .map((error, index) => (
+                                  <li key={`${index}-${error}`} className="list-disc">
+                                    {error}
+                                  </li>
+                                ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {spreadsheetResult.similarProducts?.length > 0 && (
+                          <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
+                            <p className="flex items-center gap-2 text-xs font-bold text-amber-200">
+                              <AlertTriangle size={14} />
+                              Hay {spreadsheetResult.similarProducts.length} nombre(s) parecido(s) en tu catálogo
+                            </p>
+                            <p className="mt-1 text-[10px] text-amber-100/75">
+                              Revisa que no sean productos existentes que deban actualizarse.
+                            </p>
+                            <label className="mt-2 flex cursor-pointer items-start gap-2 text-[10px] text-amber-100">
+                              <input
+                                type="checkbox"
+                                checked={similarProductsConfirmed}
+                                onChange={(event) =>
+                                  setSimilarProductsConfirmed(event.target.checked)
+                                }
+                                className="mt-0.5 accent-amber-400"
+                              />
+                              <span>
+                                Confirmo que los nombres parecidos deben agregarse como productos nuevos.
+                              </span>
+                            </label>
+                          </div>
+                        )}
+
+                        {!inventoryEnabled && (
+                          <p className="text-[10px] text-neutral-500">
+                            El stock de la plantilla se omitirá porque el inventario no está habilitado para este negocio.
+                          </p>
+                        )}
+                        {spreadsheetResult.outcome && (
+                          <p
+                            role="status"
+                            className={`rounded-lg border p-3 text-xs ${
+                              spreadsheetResult.outcomeStatus === "success"
+                                ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-200"
+                                : "border-amber-500/20 bg-amber-500/5 text-amber-200"
+                            }`}
+                          >
+                            {spreadsheetResult.outcome}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="min-h-0 flex-1 overflow-auto">
+                        <table className="w-full min-w-[980px] border-collapse text-left">
+                          <thead className="sticky top-0 z-10 bg-neutral-900 shadow-sm shadow-black/30">
+                            <tr className="border-b border-white/10 text-[9px] font-black uppercase tracking-wider text-neutral-500">
+                              <th className="w-16 px-3 py-3">Imagen</th>
+                              <th className="min-w-56 px-3 py-3">Producto</th>
+                              <th className="w-36 px-3 py-3">Precio</th>
+                              <th className="w-48 px-3 py-3">Categoría</th>
+                              <th className="min-w-64 px-3 py-3">URL de imagen</th>
+                              <th className="w-32 px-3 py-3">Unidad / opciones</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/[0.05]">
+                            {spreadsheetFilteredProducts.map(({ product, index }) => {
+                              const similarMatch =
+                                spreadsheetResult.similarProducts?.find(
+                                  (match) => match.importedName === product.name,
+                                );
+                              const optionCount = product.optionGroups.reduce(
+                                (count, group) =>
+                                  count +
+                                  1 +
+                                  group.items.reduce(
+                                    (itemCount, item) =>
+                                      itemCount +
+                                      (item.childGroups?.length || 0),
+                                    0,
+                                  ),
+                                0,
+                              );
+                              const editingDisabled =
+                                isImportingProducts || Boolean(spreadsheetResult.outcome);
+                              return (
+                                <tr
+                                  key={`${product.id || product.name}-${index}`}
+                                  className="align-middle transition-colors hover:bg-white/[0.025]"
+                                >
+                                  <td className="px-3 py-2">
+                                    <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-neutral-900">
+                                      {product.imageUrl ? (
+                                        <img
+                                          src={product.imageUrl}
+                                          alt=""
+                                          loading="lazy"
+                                          onError={(event) => {
+                                            event.currentTarget.onerror = null;
+                                            event.currentTarget.src = defaultImg;
+                                          }}
+                                          className="h-full w-full object-cover"
+                                        />
+                                      ) : (
+                                        <ImageIcon
+                                          size={17}
+                                          className="text-neutral-600"
+                                          aria-hidden="true"
+                                        />
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      value={product.name}
+                                      onChange={(event) =>
+                                        updateSpreadsheetProduct(
+                                          index,
+                                          "name",
+                                          event.target.value,
+                                        )
+                                      }
+                                      disabled={editingDisabled}
+                                      aria-label={`Nombre del producto ${product.name}`}
+                                      className="w-full rounded-md border border-white/10 bg-neutral-900 px-2.5 py-2 text-xs font-semibold text-white outline-none focus:border-violet-500/50 disabled:opacity-60"
+                                    />
+                                    {similarMatch && (
+                                      <p className="mt-1 truncate text-[9px] text-amber-300" title={`Se parece a ${similarMatch.existingName}`}>
+                                        Se parece a: {similarMatch.existingName}
+                                      </p>
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex items-center rounded-md border border-white/10 bg-neutral-900 focus-within:border-violet-500/50">
+                                      <span className="pl-2.5 text-[10px] text-neutral-500">$</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="any"
+                                        value={product.price ?? ""}
+                                        onChange={(event) =>
+                                          updateSpreadsheetProduct(
+                                            index,
+                                            "price",
+                                            event.target.value,
+                                          )
+                                        }
+                                        disabled={editingDisabled}
+                                        aria-label={`Precio de ${product.name}`}
+                                        className="w-full min-w-0 bg-transparent px-2 py-2 text-xs font-bold text-emerald-300 outline-none disabled:opacity-60"
+                                      />
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <select
+                                      value={product.categoryName || ""}
+                                      onChange={(event) =>
+                                        updateSpreadsheetProduct(
+                                          index,
+                                          "categoryName",
+                                          event.target.value,
+                                        )
+                                      }
+                                      disabled={editingDisabled}
+                                      aria-label={`Categoría de ${product.name}`}
+                                      className="w-full rounded-md border border-white/10 bg-neutral-900 px-2.5 py-2 text-xs text-white outline-none focus:border-violet-500/50 disabled:opacity-60"
+                                    >
+                                      <option value="">Selecciona categoría</option>
+                                      {spreadsheetCategoryOptions.map((category) => (
+                                        <option key={category} value={category}>
+                                          {category}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="url"
+                                      value={product.imageUrl || ""}
+                                      onChange={(event) =>
+                                        updateSpreadsheetProduct(
+                                          index,
+                                          "imageUrl",
+                                          event.target.value,
+                                        )
+                                      }
+                                      disabled={editingDisabled}
+                                      placeholder="https://..."
+                                      aria-label={`URL de imagen de ${product.name}`}
+                                      className="w-full rounded-md border border-white/10 bg-neutral-900 px-2.5 py-2 text-[10px] text-neutral-200 outline-none placeholder:text-neutral-600 focus:border-violet-500/50 disabled:opacity-60"
+                                    />
+                                    <p className="mt-1 text-[9px] text-neutral-600">
+                                      Vacío = quitar imagen
+                                    </p>
+                                  </td>
+                                  <td className="px-3 py-2 text-[10px] text-neutral-400">
+                                    <span>{product.unit?.name || "Sin unidad"}</span>
+                                    {optionCount > 0 && (
+                                      <span className="mt-1 block text-neutral-600">
+                                        {optionCount} grupo(s) de opciones
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {spreadsheetFilteredProducts.length === 0 && (
+                              <tr>
+                                <td
+                                  colSpan={6}
+                                  className="px-4 py-12 text-center text-xs text-neutral-500"
+                                >
+                                  No hay productos que coincidan con el filtro.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
-              <div className="flex justify-end gap-2 border-t border-white/10 p-4">
-                <button
-                  type="button"
-                  onClick={() => setSpreadsheetResult(null)}
-                  disabled={isImportingProducts}
-                  className="rounded-lg border border-white/10 px-4 py-2 text-xs font-bold text-neutral-300 hover:bg-white/5 disabled:opacity-40"
-                >
-                  {spreadsheetResult.outcome ? "Cerrar" : "Cancelar"}
-                </button>
-                {!spreadsheetResult.outcome && (
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-neutral-950 px-4 py-3 sm:px-6">
+                <p className="text-[10px] text-neutral-500">
+                  {spreadsheetResult.source === "catalog"
+                    ? `${spreadsheetResult.editedProductIds?.size || 0} productos modificados`
+                    : `${spreadsheetResult.products.length} productos en esta carga`}
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSpreadsheetResult(null)}
+                    disabled={isImportingProducts}
+                    className="rounded-lg border border-white/10 px-4 py-2 text-xs font-bold text-neutral-300 hover:bg-white/5 disabled:opacity-40"
+                  >
+                    {spreadsheetResult.outcome ? "Cerrar" : "Cancelar"}
+                  </button>
+                  {!spreadsheetResult.outcome && (
                   <button
                     type="button"
                     onClick={handleImportProducts}
                     disabled={
                       spreadsheetResult.parsing ||
                       spreadsheetResult.errors.length > 0 ||
-                      spreadsheetResult.products.length === 0 ||
+                      spreadsheetEditErrors.length > 0 ||
+                      (spreadsheetResult.source === "catalog"
+                        ? !spreadsheetResult.editedProductIds?.size
+                        : spreadsheetResult.products.length === 0) ||
                       (spreadsheetResult.similarProducts?.length > 0 &&
                         !similarProductsConfirmed) ||
                       isImportingProducts
@@ -5443,9 +6041,12 @@ const Productos = ({ section = "productos" }) => {
                     {spreadsheetResult.similarProducts?.length > 0 &&
                     !similarProductsConfirmed
                       ? "Confirma los nombres para continuar"
-                      : "Agregar o actualizar productos"}
+                      : spreadsheetResult.source === "catalog"
+                        ? "Guardar cambios"
+                        : "Agregar o actualizar productos"}
                   </button>
-                )}
+                  )}
+                </div>
               </div>
             </section>
           </div>

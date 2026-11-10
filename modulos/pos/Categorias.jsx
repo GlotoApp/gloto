@@ -19,6 +19,7 @@ import {
   Info,
   GripVertical,
   Search,
+  Image as ImageIcon,
 } from "lucide-react";
 
 const formatCategoryName = (value) => {
@@ -75,6 +76,11 @@ const CategoriasAdmin = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedCategories, setSelectedCategories] = useState(new Set());
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [deletingSelectedCategories, setDeletingSelectedCategories] =
+    useState(false);
   const [moveCategoryId, setMoveCategoryId] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("order");
@@ -283,30 +289,112 @@ const CategoriasAdmin = ({
     setCategoriesList(drag.original);
   };
 
-  const handleDeleteCategoryFinal = (index) => {
+  const handleDeleteCategoryFinal = async (index) => {
     const categoryToDelete = categoriesList[index];
+    if (!categoryToDelete) return;
     const updated = categoriesList.filter((_, i) => i !== index);
+
+    if (onDeleteCategoryCascade) {
+      const deleted = await onDeleteCategoryCascade(categoryToDelete.id);
+      if (deleted !== true) return;
+    }
 
     setCategoriesList(updated);
     setDeleteConfirm(null);
+    setSelectedCategories((current) => {
+      const next = new Set(current);
+      next.delete(categoryToDelete.id);
+      return next;
+    });
+  };
 
-    if (onDeleteCategoryCascade) {
-      onDeleteCategoryCascade(categoryToDelete.id);
+  const handleToggleCategorySelection = (categoryId) => {
+    setSelectedCategories((current) => {
+      const next = new Set(current);
+      if (next.has(categoryId)) {
+        next.delete(categoryId);
+      } else {
+        next.add(categoryId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllVisible = () => {
+    const visibleIds = visibleCategories.map((category) => category.id);
+    const allVisibleSelected =
+      visibleIds.length > 0 &&
+      visibleIds.every((categoryId) => selectedCategories.has(categoryId));
+    setSelectedCategories((current) => {
+      const next = new Set(current);
+      visibleIds.forEach((categoryId) => {
+        if (allVisibleSelected) {
+          next.delete(categoryId);
+        } else {
+          next.add(categoryId);
+        }
+      });
+      return next;
+    });
+  };
+
+  const handleBulkDeleteSelected = async () => {
+    const selectedIds = categoriesList
+      .filter((category) => selectedCategories.has(category.id))
+      .map((category) => category.id);
+    if (selectedIds.length === 0 || !onDeleteCategoryCascade) return;
+
+    setDeletingSelectedCategories(true);
+    const deletedIds = [];
+    try {
+      for (const categoryId of selectedIds) {
+        let deleted;
+        try {
+          deleted = await onDeleteCategoryCascade(categoryId);
+        } catch (error) {
+          console.error("Error eliminando categoría seleccionada:", error);
+          alert("Ocurrió un error al eliminar una categoría seleccionada.");
+          break;
+        }
+        if (deleted !== true) break;
+        deletedIds.push(categoryId);
+      }
+
+      setCategoriesList((current) =>
+        current.filter((category) => !deletedIds.includes(category.id)),
+      );
+      setSelectedCategories(
+        new Set(selectedIds.filter((categoryId) => !deletedIds.includes(categoryId))),
+      );
+      if (deletedIds.length === selectedIds.length) {
+        setBulkDeleteConfirm(false);
+      }
+    } finally {
+      setDeletingSelectedCategories(false);
     }
   };
 
-  const handleMoveCategoryProducts = (index) => {
+  const handleMoveCategoryProducts = async (index) => {
     const categoryToDelete = categoriesList[index];
     if (!categoryToDelete || !moveCategoryId) return;
+
+    if (onDeleteCategoryCascade) {
+      const deleted = await onDeleteCategoryCascade(
+        categoryToDelete.id,
+        moveCategoryId,
+      );
+      if (deleted !== true) return;
+    }
 
     const updated = categoriesList.filter((_, i) => i !== index);
     setCategoriesList(updated);
     setDeleteConfirm(null);
     setMoveCategoryId("");
-
-    if (onDeleteCategoryCascade) {
-      onDeleteCategoryCascade(categoryToDelete.id, moveCategoryId);
-    }
+    setSelectedCategories((current) => {
+      const next = new Set(current);
+      next.delete(categoryToDelete.id);
+      return next;
+    });
   };
 
   const visibleCategories = useMemo(() => {
@@ -345,6 +433,17 @@ const CategoriasAdmin = ({
         return 0;
       });
   }, [categoriesList, products, searchTerm, sortBy]);
+  const allVisibleCategoriesSelected =
+    visibleCategories.length > 0 &&
+    visibleCategories.every((category) =>
+      selectedCategories.has(category.id),
+    );
+  const selectedCategoryRecords = categoriesList.filter((category) =>
+    selectedCategories.has(category.id),
+  );
+  const selectedProductsCount = products.filter((product) =>
+    selectedCategories.has(product.categoryId),
+  ).length;
 
   return (
     <div className="min-h-screen bg-background text-neutral-200 p-4 font-sans">
@@ -355,13 +454,27 @@ const CategoriasAdmin = ({
               Categorías
             </h1>
           </div>
-          <button
-            type="button"
-            onClick={handleNewCategory}
-            className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-violet-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-violet-200 transition-colors hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
-          >
-            <Plus size={14} /> Nueva categoría
-          </button>
+          {!isSelectionMode && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleNewCategory}
+                className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-violet-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-violet-200 transition-colors hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+              >
+                <Plus size={14} /> Nueva categoría
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSelectionMode(true);
+                  setSelectedCategories(new Set());
+                }}
+                className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-neutral-300 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+              >
+                <Check size={14} /> Seleccionar
+              </button>
+            </div>
+          )}
         </header>
 
         <div className="grid gap-3 rounded-2xl bg-neutral-900/30 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.45fr)]">
@@ -490,6 +603,17 @@ const CategoriasAdmin = ({
                     {/* FILA PRINCIPAL */}
                     <div className="flex w-full flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-4">
                       <div className="flex min-w-0 flex-1 items-center gap-3">
+                        {isSelectionMode && (
+                          <input
+                            type="checkbox"
+                            checked={selectedCategories.has(category.id)}
+                            onChange={() =>
+                              handleToggleCategorySelection(category.id)
+                            }
+                            aria-label={`Seleccionar categoría ${category.name}`}
+                            className="h-4 w-4 shrink-0 accent-violet-500"
+                          />
+                        )}
                         <button
                           type="button"
                           disabled={
@@ -583,64 +707,92 @@ const CategoriasAdmin = ({
                           </p>
                         ) : (
                           <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1 mt-2">
-                            {associatedProducts.map((prod) => (
-                              <button
-                                key={prod.id}
-                                type="button"
-                                onClick={() =>
-                                  navigate("/pos/productos", {
-                                    state: { productId: prod.id },
-                                  })
-                                }
-                                aria-label={`Editar ${prod.name} en productos`}
-                                className="group flex min-h-12 w-full items-center justify-between gap-4 rounded-xl bg-neutral-900/50 px-3 py-2.5 text-left transition-colors hover:bg-neutral-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
-                              >
-                                <div className="flex min-w-0 flex-1 items-center gap-3">
-                                  <div
-                                    className={`h-2 w-2 shrink-0 rounded-full ${
-                                      prod.isActive && !prod.isSoldOut
-                                        ? "bg-emerald-400 shadow-[0_0_8px_#10b981]"
-                                        : "bg-neutral-600"
-                                    }`}
-                                  />
-                                  <span className="truncate text-xs font-semibold tracking-wide text-neutral-200 group-hover:text-white">
-                                    {prod.name}
-                                  </span>
-                                </div>
-                                <div className="flex shrink-0 items-center gap-3">
-                                  <div className="flex items-center gap-1.5">
-                                    <span
-                                      className={`rounded px-1.5 py-0.5 text-[8px] font-black uppercase ${
-                                        prod.isActive
-                                          ? "bg-emerald-500/10 text-emerald-400"
-                                          : "bg-slate-500/10 text-slate-400"
+                            {associatedProducts.map((prod) => {
+                              const imageValue = prod.image_url || prod.image;
+                              const imageUrl = imageValue
+                                ? /^https?:\/\//i.test(imageValue)
+                                  ? imageValue
+                                  : supabase.storage
+                                      .from("business-assets")
+                                      .getPublicUrl(imageValue).data.publicUrl
+                                : "";
+                              return (
+                                <button
+                                  key={prod.id}
+                                  type="button"
+                                  onClick={() =>
+                                    navigate("/pos/productos", {
+                                      state: { productId: prod.id },
+                                    })
+                                  }
+                                  aria-label={`Editar ${prod.name} en productos`}
+                                  className="group flex min-h-12 w-full items-center justify-between gap-4 rounded-xl bg-neutral-900/50 px-3 py-2.5 text-left transition-colors hover:bg-neutral-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+                                >
+                                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                                    <div className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-neutral-950 text-neutral-600">
+                                      <ImageIcon
+                                        size={15}
+                                        aria-hidden="true"
+                                      />
+                                      {imageUrl && (
+                                        <img
+                                          src={imageUrl}
+                                          alt=""
+                                          loading="lazy"
+                                          onError={(event) => {
+                                            event.currentTarget.style.display =
+                                              "none";
+                                          }}
+                                          className="absolute h-9 w-9 rounded-lg object-cover"
+                                        />
+                                      )}
+                                    </div>
+                                    <div
+                                      className={`h-2 w-2 shrink-0 rounded-full ${
+                                        prod.isActive && !prod.isSoldOut
+                                          ? "bg-emerald-400 shadow-[0_0_8px_#10b981]"
+                                          : "bg-neutral-600"
                                       }`}
-                                    >
-                                      {prod.isActive ? "Activo" : "Archivado"}
-                                    </span>
-                                    <span
-                                      className={`rounded px-1.5 py-0.5 text-[8px] font-black uppercase ${
-                                        prod.isSoldOut
-                                          ? "bg-red-500/10 text-red-400"
-                                          : "bg-sky-500/10 text-sky-400"
-                                      }`}
-                                    >
-                                      {prod.isSoldOut
-                                        ? "Agotado"
-                                        : "Disponible"}
+                                    />
+                                    <span className="truncate text-xs font-semibold tracking-wide text-neutral-200 group-hover:text-white">
+                                      {prod.name}
                                     </span>
                                   </div>
-                                  <span className="rounded bg-black/30 px-2 py-0.5 text-[10px] font-mono font-bold text-white">
-                                    ${prod.price?.toLocaleString("es-CO")}
-                                  </span>
-                                  <ArrowRight
-                                    size={14}
-                                    className="text-neutral-600 transition-transform group-hover:translate-x-0.5 group-hover:text-violet-400"
-                                    aria-hidden="true"
-                                  />
-                                </div>
-                              </button>
-                            ))}
+                                  <div className="flex shrink-0 items-center gap-3">
+                                    <div className="flex items-center gap-1.5">
+                                      <span
+                                        className={`rounded px-1.5 py-0.5 text-[8px] font-black uppercase ${
+                                          prod.isActive
+                                            ? "bg-emerald-500/10 text-emerald-400"
+                                            : "bg-slate-500/10 text-slate-400"
+                                        }`}
+                                      >
+                                        {prod.isActive ? "Activo" : "Archivado"}
+                                      </span>
+                                      <span
+                                        className={`rounded px-1.5 py-0.5 text-[8px] font-black uppercase ${
+                                          prod.isSoldOut
+                                            ? "bg-red-500/10 text-red-400"
+                                            : "bg-sky-500/10 text-sky-400"
+                                        }`}
+                                      >
+                                        {prod.isSoldOut
+                                          ? "Agotado"
+                                          : "Disponible"}
+                                      </span>
+                                    </div>
+                                    <span className="rounded bg-black/30 px-2 py-0.5 text-[10px] font-mono font-bold text-white">
+                                      ${prod.price?.toLocaleString("es-CO")}
+                                    </span>
+                                    <ArrowRight
+                                      size={14}
+                                      className="text-neutral-600 transition-transform group-hover:translate-x-0.5 group-hover:text-violet-400"
+                                      aria-hidden="true"
+                                    />
+                                  </div>
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -649,6 +801,48 @@ const CategoriasAdmin = ({
                 </motion.div>
               );
             })}
+          </div>
+        )}
+
+        {isSelectionMode && (
+          <div className="fixed bottom-4 left-4 right-4 z-40 flex items-center gap-2 rounded-2xl border border-white/10 bg-neutral-950/95 p-3 shadow-2xl shadow-black/50 backdrop-blur-xl md:left-24 md:right-8">
+            <button
+              type="button"
+              onClick={handleToggleSelectAllVisible}
+              aria-pressed={allVisibleCategoriesSelected}
+              disabled={visibleCategories.length === 0}
+              className="min-w-0 flex-1 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-center text-[9px] font-black uppercase tracking-wide text-sky-300 transition-all active:scale-95 disabled:opacity-40"
+            >
+              {allVisibleCategoriesSelected
+                ? "Quitar selección"
+                : "Seleccionar todo"}
+            </button>
+            {selectedCategories.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setBulkDeleteConfirm(true)}
+                disabled={deletingSelectedCategories}
+                aria-label={`Eliminar ${selectedCategories.size} categorías seleccionadas`}
+                className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-center text-[9px] font-black uppercase tracking-wide text-red-300 transition-all active:scale-95 disabled:opacity-40"
+              >
+                <Trash2 size={12} />
+                Eliminar
+                <span className="rounded-md bg-red-400/15 px-1.5 py-0.5 text-[9px] font-mono normal-case text-red-200">
+                  {selectedCategories.size}
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setIsSelectionMode(false);
+                setSelectedCategories(new Set());
+              }}
+              className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-center text-[9px] font-black uppercase tracking-wide text-emerald-300 transition-all active:scale-95"
+            >
+              <Check size={12} />
+              Terminado
+            </button>
           </div>
         )}
 
@@ -932,6 +1126,81 @@ const CategoriasAdmin = ({
               </div>
             );
           })()}
+
+        {bulkDeleteConfirm && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+            <div
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="bulk-category-delete-title"
+              className="w-full max-w-lg rounded-2xl border border-red-500/25 bg-neutral-900 p-5 shadow-2xl sm:p-6"
+            >
+              <div className="mb-4 flex items-center gap-3 border-b border-white/10 pb-3">
+                <AlertTriangle className="shrink-0 text-red-300" size={22} />
+                <div>
+                  <h3
+                    id="bulk-category-delete-title"
+                    className="font-sans text-lg font-bold text-white"
+                  >
+                    Eliminar categorías seleccionadas
+                  </h3>
+                  <p className="mt-1 text-[9px] font-bold uppercase tracking-widest text-red-300">
+                    Acción permanente
+                  </p>
+                </div>
+              </div>
+              <p className="mb-4 text-sm leading-relaxed text-neutral-300">
+                Se eliminarán {selectedCategoryRecords.length} categoría
+                {selectedCategoryRecords.length === 1 ? "" : "s"} y{" "}
+                {selectedProductsCount} producto
+                {selectedProductsCount === 1 ? "" : "s"} asociado
+                {selectedProductsCount === 1 ? "" : "s"}. Esta acción no se
+                puede deshacer.
+              </p>
+              <div className="mb-5 max-h-40 space-y-1 overflow-y-auto rounded-xl border border-red-500/10 bg-black/30 p-3">
+                {selectedCategoryRecords.map((category) => {
+                  const productCount = products.filter(
+                    (product) => product.categoryId === category.id,
+                  ).length;
+                  return (
+                    <div
+                      key={category.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-red-500/10 bg-red-500/5 px-2 py-1.5 text-xs text-neutral-300"
+                    >
+                      <span className="truncate">{category.name}</span>
+                      <span className="shrink-0 text-[10px] text-red-300">
+                        {productCount} producto{productCount === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => setBulkDeleteConfirm(false)}
+                  disabled={deletingSelectedCategories}
+                  className="min-h-10 flex-1 rounded-xl border border-white/10 px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-neutral-300 transition-colors hover:bg-white/5 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBulkDeleteSelected}
+                  disabled={
+                    deletingSelectedCategories ||
+                    selectedCategoryRecords.length === 0
+                  }
+                  className="min-h-10 flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {deletingSelectedCategories
+                    ? "Eliminando..."
+                    : "Confirmar eliminación"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

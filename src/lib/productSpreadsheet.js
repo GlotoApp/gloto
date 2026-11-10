@@ -67,6 +67,7 @@ export const downloadProductTemplate = async ({
     "Stock",
     "Stock mínimo",
     "Activo",
+    "imagen_url",
   ];
   const optionHeaders = [
     "Producto *",
@@ -94,6 +95,7 @@ export const downloadProductTemplate = async ({
       Stock: product.stock ?? "",
       "Stock mínimo": product.minStock ?? "",
       Activo: product.isActive ? "Sí" : "No",
+      imagen_url: product.imageUrl || product.image_url || "",
     })),
     ...Array.from(
       { length: 30 },
@@ -155,8 +157,8 @@ export const downloadProductTemplate = async ({
     ["El Tope de precio limita el total solo cuando la regla es Sumar."],
     ["Las unidades tienen una lista desplegable con los datos actuales. Las categorías nuevas se crearán automáticamente al importar el Excel."],
     ["Stock es opcional. Se importará solo si el negocio tiene inventario habilitado."],
-    ["El Excel incluye los productos actuales con su ID para que puedas editarlos y actualizarlo al subirlo. Los productos sin ID coincidente se buscan por nombre y se actualizan."],
-    ["Las imágenes se agregan después desde el editor."],
+    ["El Excel incluye los productos actuales, sus imágenes y su ID para que puedas editarlos y actualizarlo al subirlo. Los productos sin ID coincidente se buscan por nombre y se actualizan."],
+    ["imagen_url acepta una URL pública de Supabase o una URL externa. Si la celda queda vacía, al importar se quitará la imagen actual del producto."],
     ["Ejemplo de Productos: Pizza | Pizza individual | 20000 | Pizzas | UNIDAD | 0 | 0 | Sí"],
     ["Ejemplo de Opciones: Pizza | Tamaño | Elige el tamaño | Sí | Una opción | 1 | 1 | Sumar | | Pequeña | 0 | |"],
     ["Ejemplo dependiente: Pizza | Sabores | Elige hasta dos sabores | Sí | Varias opciones | 1 | 2 | Más caro | | Pollo | 5000 | Tamaño | Pequeña"],
@@ -167,9 +169,9 @@ export const downloadProductTemplate = async ({
     header: productHeaders,
   });
   productSheet["!cols"] = productHeaders.map((header) => ({
-    wch: Math.max(16, Math.min(header.length + 4, 30)),
+    wch: header === "imagen_url" ? 48 : Math.max(16, Math.min(header.length + 4, 30)),
   }));
-  productSheet["!autofilter"] = { ref: `A1:I${productRows.length + 1}` };
+  productSheet["!autofilter"] = { ref: `A1:J${productRows.length + 1}` };
   productSheet["!freeze"] = { xSplit: 0, ySplit: 1 };
   const optionsSheet = XLSX.utils.json_to_sheet(optionRows, {
     header: optionHeaders,
@@ -317,10 +319,23 @@ export const parseProductWorkbook = async (
     if (!["si", "sí", "yes", "true", "1", "no", "false", "0"].includes(activeText)) {
       errors.push(`Hoja Productos, fila ${rowNumber}: "Activo" debe ser Sí o No.`);
     }
+    const imageUrl = text(row.imagen_url);
+    if (imageUrl) {
+      try {
+        const parsedImageUrl = new URL(imageUrl);
+        if (!["http:", "https:"].includes(parsedImageUrl.protocol)) {
+          throw new Error("Protocolo no válido");
+        }
+      } catch {
+        errors.push(`Hoja Productos, fila ${rowNumber}: "imagen_url" debe ser una URL válida que comience con http:// o https://.`);
+      }
+    }
     productsByName.set(normalized(name), {
       id: text(row["ID producto"]),
       name,
       description: text(row.Descripción),
+      imageUrl,
+      hasImageUrlColumn: Object.prototype.hasOwnProperty.call(row, "imagen_url"),
       price,
       category,
       categoryName,
