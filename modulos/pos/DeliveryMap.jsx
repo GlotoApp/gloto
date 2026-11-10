@@ -29,9 +29,11 @@ export default function DeliveryMap({
   const destinationMarker = useRef(null);
   const routeLayer = useRef(null);
   const originRef = useRef(origin);
+  const destinationRef = useRef(destination);
   const originLogoUrlRef = useRef(originLogoUrl);
   const [mapReady, setMapReady] = useState(false);
   originRef.current = origin;
+  destinationRef.current = destination;
   originLogoUrlRef.current = originLogoUrl;
 
   useEffect(() => {
@@ -47,14 +49,16 @@ export default function DeliveryMap({
         const L = leafletModule.default || leafletModule;
         leafletInstance.current = L;
         const currentOrigin = originRef.current;
-        const initialCenter = currentOrigin || DEFAULT_MAP_CENTER;
+        const currentDestination = destinationRef.current;
+        const initialCenter =
+          currentOrigin || currentDestination || DEFAULT_MAP_CENTER;
         const centerPosition = [
           Number(initialCenter.latitude),
           Number(initialCenter.longitude),
         ];
         map = L.map(mapElement.current, { zoomControl: true }).setView(
           centerPosition,
-          currentOrigin ? 14 : 6,
+          currentOrigin || currentDestination ? 14 : 6,
         );
 
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {

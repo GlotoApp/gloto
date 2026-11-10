@@ -1495,7 +1495,7 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                         >
                           <Minimize2 size={17} />
                         </button>
-                      ) : origin ? (
+                      ) : (
                         <button
                           type="button"
                           onClick={() => setIsMapFullscreen(true)}
@@ -1515,54 +1515,53 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                         >
                           <Maximize2 size={17} />
                         </button>
-                      ) : null}
+                      )}
                     </div>
                   </div>
-                  {origin ? (
-                    <div
-                      style={
-                        isMapFullscreen
-                          ? {
-                              position: "absolute",
-                              inset: 0,
-                            }
-                          : { position: "relative" }
-                      }
-                    >
-                      <DeliveryMap
-                        origin={origin}
-                        originLogoUrl={logoTienda}
-                        destination={destination}
-                        onDestinationChange={handleDestinationChange}
-                        onRouteChange={setDeliveryDistanceMeters}
-                        onRoutingChange={setIsCalculatingRoute}
-                        onRouteErrorChange={setRouteError}
-                        fullHeight={isMapFullscreen}
-                        showCoordinates={false}
-                      />
-                      {!isMapFullscreen && (
-                        <div
-                          role="region"
-                          aria-label="Resumen del domicilio"
-                          style={{
+                  <div
+                    style={
+                      isMapFullscreen
+                        ? {
                             position: "absolute",
-                            zIndex: 2,
-                            left: "10px",
-                            right: "10px",
-                            bottom: "10px",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "7px",
-                            border: "1px solid rgba(255,255,255,0.12)",
-                            borderRadius: "14px",
-                            background: "rgba(9,9,11,0.72)",
-                            backdropFilter: "blur(14px)",
-                            WebkitBackdropFilter: "blur(14px)",
-                            padding: "10px 12px",
-                            color: "#fff",
-                            boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-                          }}
-                        >
+                            inset: 0,
+                          }
+                        : { position: "relative" }
+                    }
+                  >
+                    <DeliveryMap
+                      origin={origin}
+                      originLogoUrl={logoTienda}
+                      destination={destination}
+                      onDestinationChange={handleDestinationChange}
+                      onRouteChange={setDeliveryDistanceMeters}
+                      onRoutingChange={setIsCalculatingRoute}
+                      onRouteErrorChange={setRouteError}
+                      fullHeight={isMapFullscreen}
+                      showCoordinates={false}
+                    />
+                    {!isMapFullscreen && (
+                      <div
+                        role="region"
+                        aria-label="Resumen del domicilio"
+                        style={{
+                          position: "absolute",
+                          zIndex: 2,
+                          left: "10px",
+                          right: "10px",
+                          bottom: "10px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "7px",
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          borderRadius: "14px",
+                          background: "rgba(9,9,11,0.72)",
+                          backdropFilter: "blur(14px)",
+                          WebkitBackdropFilter: "blur(14px)",
+                          padding: "10px 12px",
+                          color: "#fff",
+                          boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+                        }}
+                      >
                           <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", fontSize: "11px" }}>
                             <span style={{ color: "rgba(255,255,255,0.65)" }}>Domicilio base</span>
                             <strong>
@@ -1610,9 +1609,9 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                               )}
                             </strong>
                           </div>
-                        </div>
-                      )}
-                      <button
+                      </div>
+                    )}
+                    <button
                         type="button"
                         onClick={() => locateCustomer()}
                         disabled={isLocating || isResolvingAddress}
@@ -1659,24 +1658,8 @@ const Checkout = ({ onVolver, onConfirmar }) => {
                         ) : (
                           <LocateFixed size={19} />
                         )}
-                      </button>
-                    </div>
-                  ) : (
-                    <div
-                      role="alert"
-                      style={{
-                        border: "1px solid rgba(251,191,36,0.2)",
-                        borderRadius: "14px",
-                        background: "rgba(251,191,36,0.06)",
-                        padding: "14px 64px 62px 14px",
-                        color: "#fde68a",
-                        fontSize: "12px",
-                      }}
-                    >
-                      Esta tienda aún no configuró su ubicación en el mapa.
-                      Contacta al negocio para completar el pedido.
-                    </div>
-                  )}
+                    </button>
+                  </div>
                   {isMapFullscreen && (
                     <div
                       ref={fullscreenSummaryRef}
