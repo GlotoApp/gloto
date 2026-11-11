@@ -929,90 +929,102 @@ const Checkout = ({ onVolver, onConfirmar }) => {
         color: "#fff",
         zIndex: 200,
         display: "flex",
-        flexDirection: "column",
+        justifyContent: "center",
         fontFamily: "'Inter', system-ui, sans-serif",
       }}
     >
-      {/* Header */}
       <div
         style={{
+          width: "100%",
+          maxWidth: "1152px",
+          height: "100%",
+          minHeight: 0,
           display: "flex",
-          alignItems: "center",
-          gap: "12px",
-          padding: "11px 4px",
-          borderBottom: "1px solid #1a1a1a",
-          flexShrink: 0,
+          flexDirection: "column",
+          background: "#0a0a0a",
         }}
       >
-        <button
-          type="button"
-          onClick={onVolver}
-          style={{
-            width: "36px",
-            height: "36px",
-            borderRadius: "50%",
-            border: "none",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            flexShrink: 0,
-          }}
-          aria-label="Volver al carrito"
-        >
-          <ChevronLeft size={20} color="#fff" />
-        </button>
+        {/* Header */}
         <div
           style={{
-            width: "40px",
-            height: "40px",
-            borderRadius: "12px",
-            background: "#131313",
-            overflow: "hidden",
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
+            gap: "12px",
+            padding: "11px 4px",
+            borderBottom: "1px solid #1a1a1a",
             flexShrink: 0,
           }}
         >
-          {logoTienda ? (
-            <img
-              src={logoTienda}
-              alt={`Logo de ${nombreTienda}`}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              onError={(event) => {
-                event.currentTarget.onerror = null;
-                event.currentTarget.src = "/default.png";
-              }}
-            />
-          ) : (
-            <Store size={24} style={{ color: "rgba(255,255,255,0.3)" }} />
-          )}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h2 style={{ fontSize: "16px", fontWeight: 800, margin: 0 }}>
-            Entrega
-          </h2>
-          <p
+          <button
+            type="button"
+            onClick={onVolver}
             style={{
-              fontSize: "12px",
-              color: "rgba(255,255,255,0.45)",
-              margin: 0,
+              width: "36px",
+              height: "36px",
+              borderRadius: "50%",
+              border: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+            aria-label="Volver al carrito"
+          >
+            <ChevronLeft size={20} color="#fff" />
+          </button>
+          <div
+            style={{
+              width: "40px",
+              height: "40px",
+              borderRadius: "12px",
+              background: "#131313",
+              overflow: "hidden",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
             }}
           >
-            {nombreTienda}
-          </p>
+            {logoTienda ? (
+              <img
+                src={logoTienda}
+                alt={`Logo de ${nombreTienda}`}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                onError={(event) => {
+                  event.currentTarget.onerror = null;
+                  event.currentTarget.src = "/default.png";
+                }}
+              />
+            ) : (
+              <Store size={24} style={{ color: "rgba(255,255,255,0.3)" }} />
+            )}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h2 style={{ fontSize: "16px", fontWeight: 800, margin: 0 }}>
+              Entrega
+            </h2>
+            <p
+              style={{
+                fontSize: "12px",
+                color: "rgba(255,255,255,0.45)",
+                margin: 0,
+              }}
+            >
+              {nombreTienda}
+            </p>
+          </div>
         </div>
-      </div>
 
-      {/* Cuerpo scrolleable */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "20px 20px 40px",
-        }}
-      >
+        {/* Cuerpo scrolleable */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            padding: "20px 20px 40px",
+          }}
+        >
         <p style={labelStyle}>¿Cómo deseas recibir tu pedido?</p>
 
         <div
@@ -1810,17 +1822,17 @@ const Checkout = ({ onVolver, onConfirmar }) => {
             )}
           </>
         )}
-      </div>
+        </div>
 
-      {/* Footer */}
-      <div
-        style={{
-          padding: "16px 20px",
-          paddingBottom: "calc(16px + env(safe-area-inset-bottom))",
-          borderTop: "1px solid #1a1a1a",
-          flexShrink: 0,
-        }}
-      >
+        {/* Footer */}
+        <div
+          style={{
+            padding: "16px 20px",
+            paddingBottom: "calc(16px + env(safe-area-inset-bottom))",
+            borderTop: "1px solid #1a1a1a",
+            flexShrink: 0,
+          }}
+        >
         {orderErrorMessage && (
           <p
             role="alert"
@@ -1893,6 +1905,7 @@ const Checkout = ({ onVolver, onConfirmar }) => {
             `Confirmar pedido · ${fmt(checkoutTotal)}`
           )}
         </button>
+        </div>
       </div>
     </div>,
     document.body,

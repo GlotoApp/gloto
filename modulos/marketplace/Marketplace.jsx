@@ -1,4 +1,10 @@
-import React, { useState } from "react";
+import React, {
+  lazy,
+  Suspense,
+  useCallback,
+  useLayoutEffect,
+  useState,
+} from "react";
 import {
   Routes,
   Route,
@@ -19,12 +25,14 @@ import {
   X,
 } from "lucide-react";
 
-import Home from "./pages/Home";
-import Shop from "./pages/Shop";
-import SeguimientoPedido from "./pages/SeguimientoPedido";
 import { CartProvider } from "./pages/CartContext";
+import MarketplaceLoading from "./pages/MarketplaceLoading";
 import TerminosCondiciones from "./pages/TerminosCondiciones";
 import PoliticaPrivacidad from "./pages/PoliticaPrivacidad";
+
+const Home = lazy(() => import("./pages/Home"));
+const Shop = lazy(() => import("./pages/Shop"));
+const SeguimientoPedido = lazy(() => import("./pages/SeguimientoPedido"));
 
 const LOCATION_STORAGE_KEY = "gloto_marketplace_location";
 const LOCATION_PROMPT_KEY = "gloto_marketplace_location_prompt";
@@ -101,6 +109,21 @@ const Marketplace = () => {
   const isHomePage =
     location.pathname === "/marketplace" ||
     location.pathname === "/marketplace/";
+  const [homeContentReady, setHomeContentReady] = useState(false);
+  const [showHomeLoader, setShowHomeLoader] = useState(isHomePage);
+
+  useLayoutEffect(() => {
+    setHomeContentReady(false);
+    setShowHomeLoader(isHomePage);
+  }, [isHomePage, location.pathname]);
+
+  const markHomeContentReady = useCallback(() => {
+    setHomeContentReady(true);
+  }, []);
+  const finishHomeLoading = useCallback(() => {
+    setShowHomeLoader(false);
+  }, []);
+
   const [userLocation, setUserLocation] = useState(readSavedLocation);
   const [locationDialogOpen, setLocationDialogOpen] = useState(() => {
     try {
@@ -180,7 +203,7 @@ const Marketplace = () => {
   return (
     <div className="min-h-screen bg-background text-on-surface">
       {/* HEADER */}
-      {!isShopPage && (
+      {!isShopPage && (!isHomePage || !showHomeLoader) && (
         <header className="sticky top-0 z-50 bg-background">
           <div className="px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -247,13 +270,31 @@ const Marketplace = () => {
       {/* CONTENIDO */}
       <main className="view-animate">
         <CartProvider>
-          <Routes>
-            <Route path="/" element={<Home userLocation={userLocation} />} />
-            <Route path="/tienda/:slug" element={<Shop />} />
-            <Route path="/seguimiento" element={<SeguimientoPedido />} />
-          </Routes>
+          <Suspense
+            fallback={isHomePage ? null : <MarketplaceLoading />}
+          >
+            <Routes>
+              <Route
+                path="/"
+                element={
+                  <Home
+                    userLocation={userLocation}
+                    onInitialLoadComplete={markHomeContentReady}
+                  />
+                }
+              />
+              <Route path="/tienda/:slug" element={<Shop />} />
+              <Route path="/seguimiento" element={<SeguimientoPedido />} />
+            </Routes>
+          </Suspense>
         </CartProvider>
       </main>
+      {isHomePage && showHomeLoader && (
+        <MarketplaceLoading
+          ready={homeContentReady}
+          onComplete={finishHomeLoading}
+        />
+      )}
 
       {menuOpen && (
         <div className="fixed inset-0 z-[90]" role="presentation">

@@ -111,49 +111,60 @@ const Carrito = ({ onIrAPagar, tiendaAbierta = true }) => {
         color: "#fff",
         zIndex: 200,
         display: "flex",
-        flexDirection: "column",
+        justifyContent: "center",
         fontFamily: "'Inter', system-ui, sans-serif",
       }}
     >
-      {/* Header */}
       <div
         style={{
+          width: "100%",
+          maxWidth: "1152px",
+          height: "100%",
+          minHeight: 0,
           display: "flex",
-          alignItems: "center",
-          gap: "12px",
-          padding: "11px 4px",
-          borderBottom: "1px solid #1a1a1a",
-          flexShrink: 0,
+          flexDirection: "column",
+          background: "#0a0a0a",
         }}
       >
-        <button
-          type="button"
-          onClick={cerrarCarrito}
-          style={{
-            width: "36px",
-            height: "36px",
-            borderRadius: "50%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            flexShrink: 0,
-          }}
-          aria-label="Volver a la tienda"
-        >
-          <ChevronLeft size={20} color="#fff" />
-        </button>
+        {/* Header */}
         <div
           style={{
-            width: "40px",
-            height: "40px",
-            borderRadius: "12px",
-            overflow: "hidden",
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
+            gap: "12px",
+            padding: "11px 4px",
+            borderBottom: "1px solid #1a1a1a",
+            flexShrink: 0,
           }}
         >
+          <button
+            type="button"
+            onClick={cerrarCarrito}
+            style={{
+              width: "36px",
+              height: "36px",
+              borderRadius: "50%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+            aria-label="Volver a la tienda"
+          >
+            <ChevronLeft size={20} color="#fff" />
+          </button>
+          <div
+            style={{
+              width: "40px",
+              height: "40px",
+              borderRadius: "12px",
+              overflow: "hidden",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
           {/* La lógica con onError para manejar errores de carga */}
           {logoTienda && !imageError ? (
             <img
@@ -165,45 +176,45 @@ const Carrito = ({ onIrAPagar, tiendaAbierta = true }) => {
           ) : (
             <Store size={24} style={{ color: "rgba(255,255,255,0.3)" }} />
           )}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h2 style={{ fontSize: "16px", fontWeight: 800, margin: 0 }}>
-            Resumen
-          </h2>
-          <p
-            style={{
-              fontSize: "12px",
-              color: "rgba(255,255,255,0.45)",
-              margin: 0,
-            }}
-          >
-            {nombreTienda}
-          </p>
-        </div>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h2 style={{ fontSize: "16px", fontWeight: 800, margin: 0 }}>
+              Resumen
+            </h2>
+            <p
+              style={{
+                fontSize: "12px",
+                color: "rgba(255,255,255,0.45)",
+                margin: 0,
+              }}
+            >
+              {nombreTienda}
+            </p>
+          </div>
 
-        {items.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setConfirmVaciarOpen(true)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              borderRadius: "100px",
-              padding: "8px 12px",
-              color: "rgba(255,255,255,0.7)",
-              fontSize: "12px",
-              fontWeight: 700,
-              cursor: "pointer",
-              flexShrink: 0,
-            }}
-            aria-label="Vaciar carrito"
-          >
-            <Trash2 size={14} />
-            Vaciar
-          </button>
-        )}
-      </div>
+          {items.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirmVaciarOpen(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                borderRadius: "100px",
+                padding: "8px 12px",
+                color: "rgba(255,255,255,0.7)",
+                fontSize: "12px",
+                fontWeight: 700,
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+              aria-label="Vaciar carrito"
+            >
+              <Trash2 size={14} />
+              Vaciar
+            </button>
+          )}
+        </div>
 
       {/* Cuerpo scrolleable */}
       <div style={{ flex: 1, overflowY: "auto" }}>
@@ -902,6 +913,7 @@ const Carrito = ({ onIrAPagar, tiendaAbierta = true }) => {
           </button>
         </div>
       )}
+      </div>
 
       {/* Confirmar vaciar carrito */}
       {confirmVaciarOpen &&

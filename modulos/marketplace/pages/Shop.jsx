@@ -1,5 +1,5 @@
 // Shop.jsx
-import React, { useEffect, useRef, useState } from "react";
+import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -16,10 +16,10 @@ import { QRCodeCanvas } from "qrcode.react";
 import { supabase, resolveImageUrl } from "../../../src/lib/supabaseClient";
 import { buildProductOptionGroups } from "../../../src/lib/productOptions";
 import { useCart } from "./CartContext";
-import Carrito from "./Carrito";
-import Checkout from "./Checkout";
-import ProductoDetalle from "./ProductoDetalle";
-import SeguimientoPedido from "./SeguimientoPedido";
+
+const Carrito = lazy(() => import("./Carrito"));
+const Checkout = lazy(() => import("./Checkout"));
+const ProductoDetalle = lazy(() => import("./ProductoDetalle"));
 
 const TIENDA_INFO = {
   nombre: "",
@@ -373,6 +373,7 @@ const Shop = () => {
   const [tiendaConProductosModal, setTiendaConProductosModal] = useState("");
   const searchInputRef = useRef(null);
   const filtrosRef = useRef(null);
+  const listaProductosRef = useRef(null);
 
   useEffect(() => {
     if (isLoadingProductos) return undefined;
@@ -931,26 +932,20 @@ const Shop = () => {
     };
   }, [shopBusinessId, shopInventoryEnabled]);
 
-  // Lleva la vista al punto exacto donde la barra de filtros queda fija
-  // arriba, mostrando el primer producto del filtro justo debajo.
-  // Usamos offsetTop (no scrollIntoView) porque, al ser "sticky", el
-  // navegador cree que ya está visible y no mueve el scroll real.
+  // Coloca el inicio de la lista justo debajo de la barra sticky.
   const scrollASuave = () => {
-    const el = filtrosRef.current;
-    if (!el) return;
-    window.scrollTo({ top: el.offsetTop, behavior: "smooth" });
+    const lista = listaProductosRef.current;
+    if (!lista) return;
+
+    const filtrosHeight = filtrosRef.current?.offsetHeight || 0;
+    const top = window.scrollY + lista.getBoundingClientRect().top;
+    window.scrollTo({
+      top: Math.max(0, top - filtrosHeight),
+      behavior: "smooth",
+    });
   };
 
-  // Importante: el scroll se dispara en un useEffect (DESPUÉS de que React
-  // ya actualizó el DOM con la nueva categoría), no dentro del onClick.
-  // Si se dispara antes, el cambio de tamaño de la lista activa el
-  // "scroll anchoring" del navegador, que pelea con nuestra animación y
-  // deja al usuario viendo el espacio vacío del filtro anterior.
-  //
-  // Usamos un contador (filtroTick) en vez de depender de "catActiva"
-  // directamente: así el scroll se ejecuta en TODOS los clics, incluso si
-  // el usuario toca dos veces la misma categoría (catActiva no cambiaría
-  // de valor, pero igual queremos resetear la vista al primer producto).
+  // Se ejecuta después del render para medir la posición de la lista filtrada.
   const [filtroTick, setFiltroTick] = useState(0);
   useEffect(() => {
     if (filtroTick === 0) return; // evita el scroll al cargar la página
@@ -1076,6 +1071,13 @@ const Shop = () => {
           },
         ].filter((group) => group.products.length > 0)
       : [{ name: null, products: displayedProducts }];
+  const priorityProducts = displayedProductGroups
+    .flatMap((group) => group.products)
+    .filter((product) => product.image)
+    .slice(0, 3);
+  const priorityProductIds = new Set(
+    priorityProducts.map((product) => product.id),
+  );
 
   const obtenerCantidadProducto = (producto) => {
     const baseCantidad = carrito[producto.id] || 0;
@@ -1228,6 +1230,8 @@ const Shop = () => {
       <div
         style={{
           background: "#0a0a0a",
+          maxWidth: "1152px",
+          margin: "0 auto",
           minHeight: "100vh",
           color: "#fff",
           paddingBottom: "calc(88px + env(safe-area-inset-bottom))",
@@ -1383,7 +1387,11 @@ const Shop = () => {
               </div>
             ) : (
               <>
-                <div
+                <button
+                  type="button"
+                  onClick={() => navigate("/marketplace")}
+                  aria-label="Explorar más"
+                  title="Explorar más"
                   className="marketplace-explore-shell"
                   style={{
                     display: "flex",
@@ -1391,6 +1399,7 @@ const Shop = () => {
                     width: marketplaceHintVisible ? "140px" : "40px",
                     height: "40px",
                     padding: "2px",
+                    border: "none",
                     overflow: "hidden",
                     borderRadius: "22px",
                     background: marketplaceHintVisible
@@ -1404,11 +1413,11 @@ const Shop = () => {
                     animation: marketplaceHintVisible
                       ? "marketplaceHintIn 500ms cubic-bezier(0.22,1,0.36,1) both"
                       : "none",
+                    cursor: "pointer",
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => navigate("/marketplace")}
+                  <span
+                    aria-hidden="true"
                     style={{
                       width: "36px",
                       height: "36px",
@@ -1417,22 +1426,19 @@ const Shop = () => {
                       position: "relative",
                       zIndex: 1,
                       background: "transparent",
-                      border: "none",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      cursor: "pointer",
                       transition: "transform 250ms ease",
                     }}
                     className="marketplace-explore-button"
-                    aria-label="Explorar más"
-                    title="Explorar más"
                   >
                     <Store size={18} color="#fff" />
-                  </button>
-                  <div
+                  </span>
+                  <span
                     aria-hidden={!marketplaceHintVisible}
                     style={{
+                      display: "block",
                       width: marketplaceHintVisible ? "100px" : "0",
                       flex: `0 0 ${marketplaceHintVisible ? "100px" : "0px"}`,
                       padding: marketplaceHintVisible ? "0 10px" : "0",
@@ -1455,8 +1461,8 @@ const Shop = () => {
                     className="marketplace-explore-label"
                   >
                     Explorar más
-                  </div>
-                </div>
+                  </span>
+                </button>
                 <div style={{ display: "flex", gap: "10px" }}>
                   <button
                     type="button"
@@ -1871,6 +1877,7 @@ const Shop = () => {
             filtros llegue arriba (no hay a dónde "scrollear"). */}
         <div
           key={catActiva}
+          ref={listaProductosRef}
           style={{
             padding: "8px 0",
             minHeight: "100vh",
@@ -2062,7 +2069,7 @@ const Shop = () => {
                               fontSize: "12px",
                               color: "rgba(255,255,255,0.4)",
                               lineHeight: 1.55,
-                              marginBottom: "12px",
+                              marginBottom: "6px",
                             }}
                           >
                             {p.desc}
@@ -2139,6 +2146,17 @@ const Shop = () => {
                               <img
                                 src={p.image}
                                 alt={p.nombre}
+                                loading={
+                                  priorityProductIds.has(p.id)
+                                    ? "eager"
+                                    : "lazy"
+                                }
+                                fetchPriority={
+                                  p.id === priorityProducts[0]?.id
+                                    ? "high"
+                                    : "auto"
+                                }
+                                decoding="async"
                                 onError={(event) => {
                                   event.currentTarget.onerror = null;
                                   event.currentTarget.src = "/default.png";
@@ -2253,7 +2271,7 @@ const Shop = () => {
               inset: 0,
               background: "rgba(0,0,0,0.7)",
               backdropFilter: "blur(6px)",
-              zIndex: 100,
+              zIndex: 1000,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -2495,79 +2513,85 @@ const Shop = () => {
 
       {/* ── CARRITO (pantalla completa) ── */}
       {cartOpen && (
-        <Carrito
-          tiendaAbierta={tiendaData.isOpen}
-          onIrAPagar={() => {
-            if (!tiendaData.isOpen) return;
-            cerrarCarrito();
-            setCheckoutOpen(true);
-          }}
-        />
+        <Suspense fallback={<div role="status">Cargando carrito...</div>}>
+          <Carrito
+            tiendaAbierta={tiendaData.isOpen}
+            onIrAPagar={() => {
+              if (!tiendaData.isOpen) return;
+              cerrarCarrito();
+              setCheckoutOpen(true);
+            }}
+          />
+        </Suspense>
       )}
 
       {/* ── CHECKOUT / MÉTODO DE ENTREGA (pantalla completa) ── */}
       {checkoutOpen && (
-        <Checkout
-          onVolver={() => {
-            setCheckoutOpen(false);
-            abrirCarrito();
-          }}
-          onConfirmar={async (deliveryFee) => {
-            if (!tiendaData.isOpen) {
+        <Suspense fallback={<div role="status">Cargando pago...</div>}>
+          <Checkout
+            onVolver={() => {
               setCheckoutOpen(false);
               abrirCarrito();
-              setShareMessage(
-                "Esta tienda está cerrada. No es posible hacer pedidos ahora.",
-              );
-              window.setTimeout(() => setShareMessage(""), 3500);
-              return;
-            }
-            try {
-              const pedido = await crearPedido({ deliveryFee });
-              setCheckoutOpen(false);
-              if (pedido) {
-                navigate(
-                  `/marketplace/seguimiento?order=${encodeURIComponent(
-                    pedido.numero,
-                  )}&token=${encodeURIComponent(pedido.trackingToken)}`,
+            }}
+            onConfirmar={async (deliveryFee) => {
+              if (!tiendaData.isOpen) {
+                setCheckoutOpen(false);
+                abrirCarrito();
+                setShareMessage(
+                  "Esta tienda está cerrada. No es posible hacer pedidos ahora.",
+                );
+                window.setTimeout(() => setShareMessage(""), 3500);
+                return;
+              }
+              try {
+                const pedido = await crearPedido({ deliveryFee });
+                setCheckoutOpen(false);
+                if (pedido) {
+                  navigate(
+                    `/marketplace/seguimiento?order=${encodeURIComponent(
+                      pedido.numero,
+                    )}&token=${encodeURIComponent(pedido.trackingToken)}`,
+                  );
+                }
+              } catch (error) {
+                console.error("No se pudo confirmar el pedido:", error);
+                if (error?.code === "PRICE_CHANGED") throw error;
+                throw new Error(
+                  "No pudimos completar tu pedido. Inténtalo de nuevo en unos momentos.",
+                  { cause: error },
                 );
               }
-            } catch (error) {
-              console.error("No se pudo confirmar el pedido:", error);
-              if (error?.code === "PRICE_CHANGED") throw error;
-              throw new Error(
-                "No pudimos completar tu pedido. Inténtalo de nuevo en unos momentos.",
-                { cause: error },
-              );
-            }
-          }}
-        />
+            }}
+          />
+        </Suspense>
       )}
 
       {/* ── DETALLE DE PRODUCTO (imagen grande, variantes, indicaciones) ── */}
       {productoDetalle && (
-        <ProductoDetalle
-          producto={productoDetalle}
-          onClose={() => setProductoDetalle(null)}
-          onAgregarIntento={() => {
-            if (!tiendaData.isOpen) {
-              setShareMessage(
-                "Esta tienda está cerrada. No es posible hacer pedidos ahora.",
-              );
-              window.setTimeout(() => setShareMessage(""), 3500);
-              return false;
-            }
-            if (mostrarModalCambioTienda(slug)) {
-              return false;
-            }
-            return true;
-          }}
-          tiendaAbierta={tiendaData.isOpen}
-          tiendaNombre={tiendaData?.nombre}
-          tiendaLogo={tiendaData?.logo}
-          tiendaSlug={slug}
-          onAddedToCart={animarProductoAlCarrito}
-        />
+        <Suspense fallback={<div role="status">Cargando producto...</div>}>
+          <ProductoDetalle
+            producto={productoDetalle}
+            onClose={() => setProductoDetalle(null)}
+            onAgregarIntento={() => {
+              if (!tiendaData.isOpen) {
+                setShareMessage(
+                  "Esta tienda está cerrada. No es posible hacer pedidos ahora.",
+                );
+                window.setTimeout(() => setShareMessage(""), 3500);
+                return false;
+              }
+              if (mostrarModalCambioTienda(slug)) {
+                return false;
+              }
+              return true;
+            }}
+            tiendaAbierta={tiendaData.isOpen}
+            tiendaNombre={tiendaData?.nombre}
+            tiendaLogo={tiendaData?.logo}
+            tiendaSlug={slug}
+            onAddedToCart={animarProductoAlCarrito}
+          />
+        </Suspense>
       )}
 
       {cartDropProduct && (
@@ -2587,7 +2611,7 @@ const Shop = () => {
               bottom: "96px",
               left: "50%",
               transform: "translateX(-50%)",
-              zIndex: 60,
+              zIndex: 1100,
               padding: "10px 20px",
               borderRadius: "100px",
               background: "#222",

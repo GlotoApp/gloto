@@ -23,8 +23,9 @@ import {
   Hamburger,
   ClockFading,
   Star,
-  LoaderCircle,
   MapPin,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import {
   resolveCategoryIconUrl,
@@ -67,12 +68,6 @@ const FILTROS = [
   "Con promociones",
 ];
 const TIENDAS_POR_TANDA = 24;
-
-const SkeletonBlock = ({ className = "", rounded = "rounded-2xl" }) => (
-  <div
-    className={`animate-pulse bg-surface/20 border border-outline/20 ${rounded} ${className}`}
-  />
-);
 
 const formatHourLabel = (value) => {
   if (!value) return "";
@@ -163,11 +158,12 @@ const getBusinessHoursStatus = (rows, now) => {
   };
 };
 
-const Home = ({ userLocation }) => {
+const Home = ({ userLocation, onInitialLoadComplete }) => {
   const navigate = useNavigate();
 
   const [busqueda, setBusqueda] = useState("");
   const [filtroActivo, setFiltroActivo] = useState("Todas");
+  const [vistaTiendas, setVistaTiendas] = useState("cuadricula");
   const [categoriaActiva, setCategoriaActiva] = useState(null);
   const [textoIndex, setTextoIndex] = useState(0);
   const [animando, setAnimando] = useState(true);
@@ -183,6 +179,10 @@ const Home = ({ userLocation }) => {
   const [horaActual, setHoraActual] = useState(() => new Date());
   const portadasAlternativasSolicitadas = useRef(new Set());
   const frasesLoop = [...frasesInicio, ...frasesInicio];
+
+  useEffect(() => {
+    if (!cargando) onInitialLoadComplete?.();
+  }, [cargando, onInitialLoadComplete]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setHoraActual(new Date()), 60_000);
@@ -708,104 +708,7 @@ const Home = ({ userLocation }) => {
     setCategoriaActiva((prev) => (prev === idCategoria ? null : idCategoria));
   };
 
-  const renderLoadingState = () => (
-    <>
-      <div
-        aria-hidden="true"
-        className="max-w-6xl mx-auto min-h-screen bg-background px-4 pt-4 pb-8"
-      >
-        <section className="mb-6 space-y-4">
-          <SkeletonBlock className="h-4 w-28" />
-          <SkeletonBlock className="h-14 w-full rounded-3xl" />
-          <div className="flex items-center gap-3">
-            <SkeletonBlock className="h-10 w-full rounded-3xl" />
-            <SkeletonBlock className="h-10 w-10 rounded-full" />
-          </div>
-        </section>
-
-        <section className="mb-5">
-          <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
-            {Array.from({ length: 8 }).map((_, idx) => (
-              <div
-                key={`cat-skeleton-${idx}`}
-                className="flex-shrink-0 flex flex-col items-center gap-2"
-              >
-                <SkeletonBlock className="h-14 w-14" rounded="rounded-2xl" />
-                <SkeletonBlock className="h-3 w-10" />
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mb-5">
-          <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
-            {Array.from({ length: 3 }).map((_, idx) => (
-              <div
-                key={`promo-skeleton-${idx}`}
-                className="w-[140px] sm:w-[160px] md:w-[190px]"
-              >
-                <SkeletonBlock className="h-24 w-full rounded-3xl" />
-              </div>
-            ))}
-            <div className="flex-shrink-0 w-[110px] sm:w-[120px]">
-              <SkeletonBlock className="h-24 w-full rounded-3xl" />
-            </div>
-          </div>
-        </section>
-
-        <section className="sticky top-0 z-10 mb-5 bg-background pt-4">
-          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-            {Array.from({ length: 5 }).map((_, idx) => (
-              <SkeletonBlock
-                key={`filter-skeleton-${idx}`}
-                className="h-8 w-20 rounded-full"
-              />
-            ))}
-          </div>
-        </section>
-
-        <section>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 8 }).map((_, idx) => (
-              <div
-                key={`tienda-skeleton-${idx}`}
-                className="flex flex-col rounded-3xl bg-transparent p-3"
-              >
-                <SkeletonBlock className="h-24 w-full mb-3 rounded-3xl" />
-                <SkeletonBlock className="h-3.5 w-3/4 mb-2 rounded-full" />
-                <SkeletonBlock className="h-2.5 w-1/2 mb-3 rounded-full" />
-                <SkeletonBlock className="h-2.5 w-full rounded-full" />
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      <div
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 px-5 backdrop-blur-md"
-        role="status"
-        aria-live="polite"
-      >
-        <div className="flex max-w-sm flex-col items-center text-center">
-          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-primary/10 text-primary shadow-lg shadow-primary/10">
-            <LoaderCircle
-              size={34}
-              strokeWidth={2.5}
-              className="animate-spin"
-            />
-          </div>
-          <p className="text-lg font-black tracking-tight text-on-surface sm:text-xl">
-            Gloto está buscando algo bueno para ti
-          </p>
-          <p className="mt-2 text-sm text-on-surface-variant">
-            Estamos preparando las mejores opciones cerca de ti...
-          </p>
-        </div>
-      </div>
-    </>
-  );
-
-  if (cargando) return renderLoadingState();
+  if (cargando) return null;
 
   return (
     <div className="max-w-6xl mx-auto bg-background min-h-screen">
@@ -842,7 +745,7 @@ const Home = ({ userLocation }) => {
 
         {/* BUSCADOR SIEMPRE VISIBLE */}
         {!verTodasPromos && !modoCategoria && (
-          <div className="flex h-12 items-center rounded-2xl border border-white/5 bg-surface/80 px-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)] sm:h-12 sm:rounded-3xl sm:px-4">
+          <div className="flex h-12 items-center rounded-3xl border border-white/5 bg-surface/80 px-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)] sm:h-12 sm:rounded-full sm:px-4">
             <Search size={18} className="opacity-60" />
 
             <input
@@ -1089,16 +992,45 @@ const Home = ({ userLocation }) => {
 
       {!verTodasPromos && (
         <section className="px-5">
-          {userLocation && (
-            <div className="mb-3">
-              <h2 className="text-base font-black text-on-surface">
-                Tiendas cerca de ti
-              </h2>
-              <p className="mt-0.5 text-[11px] text-on-surface-variant">
-                {filtroActivo === "Todas"
-                  ? "Las más cercanas aparecen primero."
-                  : `Negocios en ${userLocation.city}.`}
-              </p>
+          {!buscando && tiendasOrdenadas.length > 0 && (
+            <div className="mb-3 flex items-center justify-between gap-3">
+              {userLocation && (
+                <div>
+                  <h2 className="text-base font-black text-on-surface">
+                    Tiendas cerca de ti
+                  </h2>
+                  <p className="mt-0.5 text-[11px] text-on-surface-variant">
+                    {filtroActivo === "Todas"
+                      ? "Las más cercanas aparecen primero."
+                      : `Negocios en ${userLocation.city}.`}
+                  </p>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  setVistaTiendas((vista) =>
+                    vista === "lista" ? "cuadricula" : "lista",
+                  )
+                }
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-surface text-on-surface-variant transition hover:bg-surface/80"
+                aria-label={
+                  vistaTiendas === "lista"
+                    ? "Mostrar tiendas en cuadrícula"
+                    : "Mostrar tiendas en una fila"
+                }
+                title={
+                  vistaTiendas === "lista"
+                    ? "Vista en cuadrícula"
+                    : "Vista en una fila"
+                }
+              >
+                {vistaTiendas === "lista" ? (
+                  <LayoutGrid size={16} aria-hidden="true" />
+                ) : (
+                  <List size={16} aria-hidden="true" />
+                )}
+              </button>
             </div>
           )}
           {tiendasOrdenadas.length === 0 ? (
@@ -1252,15 +1184,31 @@ const Home = ({ userLocation }) => {
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 pb-8 sm:grid-cols-2 lg:grid-cols-3">
+            <div
+              className={
+                vistaTiendas === "cuadricula"
+                  ? "grid grid-cols-2 gap-3 pb-8 sm:gap-4"
+                  : "flex flex-col gap-3 pb-8"
+              }
+            >
               {tiendasVisibles.map((t) => (
                 <Link
                   key={t.slug}
                   to={`/marketplace/tienda/${t.slug}`}
-                  className="group relative flex flex-row items-center gap-3 rounded-3xl bg-surface p-2.5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_10px_30px_rgba(0,0,0,0.18)] sm:flex-col sm:items-stretch sm:gap-0 sm:p-3"
+                  className={`group relative rounded-3xl bg-surface transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_10px_30px_rgba(0,0,0,0.18)] ${
+                    vistaTiendas === "cuadricula"
+                      ? "flex flex-col gap-2 p-2 sm:gap-0 sm:p-3"
+                      : "flex flex-row items-center gap-3 p-2.5"
+                  }`}
                 >
                   {/* Contenedor de portada con logo superpuesto */}
-                  <div className="relative h-24 w-28 flex-shrink-0 overflow-hidden rounded-2xl border border-outline/10 bg-background sm:mb-3 sm:h-28 sm:w-full">
+                  <div
+                    className={`relative flex-shrink-0 overflow-hidden rounded-2xl border border-outline/10 bg-background ${
+                      vistaTiendas === "cuadricula"
+                        ? "mb-1 h-24 w-full sm:mb-3 sm:h-28"
+                        : "h-20 w-24 sm:h-24 sm:w-28"
+                    }`}
+                  >
                     <img
                       src={t.cover || t.logo}
                       alt={t.nombre}

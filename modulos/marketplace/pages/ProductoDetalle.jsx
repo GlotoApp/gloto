@@ -74,7 +74,7 @@ const ProductoDetalle = ({
   const [selecciones, setSelecciones] = useState({});
   const [varianteId, setVarianteId] = useState(null);
   const [notas, setNotas] = useState("");
-  const [cantidad, setCantidad] = useState(1);
+  const [cantidad, setCantidad] = useState("1");
   const [cantidadMedida, setCantidadMedida] = useState("1");
 
   useEffect(() => {
@@ -237,7 +237,7 @@ const ProductoDetalle = ({
       }
 
       setNotas("");
-      setCantidad(1);
+      setCantidad("1");
       setCantidadMedida("1");
       setVarianteId(null);
     };
@@ -296,7 +296,7 @@ const ProductoDetalle = ({
   const admiteFracciones = unidadVenta.allows_fraction === true;
   const cantidadIngresada = admiteFracciones
     ? Number(String(cantidadMedida).replace(",", "."))
-    : cantidad;
+    : Number(cantidad);
   const cantidadAgregada = Number.isFinite(cantidadIngresada)
     ? cantidadIngresada
     : 0;
@@ -579,19 +579,31 @@ const ProductoDetalle = ({
         color: "#fff",
         zIndex: 250,
         display: "flex",
-        flexDirection: "column",
+        justifyContent: "center",
         fontFamily: "'Inter', system-ui, sans-serif",
       }}
     >
       <div
         style={{
-          flex: 1,
-          overflowY: "auto",
-          overscrollBehaviorY: "contain",
+          width: "100%",
+          maxWidth: "1152px",
+          height: "100%",
+          minHeight: 0,
           display: "flex",
           flexDirection: "column",
+          background: "#0a0a0a",
         }}
       >
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            overscrollBehaviorY: "contain",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
         {/* Imagen / emoji grande */}
         <div
           style={{
@@ -1047,7 +1059,7 @@ const ProductoDetalle = ({
             />
           </div>
         </div>
-      </div>
+        </div>
 
       {/* Footer: cantidad + agregar */}
       <div
@@ -1103,6 +1115,7 @@ const ProductoDetalle = ({
                   background: "#131313",
                   color: "#fff",
                   padding: "9px",
+                  fontSize: "16px",
                 }}
               />
             </label>
@@ -1110,7 +1123,11 @@ const ProductoDetalle = ({
             <>
               <button
                 type="button"
-                onClick={() => setCantidad((c) => Math.max(1, c - 1))}
+                onClick={() =>
+                  setCantidad((current) =>
+                    String(Math.max(1, Number(current) - 1)),
+                  )
+                }
                 style={{
                   background: "none",
                   border: "none",
@@ -1122,20 +1139,46 @@ const ProductoDetalle = ({
               >
                 <Minus size={16} />
               </button>
-              <span
-                style={{
-                  fontSize: "14px",
-                  fontWeight: 800,
-                  minWidth: "16px",
-                  textAlign: "center",
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={cantidad}
+                onChange={(event) => {
+                  if (/^\d*$/.test(event.target.value)) {
+                    setCantidad(event.target.value);
+                  }
                 }}
-              >
-                {cantidad}
-              </span>
+                onBlur={() => {
+                  const parsed = Number(cantidad);
+                  if (!Number.isInteger(parsed) || parsed < 1) {
+                    setCantidad("1");
+                  } else if (restanteParaAgregar > 0) {
+                    setCantidad(String(Math.min(parsed, restanteParaAgregar)));
+                  }
+                }}
+                aria-label="Cantidad"
+                style={{
+                  width: "48px",
+                  border: "none",
+                  background: "transparent",
+                  color: "#fff",
+                  fontSize: "16px",
+                  fontWeight: 800,
+                  textAlign: "center",
+                  outline: "none",
+                }}
+              />
               <button
                 type="button"
                 onClick={() =>
-                  setCantidad((c) => (c < restanteParaAgregar ? c + 1 : c))
+                  setCantidad((current) =>
+                    String(
+                      Number(current) < restanteParaAgregar
+                        ? Number(current) + 1
+                        : Number(current),
+                    ),
+                  )
                 }
                 disabled={alcanzoStock}
                 style={{
@@ -1192,6 +1235,7 @@ const ProductoDetalle = ({
                   ? "Selecciona una opción"
                   : `Agregar · ${fmt(precioTotal)}`}
         </button>
+      </div>
       </div>
     </div>,
     document.body,
