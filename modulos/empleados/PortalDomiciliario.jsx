@@ -3,7 +3,6 @@ import {
   Activity,
   Bike,
   Check,
-  ChevronLeft,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -11,20 +10,27 @@ import {
   Clock3,
   Eye,
   EyeOff,
+  Globe2,
   History,
   Info,
   LoaderCircle,
   LocateFixed,
+  Maximize2,
   MessageCircle,
   MapPin,
   MapPinned,
+  Menu,
+  Minimize2,
   PackageCheck,
   Phone,
   Power,
   RefreshCw,
   Route,
+  Search,
   ShieldAlert,
+  Store,
   UserRound,
+  Wallet,
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -64,6 +70,47 @@ const formatDate = (value) =>
 
 const courierWorkSessionKey = (userId) =>
   `gloto:courier-work-session:${userId}`;
+
+const courierDailyStatsKey = (userId) =>
+  `gloto:courier-daily-stats:${userId}`;
+
+const getLocalDateKey = (date = new Date()) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+const createEmptyDailyStats = (dateKey = getLocalDateKey()) => ({
+  dateKey,
+  completedOrders: [],
+});
+
+const readCourierDailyStats = (userId) => {
+  const empty = createEmptyDailyStats();
+  if (!userId) return empty;
+  try {
+    const stored = localStorage.getItem(courierDailyStatsKey(userId));
+    if (!stored) return empty;
+    const stats = JSON.parse(stored);
+    if (stats?.dateKey !== empty.dateKey) return empty;
+    return {
+      ...empty,
+      completedOrders: Array.isArray(stats.completedOrders)
+        ? stats.completedOrders.filter(
+            (order) => order?.id && ["private", "public"].includes(order.source),
+          )
+        : [],
+    };
+  } catch (error) {
+    console.error("No se pudieron leer las métricas diarias del domiciliario:", error);
+    return empty;
+  }
+};
+
+const getLocalDayRange = () => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+};
 
 const readCourierWorkSession = (userId) => {
   if (!userId) return null;
@@ -139,6 +186,24 @@ const getDistanceBetweenCoordinatesKm = (fromLatitude, fromLongitude, toLatitude
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
+const getPickupToCustomerDistanceKm = (order) => {
+  const pickupDistance = getDistanceBetweenCoordinatesKm(
+    order.pickup_latitude,
+    order.pickup_longitude,
+    order.destination_latitude,
+    order.destination_longitude,
+  );
+  if (pickupDistance != null && pickupDistance > 0) return pickupDistance;
+
+  const serverDistance = Number(order.distance_km);
+  return order.distance_km != null &&
+    order.distance_km !== "" &&
+    Number.isFinite(serverDistance) &&
+    serverDistance > 0
+    ? serverDistance
+    : null;
+};
+
 const getOrderDistanceKm = (order, location) => {
   const serverDistance = Number(order.distance_km);
   const hasServerDistance =
@@ -146,14 +211,7 @@ const getOrderDistanceKm = (order, location) => {
     order.distance_km !== "" &&
     Number.isFinite(serverDistance);
   if (order.courier_mode === "public") {
-    const pickupDistance = getDistanceBetweenCoordinatesKm(
-      order.pickup_latitude,
-      order.pickup_longitude,
-      order.destination_latitude,
-      order.destination_longitude,
-    );
-    if (pickupDistance != null && pickupDistance > 0) return pickupDistance;
-    return hasServerDistance && serverDistance > 0 ? serverDistance : null;
+    return getPickupToCustomerDistanceKm(order);
   }
 
   const hasCurrentLocation =
@@ -260,7 +318,11 @@ const PortalDomiciliario = () => {
     readCourierWorkSession(user?.id),
   );
   const workSessionRef = useRef(workSession);
-  const [sessionDeductions, setSessionDeductions] = useState(0);
+  const [dailyWalletDeductions, setDailyWalletDeductions] = useState(0);
+  const [dailyStats, setDailyStats] = useState(() =>
+    readCourierDailyStats(user?.id),
+  );
+  const dailyStatsRef = useRef(dailyStats);
   const [activityError, setActivityError] = useState("");
   const [activityLoading, setActivityLoading] = useState(false);
   const [privateBusinessLogo, setPrivateBusinessLogo] = useState({
@@ -270,10 +332,14 @@ const PortalDomiciliario = () => {
   const [summaryLoaded, setSummaryLoaded] = useState(false);
   const [orders, setOrders] = useState([]);
   const [previewOrderIds, setPreviewOrderIds] = useState([]);
-  const [previewedOrderIds, setPreviewedOrderIds] = useState(() => new Set());
   const seenOfferIdsRef = useRef(new Set());
   const offerBaselineReadyRef = useRef(false);
   const [history, setHistory] = useState([]);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historySourceFilter, setHistorySourceFilter] = useState("all");
+  const [historyDatePreset, setHistoryDatePreset] = useState("all");
+  const [historyStartDate, setHistoryStartDate] = useState("");
+  const [historyEndDate, setHistoryEndDate] = useState("");
   const [ledger, setLedger] = useState([]);
   const [topups, setTopups] = useState([]);
   const [sectionLoading, setSectionLoading] = useState(false);
@@ -413,6 +479,30 @@ const PortalDomiciliario = () => {
     [saveWorkSession],
   );
 
+  const updateDailyStats = useCallback(
+    (update) => {
+      if (!user?.id) return;
+      const today = getLocalDateKey();
+      const current =
+        dailyStatsRef.current?.dateKey === today
+          ? dailyStatsRef.current
+          : createEmptyDailyStats(today);
+      const next = update(current);
+      dailyStatsRef.current = next;
+      setDailyStats(next);
+      try {
+        localStorage.setItem(
+          courierDailyStatsKey(user.id),
+          JSON.stringify(next),
+        );
+      } catch (error) {
+        console.error("No se pudieron guardar las métricas diarias:", error);
+        setErrorMessage("No se pudieron guardar las métricas de hoy.");
+      }
+    },
+    [user?.id],
+  );
+
   const updateOrders = useCallback((nextOrders) => {
     setOrders(nextOrders);
 
@@ -424,7 +514,6 @@ const PortalDomiciliario = () => {
     if (!isCourierOnline || !offerBaselineReadyRef.current) {
       availableIds.forEach((id) => seenOfferIdsRef.current.add(id));
       setPreviewOrderIds([]);
-      setPreviewedOrderIds(availableIds);
       offerBaselineReadyRef.current = isCourierOnline;
       return;
     }
@@ -439,17 +528,10 @@ const PortalDomiciliario = () => {
       const queuedIds = new Set(queued);
       return [...queued, ...newOfferIds.filter((id) => !queuedIds.has(id))];
     });
-    setPreviewedOrderIds((current) => {
-      const next = new Set(
-        [...current].filter((id) => availableIds.has(id)),
-      );
-      return next;
-    });
   }, [isCourierOnline]);
 
   const finishOrderPreview = useCallback((orderId) => {
     setPreviewOrderIds((current) => current.filter((id) => id !== orderId));
-    setPreviewedOrderIds((current) => new Set(current).add(orderId));
   }, []);
 
   const syncLiveLocation = useCallback(
@@ -580,26 +662,20 @@ const PortalDomiciliario = () => {
     const failed = results.find(({ error }) => error);
     if (failed?.error) throw failed.error;
     const privateOrders = results.find(({ source }) => source === "private")?.data || [];
-    const assignedPrivateBusinessIds = [
+    const privateBusinessIds = [
       ...new Set(
-        privateOrders
-          .filter((order) => order.delivery_status !== "available")
-          .map((order) => order.business_id)
-          .filter(Boolean),
+        privateOrders.map((order) => order.business_id).filter(Boolean),
       ),
     ];
-    const privateBusinessPhones = new Map();
-    if (assignedPrivateBusinessIds.length > 0) {
+    const privateBusinessDetails = new Map();
+    if (privateBusinessIds.length > 0) {
       const { data, error } = await supabase
         .from("business_info")
-        .select("business_id, whatsapp_phone")
-        .in("business_id", assignedPrivateBusinessIds);
+        .select("business_id, whatsapp_phone, latitude, longitude")
+        .in("business_id", privateBusinessIds);
       if (error) throw error;
       for (const businessInfo of data || []) {
-        privateBusinessPhones.set(
-          businessInfo.business_id,
-          businessInfo.whatsapp_phone,
-        );
+        privateBusinessDetails.set(businessInfo.business_id, businessInfo);
       }
     }
     const publicOrders = results.find(({ source }) => source === "public")?.data || [];
@@ -616,36 +692,63 @@ const PortalDomiciliario = () => {
     }
     return {
       data: results.flatMap(({ data, source }) =>
-        (data || []).map((order) => ({
-          ...order,
-          ...(source === "private"
-            ? {
-                pickup_phone:
-                  privateBusinessPhones.get(order.business_id) ||
-                  order.pickup_phone ||
-                  "",
-              }
-            : {}),
-          ...(source === "public"
-            ? publicOrderDetails.get(order.order_id) || {}
-            : {}),
-          courier_mode: source,
-        })),
+        (data || []).map((order) => {
+          const businessInfo = privateBusinessDetails.get(order.business_id);
+          return {
+            ...order,
+            ...(source === "private"
+              ? {
+                  pickup_phone:
+                    businessInfo?.whatsapp_phone || order.pickup_phone || "",
+                  pickup_latitude:
+                    order.pickup_latitude ?? businessInfo?.latitude,
+                  pickup_longitude:
+                    order.pickup_longitude ?? businessInfo?.longitude,
+                }
+              : {}),
+            ...(source === "public"
+              ? publicOrderDetails.get(order.order_id) || {}
+              : {}),
+            courier_mode: source,
+          };
+        }),
       ),
       error: null,
     };
   }, [canUsePrivate, isPublicApproved]);
 
   const loadHistory = useCallback(async () => {
-    const { data, error } = await supabase.rpc("get_courier_order_history", {
-      p_mode: mode,
-    });
-    if (error) throw error;
-    setHistory(data || []);
-  }, [mode]);
+    const sources = ["private", "public"];
+    const results = await Promise.all(
+      sources.map((source) =>
+        supabase.rpc("get_courier_order_history", { p_mode: source }),
+      ),
+    );
+    const failedResult = results.find(({ error }) => error);
+    if (failedResult?.error) throw failedResult.error;
+
+    const allOrders = results.flatMap(({ data }, index) =>
+      (data || []).map((order) => ({
+        ...order,
+        courier_mode: order.courier_mode || sources[index],
+      })),
+    );
+    const uniqueOrders = new Map(
+      allOrders.map((order) => [
+        `${order.courier_mode}:${order.order_id}`,
+        order,
+      ]),
+    );
+    setHistory(
+      [...uniqueOrders.values()].sort(
+        (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0),
+      ),
+    );
+  }, []);
 
   const loadWallet = useCallback(async () => {
-    const [ledgerResult, topupsResult] = await Promise.all([
+    const { start, end } = getLocalDayRange();
+    const [ledgerResult, topupsResult, dailyLedgerResult] = await Promise.all([
       supabase
         .from("public_courier_ledger")
         .select("id, amount, entry_type, description, created_at")
@@ -656,39 +759,50 @@ const PortalDomiciliario = () => {
         .select("id, amount, status, review_notes, created_at")
         .order("created_at", { ascending: false })
         .limit(20),
+      supabase
+        .from("public_courier_ledger")
+        .select("amount")
+        .gte("created_at", start)
+        .lt("created_at", end),
     ]);
     if (ledgerResult.error) throw ledgerResult.error;
     if (topupsResult.error) throw topupsResult.error;
+    if (dailyLedgerResult.error) throw dailyLedgerResult.error;
     setLedger(ledgerResult.data || []);
     setTopups(topupsResult.data || []);
+    setDailyWalletDeductions(
+      (dailyLedgerResult.data || []).reduce((total, entry) => {
+        const amount = Number(entry.amount) || 0;
+        return amount < 0 ? total + Math.abs(amount) : total;
+      }, 0),
+    );
   }, []);
 
-  const refreshSessionDeductions = useCallback(async () => {
-    const current = workSessionRef.current;
-    if (!current || !isPublicApproved) {
-      setSessionDeductions(0);
-      return;
-    }
+  const refreshDailyWalletDeductions = useCallback(async () => {
+    const { start, end } = getLocalDayRange();
     const { data, error } = await supabase
       .from("public_courier_ledger")
       .select("amount")
-      .gte("created_at", current.startedAt)
-      .lt("created_at", current.endedAt || new Date().toISOString());
+      .gte("created_at", start)
+      .lt("created_at", end);
     if (error) throw error;
-    setSessionDeductions(
+    setDailyWalletDeductions(
       (data || []).reduce((total, entry) => {
         const amount = Number(entry.amount) || 0;
         return amount < 0 ? total + Math.abs(amount) : total;
       }, 0),
     );
-  }, [isPublicApproved]);
+  }, []);
 
   const openActivity = async () => {
     setActivityOpen(true);
     setActivityLoading(true);
     setActivityError("");
     try {
-      await Promise.all([refreshSessionDeductions(), loadSummary()]);
+      await Promise.all([
+        refreshDailyWalletDeductions(),
+        loadSummary(),
+      ]);
     } catch (error) {
       console.error("No se pudo actualizar el resumen de la jornada:", error);
       setActivityError(
@@ -703,7 +817,7 @@ const PortalDomiciliario = () => {
     if (!activityOpen || !isCourierOnline) return undefined;
     const timerId = window.setInterval(async () => {
       try {
-        await refreshSessionDeductions();
+        await refreshDailyWalletDeductions();
       } catch (error) {
         console.error("No se pudo actualizar el saldo descontado:", error);
         setActivityError(
@@ -712,7 +826,7 @@ const PortalDomiciliario = () => {
       }
     }, 15000);
     return () => window.clearInterval(timerId);
-  }, [activityOpen, isCourierOnline, refreshSessionDeductions]);
+  }, [activityOpen, isCourierOnline, refreshDailyWalletDeductions]);
 
   useEffect(() => {
     let mounted = true;
@@ -820,7 +934,7 @@ const PortalDomiciliario = () => {
     const fetchSection = async () => {
       try {
         if (section === "history") await loadHistory();
-        else await loadWallet();
+        else await Promise.all([loadWallet(), loadSummary()]);
         if (mounted) setErrorMessage("");
       } catch (error) {
         if (!mounted) return;
@@ -1042,6 +1156,26 @@ const PortalDomiciliario = () => {
     );
     if (updated && status === "delivered") {
       recordWorkOrder(order);
+      updateDailyStats((current) => {
+        const source = order.courier_mode === "public" ? "public" : "private";
+        const id = `${source}:${order.order_id}`;
+        if (current.completedOrders.some((completed) => completed.id === id)) {
+          return current;
+        }
+        return {
+          ...current,
+          completedOrders: [
+            ...current.completedOrders,
+            {
+              id,
+              source,
+              fee: Number(order.delivery_fee) || 0,
+              distanceKm: getPickupToCustomerDistanceKm(order),
+              completedAt: new Date().toISOString(),
+            },
+          ],
+        };
+      });
     }
   };
 
@@ -1110,7 +1244,6 @@ const PortalDomiciliario = () => {
         setRealtimeStatus("offline");
         offerBaselineReadyRef.current = false;
         setPreviewOrderIds([]);
-        setNotice("Quedaste desconectado. Tus fuentes elegidas se conservaron.");
       } else {
         if (!hasEnabledSources) {
           setErrorMessage("Activa al menos una fuente: tienda o pedidos públicos.");
@@ -1164,7 +1297,6 @@ const PortalDomiciliario = () => {
             : null,
         }));
         syncWorkSession(true);
-        setNotice("Estás activo. Recibirás pedidos de tus fuentes elegidas.");
       }
     } catch (error) {
       console.error("No se pudo cambiar la disponibilidad:", error);
@@ -1421,14 +1553,6 @@ const PortalDomiciliario = () => {
     setSectionLoading(nextSection === "history" || nextSection === "wallet");
   };
 
-  const selectMapOrder = (orderId) => {
-    setSelectedOrderId(orderId);
-    window.setTimeout(() => {
-      document
-        .getElementById(`courier-order-${orderId}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 0);
-  };
   const showFullMap =
     section === "orders" &&
     (!summaryLoaded || !summary || canUsePrivate || isPublicApproved) &&
@@ -1442,13 +1566,97 @@ const PortalDomiciliario = () => {
   }, [orders]);
   const activityStats = useMemo(
     () => ({
-      earned: workSession?.grossEarnings || 0,
-      deductions: sessionDeductions,
-      net: (workSession?.grossEarnings || 0) - sessionDeductions,
       isCurrent: Boolean(isCourierOnline && workSession && !workSession.endedAt),
     }),
-    [isCourierOnline, sessionDeductions, workSession],
+    [isCourierOnline, workSession],
   );
+  const walletTodayStats = useMemo(() => {
+    const todayStats =
+      dailyStats.dateKey === getLocalDateKey()
+        ? dailyStats
+        : createEmptyDailyStats();
+    const completedOrders = todayStats.completedOrders;
+    return {
+      earned: completedOrders.reduce(
+        (total, order) => total + (Number(order.fee) || 0),
+        0,
+      ),
+      kilometers: completedOrders.reduce(
+        (total, order) => total + (Number(order.distanceKm) || 0),
+        0,
+      ),
+      privateOrders: completedOrders.filter(
+        (order) => order.source === "private",
+      ).length,
+      publicOrders: completedOrders.filter(
+        (order) => order.source === "public",
+      ).length,
+    };
+  }, [dailyStats]);
+  const filteredHistory = useMemo(() => {
+    const query = historySearch.trim().toLocaleLowerCase("es");
+    return history.filter((order) => {
+      const source = order.courier_mode || "private";
+      if (historySourceFilter !== "all" && source !== historySourceFilter) {
+        return false;
+      }
+      if (historyStartDate || historyEndDate) {
+        const orderDate = new Date(order.created_at);
+        if (!Number.isFinite(orderDate.getTime())) return false;
+        const orderDateKey = getLocalDateKey(orderDate);
+        if (historyStartDate && orderDateKey < historyStartDate) return false;
+        if (historyEndDate && orderDateKey > historyEndDate) return false;
+      }
+      if (!query) return true;
+      const searchable = [
+        order.order_id,
+        order.business_name,
+        order.delivery_address,
+        order.delivery_status,
+        statusLabel[order.delivery_status],
+        source === "public" ? "publico red publica" : "tienda privado",
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("es");
+      return searchable.includes(query);
+    });
+  }, [
+    history,
+    historyEndDate,
+    historySearch,
+    historySourceFilter,
+    historyStartDate,
+  ]);
+  const hasHistoryFilters =
+    historySearch ||
+    historySourceFilter !== "all" ||
+    historyDatePreset !== "all";
+  const handleHistoryDatePresetChange = (preset) => {
+    setHistoryDatePreset(preset);
+    if (preset === "all" || preset === "custom") {
+      setHistoryStartDate("");
+      setHistoryEndDate("");
+      return;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (preset === "last7" || preset === "last30") {
+      const start = new Date(today);
+      start.setDate(start.getDate() - (preset === "last7" ? 6 : 29));
+      setHistoryStartDate(getLocalDateKey(start));
+      setHistoryEndDate(getLocalDateKey(today));
+      return;
+    }
+
+    const daysAgo = Number(preset);
+    const selectedDay = new Date(today);
+    selectedDay.setDate(selectedDay.getDate() - daysAgo);
+    const dateKey = getLocalDateKey(selectedDay);
+    setHistoryStartDate(dateKey);
+    setHistoryEndDate(dateKey);
+  };
 
   return (
     <main className="min-h-screen bg-[#09090f] text-white">
@@ -1479,17 +1687,17 @@ const PortalDomiciliario = () => {
           locationStatus={locationStatus}
           availabilityBusy={availabilityBusy}
           onToggleAvailability={toggleSourcePreference}
+          courierOnline={isCourierOnline}
+          onDisconnect={toggleAvailability}
           canUsePrivate={canUsePrivate}
           canUsePublic={isPublicApproved}
           isPublicApproved={isPublicApproved}
-          balance={balance}
-          sessionEarnings={activityStats.earned}
+          sessionEarnings={walletTodayStats.earned}
           activityValuesVisible={activityValuesVisible}
           onToggleActivityValues={() =>
             setActivityValuesVisible((visible) => !visible)
           }
           onOpenActivity={openActivity}
-          onOpenBalance={() => changeSection("wallet")}
           displayName={displayName}
           onSignOut={signOut}
         />
@@ -1519,6 +1727,9 @@ const PortalDomiciliario = () => {
           mode={mode}
           privateEnabled={privateSourceEnabled}
           publicEnabled={publicSourceEnabled}
+          menuOpen={menuOpen}
+          onToggleMenu={() => setMenuOpen((open) => !open)}
+          locationStatus={locationStatus}
           online={isCourierOnline}
           realtimeStatus={realtimeStatus}
           location={
@@ -1531,17 +1742,17 @@ const PortalDomiciliario = () => {
                 }
               : null)
           }
+          publicRadiusKm={summary?.public_radius_km ?? 10}
+          searchingPublic={isPublicOnline}
           orders={orders}
           activeDelivery={activeDelivery}
           previewOrderIds={previewOrderIds}
-          previewedOrderIds={previewedOrderIds}
           onFinishOrderPreview={finishOrderPreview}
           activeOrderId={activeOrderId}
           selectedOrderId={selectedOrderId}
           errorMessage={errorMessage}
           availabilityBusy={availabilityBusy}
           onToggleAvailability={toggleAvailability}
-          onSelectOrder={selectMapOrder}
           onClaim={claimOrder}
           onUpdateStatus={updateOrderStatus}
         />
@@ -1551,12 +1762,6 @@ const PortalDomiciliario = () => {
       <div className="mx-auto max-w-7xl px-4 pb-12 pt-7 sm:px-6 lg:px-8">
         <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-violet-300">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              {mode === "public"
-                ? "Red pública Gloto"
-                : summary?.private_business_name || "Tu tienda"}
-            </p>
             <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
               {section === "orders"
                 ? "Inicio"
@@ -1566,17 +1771,17 @@ const PortalDomiciliario = () => {
                     ? "Mi saldo"
                     : "Mi perfil"}
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-neutral-400">
-              {section === "orders"
-                ? mode === "public"
-                  ? "Encuentra entregas disponibles dentro de tu zona."
-                  : "Gestiona tus entregas asignadas por tu tienda."
-                : section === "history"
-                  ? "Consulta tus entregas anteriores y su estado."
+            {section !== "history" && (
+              <p className="mt-2 max-w-2xl text-sm text-neutral-400">
+                {section === "orders"
+                  ? mode === "public"
+                    ? "Encuentra entregas disponibles dentro de tu zona."
+                    : "Gestiona tus entregas asignadas por tu tienda."
                   : section === "wallet"
                     ? "Consulta movimientos y solicita una recarga."
                     : "Tus datos de acceso y modos de trabajo."}
-            </p>
+              </p>
+            )}
           </div>
           {section === "orders" && (
             <button
@@ -1603,7 +1808,7 @@ const PortalDomiciliario = () => {
             <span>{errorMessage}</span>
           </div>
         )}
-        {notice && (
+        {notice && section !== "history" && (
           <p
             role="status"
             className="mb-5 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200"
@@ -1686,17 +1891,19 @@ const PortalDomiciliario = () => {
           <section className="mb-6 overflow-hidden rounded-3xl border border-white/[0.08] bg-neutral-900/60 p-3 sm:p-4">
             <PortalDomiciliarioMap
               location={
-                summary?.location_latitude != null &&
+                mapLocation ||
+                (summary?.location_latitude != null &&
                 summary?.location_longitude != null
                   ? {
                       latitude: summary.location_latitude,
                       longitude: summary.location_longitude,
                     }
-                  : null
+                  : null)
               }
+              publicRadiusKm={summary?.public_radius_km ?? 10}
+              searching={isPublicOnline}
               orders={orders}
               online={isPublicOnline}
-              onSelectOrder={selectMapOrder}
             />
             <div className="flex flex-col gap-4 px-2 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-3">
               <div className="flex items-center gap-3">
@@ -1880,75 +2087,196 @@ const PortalDomiciliario = () => {
         {section === "history" && sectionLoading ? (
           <LoadingCard label="Cargando historial..." />
         ) : section === "history" && (
-          history.length === 0 ? (
-            <EmptyState
-              icon={History}
-              title="Aún no tienes entregas en el historial"
-              description="Cuando completes pedidos, podrás consultarlos aquí."
-            />
-          ) : (
-            <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-neutral-900/50">
-              <div className="hidden grid-cols-[1.4fr_1fr_1.3fr_0.8fr_0.8fr] gap-4 border-b border-white/[0.07] px-5 py-3 text-[10px] font-black uppercase tracking-wider text-neutral-500 sm:grid">
-                <span>Referencia / tienda</span>
-                <span>Fecha</span>
-                <span>Zona de entrega</span>
-                <span>Valor domicilio</span>
-                <span>Estado</span>
-              </div>
-              {history.map((order) => (
-                <div
-                  key={order.order_id}
-                  className="grid gap-2 border-b border-white/[0.06] px-5 py-4 last:border-0 sm:grid-cols-[1.4fr_1fr_1.3fr_0.8fr_0.8fr] sm:items-center sm:gap-4"
-                >
-                  <div>
-                    <p className="text-sm font-bold">
-                      {order.business_name || "Pedido"}
-                    </p>
-                    <p className="mt-1 text-xs text-neutral-500">
-                      Pedido #{String(order.order_id || "").slice(0, 8).toUpperCase()}
-                    </p>
-                  </div>
-                  <p className="text-xs text-neutral-400">
-                    {formatDate(order.created_at)}
-                  </p>
-                  <p className="truncate text-xs text-neutral-400">
-                    {getGeneralDeliveryArea(order.delivery_address)}
-                  </p>
-                  <p className="text-xs font-semibold text-emerald-300">
-                    {order.delivery_fee != null
-                      ? formatMoney(order.delivery_fee)
-                      : "No disponible"}
-                  </p>
-                  <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-neutral-300">
-                    {statusLabel[order.delivery_status] ||
-                      order.delivery_status ||
-                      "Finalizado"}
+          <div className="space-y-4">
+            <section className="rounded-xl border border-white/[0.08] bg-neutral-900/50 p-3">
+              <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_190px_190px_auto]">
+                <label className="relative block">
+                  <span className="sr-only">Buscar pedido</span>
+                  <Search
+                    size={16}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
+                  />
+                  <input
+                    type="search"
+                    value={historySearch}
+                    onChange={(event) => setHistorySearch(event.target.value)}
+                    placeholder="Buscar pedido..."
+                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-black/20 pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-neutral-500 focus:border-violet-400/50"
+                  />
+                </label>
+                <label>
+                  <span className="sr-only">Tipo de pedido</span>
+                  <select
+                    value={historySourceFilter}
+                    onChange={(event) =>
+                      setHistorySourceFilter(event.target.value)
+                    }
+                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-sm text-white outline-none focus:border-violet-400/50"
+                  >
+                    <option value="all">Todos los tipos</option>
+                    <option value="private">Pedidos de tienda</option>
+                    <option value="public">Pedidos públicos</option>
+                  </select>
+                </label>
+                <label>
+                  <span className="sr-only">Periodo</span>
+                  <select
+                    value={historyDatePreset}
+                    onChange={(event) =>
+                      handleHistoryDatePresetChange(event.target.value)
+                    }
+                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-sm text-white outline-none focus:border-violet-400/50"
+                  >
+                    <option value="all">Todas las fechas</option>
+                    <option value="0">Hoy</option>
+                    <option value="1">Ayer</option>
+                    <option value="2">Anteayer</option>
+                    <option value="3">Hace 3 días</option>
+                    <option value="4">Hace 4 días</option>
+                    <option value="5">Hace 5 días</option>
+                    <option value="6">Hace 6 días</option>
+                    <option value="last7">Últimos 7 días</option>
+                    <option value="last30">Últimos 30 días</option>
+                    <option value="custom">Personalizado</option>
+                  </select>
+                </label>
+                <div className="flex items-center justify-between gap-3 sm:justify-end">
+                  <span className="text-xs tabular-nums text-neutral-500">
+                    {filteredHistory.length}/{history.length}
                   </span>
+                  {hasHistoryFilters && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistorySearch("");
+                        setHistorySourceFilter("all");
+                        setHistoryDatePreset("all");
+                        setHistoryStartDate("");
+                        setHistoryEndDate("");
+                      }}
+                      className="rounded-lg px-2 py-2 text-xs font-semibold text-neutral-400 transition hover:bg-white/[0.06] hover:text-white"
+                    >
+                      Limpiar
+                    </button>
+                  )}
                 </div>
-              ))}
-            </div>
-          )
+              </div>
+              {historyDatePreset === "custom" && (
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <label>
+                    <span className="sr-only">Desde</span>
+                    <input
+                      type="date"
+                      value={historyStartDate}
+                      max={historyEndDate || undefined}
+                      onChange={(event) => setHistoryStartDate(event.target.value)}
+                      className="h-10 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-sm text-white outline-none focus:border-violet-400/50"
+                    />
+                  </label>
+                  <label>
+                    <span className="sr-only">Hasta</span>
+                    <input
+                      type="date"
+                      value={historyEndDate}
+                      min={historyStartDate || undefined}
+                      onChange={(event) => setHistoryEndDate(event.target.value)}
+                      className="h-10 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-sm text-white outline-none focus:border-violet-400/50"
+                    />
+                  </label>
+                </div>
+              )}
+            </section>
+
+            {history.length === 0 ? (
+              <EmptyState
+                icon={History}
+                title="Aún no tienes entregas en el historial"
+                description="Cuando completes pedidos públicos o de tienda, podrás consultarlos aquí."
+              />
+            ) : filteredHistory.length === 0 ? (
+              <EmptyState
+                icon={Search}
+                title="No encontramos pedidos"
+                description="Prueba cambiando los filtros o limpiándolos para ver todo tu historial."
+              />
+            ) : (
+              <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-neutral-900/50">
+                <div className="hidden grid-cols-[1.35fr_0.8fr_1fr_1.25fr_0.8fr_0.8fr] gap-4 border-b border-white/[0.07] px-5 py-3 text-[10px] font-black uppercase tracking-wider text-neutral-500 sm:grid">
+                  <span>Referencia / tienda</span>
+                  <span>Tipo</span>
+                  <span>Fecha</span>
+                  <span>Zona de entrega</span>
+                  <span>Valor domicilio</span>
+                  <span>Estado</span>
+                </div>
+                {filteredHistory.map((order) => {
+                  const isPublicOrder = order.courier_mode === "public";
+                  return (
+                    <div
+                      key={`${order.courier_mode || "private"}:${order.order_id}`}
+                      className="grid gap-2 border-b border-white/[0.06] px-5 py-4 last:border-0 sm:grid-cols-[1.35fr_0.8fr_1fr_1.25fr_0.8fr_0.8fr] sm:items-center sm:gap-4"
+                    >
+                      <div>
+                        <p className="text-sm font-bold">
+                          {order.business_name ||
+                            (isPublicOrder ? "Pedido público" : "Pedido de tienda")}
+                        </p>
+                        <p className="mt-1 text-xs text-neutral-500">
+                          Pedido #{String(order.order_id || "").slice(0, 8).toUpperCase()}
+                        </p>
+                      </div>
+                      <span
+                        className={`w-fit rounded-full border px-2.5 py-1 text-[10px] font-bold ${
+                          isPublicOrder
+                            ? "border-amber-300/20 bg-amber-300/10 text-amber-200"
+                            : "border-violet-300/20 bg-violet-300/10 text-violet-200"
+                        }`}
+                      >
+                        {isPublicOrder ? "Público" : "Tienda"}
+                      </span>
+                      <p className="text-xs text-neutral-400">
+                        {formatDate(order.created_at)}
+                      </p>
+                      <p className="truncate text-xs text-neutral-400">
+                        {getGeneralDeliveryArea(order.delivery_address)}
+                      </p>
+                      <p className="text-xs font-semibold text-emerald-300">
+                        {order.delivery_fee != null
+                          ? formatMoney(order.delivery_fee)
+                          : "No disponible"}
+                      </p>
+                      <span className="w-fit rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-neutral-300">
+                        {statusLabel[order.delivery_status] ||
+                          order.delivery_status ||
+                          "Finalizado"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
 
         {section === "wallet" && sectionLoading ? (
           <LoadingCard label="Cargando movimientos..." />
         ) : section === "wallet" && (
           <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-            <div className="space-y-5">
-              <section className="rounded-3xl border border-emerald-400/20 bg-gradient-to-br from-emerald-400/[0.16] to-neutral-900 p-6">
-                <div className="flex items-center gap-2 text-sm font-bold text-emerald-100">
+              <div className="space-y-5">
+              <section className="rounded-3xl border border-primary-container/30 bg-gradient-to-br from-primary-container/25 to-neutral-900 p-6">
+                <div className="flex items-center gap-2 text-sm font-bold text-white">
                   <CircleDollarSign size={18} />
                   Saldo disponible
                 </div>
                 <p className="mt-5 text-4xl font-black tracking-tight">
                   {formatMoney(balance)}
                 </p>
-                <p className="mt-2 text-xs text-emerald-100/60">
+                <p className="mt-2 text-xs text-neutral-300">
                   El saldo se actualiza cuando se aprueba una recarga o tomas un
                   pedido público.
                 </p>
                 {Number(summary?.commission_percentage) > 0 && (
-                  <p className="mt-2 text-xs text-emerald-100/60">
+                  <p className="mt-2 text-xs text-neutral-300">
                     Comisión de pedidos públicos:{" "}
                     {Number(summary.commission_percentage)}% del costo del
                     domicilio, descontada del saldo al aceptar.
@@ -1965,11 +2293,6 @@ const PortalDomiciliario = () => {
                     Ya tienes una recarga pendiente de revisión.
                   </p>
                 )}
-                {summary?.deposit_instructions && (
-                  <p className="mt-3 whitespace-pre-line text-xs leading-5 text-neutral-400">
-                    {summary.deposit_instructions}
-                  </p>
-                )}
                 <div className="mt-4">
                   <p className="text-xs font-semibold text-neutral-300">
                     Valor a recargar (COP)
@@ -1982,8 +2305,8 @@ const PortalDomiciliario = () => {
                         onClick={() => setTopupAmount(String(amount))}
                         className={`rounded-xl border px-2 py-3 text-xs font-black transition ${
                           Number(topupAmount) === amount
-                            ? "border-emerald-400 bg-emerald-400/15 text-emerald-300"
-                            : "border-white/10 bg-black/20 text-white hover:border-emerald-400/40 hover:bg-emerald-400/[0.07]"
+                            ? "border-primary-container bg-primary-container/20 text-white"
+                            : "border-primary-container/25 bg-primary-container/[0.04] text-white hover:border-primary-container/50 hover:bg-primary-container/[0.12]"
                         }`}
                       >
                         {formatMoney(amount)}
@@ -1999,7 +2322,7 @@ const PortalDomiciliario = () => {
                           "_blank",
                           "noopener,noreferrer",
                         )}
-                        className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-black text-emerald-950 transition hover:bg-emerald-400"
+                        className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary-container px-4 text-sm font-black text-on-primary transition hover:brightness-110"
                       >
                         <CircleDollarSign size={17} />
                         Pagar {formatMoney(Number(topupAmount))}
@@ -2026,15 +2349,15 @@ const PortalDomiciliario = () => {
                 <button
                   type="submit"
                   disabled={busy || summary?.has_pending_topup}
-                  className="mt-4 w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-emerald-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="mt-4 w-full rounded-xl bg-primary-container px-4 py-3 text-sm font-black text-on-primary transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {busy ? "Enviando..." : "Enviar comprobante"}
                 </button>
               </form>
-            </div>
-            <section className="rounded-2xl border border-white/[0.08] bg-neutral-900/50 p-5">
+              </div>
+              <section className="rounded-2xl border border-white/[0.08] bg-neutral-900/50 p-5">
               <div className="mb-4 flex items-center gap-2">
-                <Activity size={18} className="text-violet-300" />
+                <Activity size={18} className="text-primary-container" />
                 <h2 className="font-black">Movimientos recientes</h2>
               </div>
               {ledger.length === 0 ? (
@@ -2059,7 +2382,7 @@ const PortalDomiciliario = () => {
                       <span
                         className={`shrink-0 text-sm font-black ${
                           Number(entry.amount) >= 0
-                            ? "text-emerald-300"
+                            ? "text-primary-container"
                             : "text-rose-300"
                         }`}
                       >
@@ -2070,9 +2393,9 @@ const PortalDomiciliario = () => {
                   ))}
                 </div>
               )}
-            </section>
-            {topups.length > 0 && (
-              <section className="rounded-2xl border border-white/[0.08] bg-neutral-900/50 p-5 lg:col-span-2">
+              </section>
+              {topups.length > 0 && (
+                <section className="rounded-2xl border border-white/[0.08] bg-neutral-900/50 p-5 lg:col-span-2">
                 <h2 className="mb-3 font-black">Solicitudes de recarga</h2>
                 <div className="divide-y divide-white/[0.06]">
                   {topups.map((topup) => (
@@ -2098,8 +2421,8 @@ const PortalDomiciliario = () => {
                     </div>
                   ))}
                 </div>
-              </section>
-            )}
+                </section>
+              )}
           </div>
         )}
 
@@ -2197,6 +2520,9 @@ const PortalDomiciliario = () => {
       {activityOpen && (
         <CourierActivityModal
           stats={activityStats}
+          todayStats={walletTodayStats}
+          balance={balance}
+          deductions={dailyWalletDeductions}
           loading={activityLoading}
           error={activityError}
           valuesVisible={activityValuesVisible}
@@ -2228,8 +2554,32 @@ const StatCard = ({ icon: Icon, label, value, color }) => (
   </div>
 );
 
+const WalletTodayStat = ({ icon: Icon, label, value, accent }) => {
+  const accentClasses = {
+    emerald: "bg-emerald-400/10 text-emerald-300",
+    blue: "bg-sky-400/10 text-sky-300",
+    violet: "bg-violet-400/10 text-violet-300",
+    amber: "bg-amber-400/10 text-amber-300",
+    rose: "bg-rose-400/10 text-rose-300",
+  };
+  return (
+    <div className="min-w-0 rounded-2xl border border-white/[0.07] bg-black/20 p-3">
+      <span
+        className={`mb-3 flex h-9 w-9 items-center justify-center rounded-xl ${accentClasses[accent]}`}
+      >
+        <Icon size={17} />
+      </span>
+      <p className="text-[11px] font-semibold text-neutral-500">{label}</p>
+      <p className="mt-1 truncate text-base font-black text-white">{value}</p>
+    </div>
+  );
+};
+
 const CourierActivityModal = ({
   stats,
+  todayStats,
+  balance,
+  deductions,
   loading,
   error,
   valuesVisible,
@@ -2249,7 +2599,7 @@ const CourierActivityModal = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="courier-activity-title"
-        className="w-full max-w-md rounded-3xl border border-white/10 bg-neutral-950 p-5 shadow-2xl sm:p-6"
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-neutral-950 p-5 shadow-2xl sm:p-6"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -2260,7 +2610,7 @@ const CourierActivityModal = ({
               id="courier-activity-title"
               className="mt-1 text-xl font-black text-white"
             >
-              Dinero de la jornada
+              Resumen de hoy
             </h2>
           </div>
           <div className="flex items-center gap-1">
@@ -2286,37 +2636,89 @@ const CourierActivityModal = ({
           </div>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.07] p-4">
-          <p className="text-xs font-semibold text-emerald-100/70">
-            Ganado en domicilios completados
-          </p>
-          <p className="mt-2 text-3xl font-black text-emerald-200">
-            {valuesVisible ? formatMoney(stats.earned) : concealedValue}
-          </p>
-        </div>
-        <div className="mt-3 rounded-2xl border border-rose-300/15 bg-rose-300/[0.05] p-4">
-          <p className="text-xs font-semibold text-neutral-300">
-            Descontado de mi saldo
-          </p>
-          <p className="mt-2 text-xl font-black text-rose-200">
-            {valuesVisible
-              ? loading
-                ? "Actualizando..."
-                : formatMoney(stats.deductions)
-              : concealedValue}
-          </p>
-        </div>
-        <div className="mt-3 flex items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
-          <span className="text-xs font-semibold text-neutral-400">
-            Neto generado
-          </span>
-          <span className="text-sm font-black text-white">
-            {valuesVisible ? formatMoney(stats.net) : concealedValue}
-          </span>
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <WalletTodayStat
+            icon={CircleDollarSign}
+            label="Ganado hoy"
+            value={
+              valuesVisible
+                ? formatMoney(todayStats.earned)
+                : concealedValue
+            }
+            accent="emerald"
+          />
+          <WalletTodayStat
+            icon={Route}
+            label="Km de domicilio: tienda a cliente"
+            value={
+              valuesVisible
+                ? `${todayStats.kilometers.toFixed(1)} km`
+                : concealedValue
+            }
+            accent="blue"
+          />
+          <WalletTodayStat
+            icon={Store}
+            label="Pedidos de tienda"
+            value={valuesVisible ? todayStats.privateOrders : concealedValue}
+            accent="violet"
+          />
+          <WalletTodayStat
+            icon={Globe2}
+            label="Pedidos públicos"
+            value={valuesVisible ? todayStats.publicOrders : concealedValue}
+            accent="amber"
+          />
+          <WalletTodayStat
+            icon={Wallet}
+            label="Saldo disponible"
+            value={
+              valuesVisible
+                ? loading
+                  ? (
+                    <span
+                      role="status"
+                      aria-label="Cargando saldo disponible"
+                      className="flex h-6 items-center"
+                    >
+                      <LoaderCircle
+                        size={18}
+                        className="animate-spin text-sky-300"
+                      />
+                    </span>
+                  )
+                  : formatMoney(balance)
+                : concealedValue
+            }
+            accent="blue"
+          />
+          <WalletTodayStat
+            icon={CircleDollarSign}
+            label="Descontado hoy"
+            value={
+              valuesVisible
+                ? loading
+                  ? (
+                    <span
+                      role="status"
+                      aria-label="Cargando descuentos del día"
+                      className="flex h-6 items-center"
+                    >
+                      <LoaderCircle
+                        size={18}
+                        className="animate-spin text-rose-300"
+                      />
+                    </span>
+                  )
+                  : formatMoney(deductions)
+                : concealedValue
+            }
+            accent="rose"
+          />
         </div>
         {error && (
           <p role="alert" className="mt-3 text-xs text-rose-200">
-            No se pudo actualizar el saldo descontado: {error}
+            No se pudo actualizar el resumen de hoy: {error}
           </p>
         )}
       </section>
@@ -2374,21 +2776,17 @@ const OrderCard = ({
     order.delivery_status === "available";
   const isPublicOrder = (order.courier_mode || mode) === "public";
   const orderDistance = getOrderDistanceKm(order, location);
-  const orderAccent = isPublicOrder
-    ? {
-        border: isSelected ? "border-white/20" : "border-white/10",
-        background: isSelected ? "bg-white/[0.06]" : "bg-neutral-900/50",
-        label: "text-neutral-300",
-        badge: "bg-white/[0.06] text-neutral-300",
-        action: "bg-emerald-400 text-neutral-950 hover:bg-emerald-300",
-      }
-    : {
-        border: isSelected ? "border-violet-300/50" : "border-violet-300/25",
-        background: isSelected ? "bg-violet-300/[0.07]" : "bg-violet-300/[0.035]",
-        label: "text-violet-200",
-        badge: "bg-violet-400/15 text-violet-200",
-        action: "bg-violet-400 text-neutral-950 hover:bg-violet-300",
-      };
+  const orderAccent = {
+    border: isSelected
+      ? "border-primary-container/50"
+      : "border-primary-container/25",
+    background: isSelected
+      ? "bg-primary-container/[0.07]"
+      : "bg-primary-container/[0.035]",
+    label: "text-white",
+    badge: "bg-primary-container/15 text-white",
+    action: "bg-primary-container text-on-primary hover:brightness-110",
+  };
 
   if (compact) {
     return (
@@ -2436,7 +2834,7 @@ const OrderCard = ({
             <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-500">
               Domicilio
             </p>
-            <p className="mt-1 text-sm font-black text-emerald-300">
+            <p className="mt-1 text-sm font-black text-white">
               {formatMoney(order.delivery_fee)}
             </p>
           </div>
@@ -2473,7 +2871,7 @@ const OrderCard = ({
               type="button"
               onClick={() => onUpdateStatus(order, "delivered")}
               disabled={busy}
-              className="rounded-lg bg-emerald-400 px-3 py-2 text-xs font-bold text-neutral-950 transition hover:bg-emerald-300 disabled:opacity-50"
+              className="rounded-lg bg-primary-container px-3 py-2 text-xs font-bold text-on-primary transition hover:brightness-110 disabled:opacity-50"
             >
               {busy ? "Actualizando..." : "Entregado"}
             </button>
@@ -2655,187 +3053,12 @@ const CourierPointBadge = ({ point }) => (
     className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[10px] font-black ${
       point === "A"
         ? "border-neutral-400/30 bg-white/[0.06] text-neutral-300"
-        : "border-emerald-300/40 bg-emerald-300/15 text-emerald-200"
+        : "border-primary-container/50 bg-primary-container/20 text-violet-200"
     }`}
   >
     {point}
   </span>
 );
-
-const CourierAvailabilitySlider = ({
-  online,
-  busy,
-  hasActiveDelivery,
-  onToggle,
-  className = "",
-}) => {
-  const trackRef = useRef(null);
-  const dragRef = useRef(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [thumbPosition, setThumbPosition] = useState(null);
-
-  const getThumbPosition = () => {
-    const track = trackRef.current;
-    if (!track) return 5;
-    const thumbSize = 44;
-    return online ? Math.max(5, track.clientWidth - thumbSize - 5) : 5;
-  };
-
-  const handlePointerDown = (event) => {
-    if (
-      busy ||
-      !event.isPrimary ||
-      (event.pointerType === "mouse" && event.button !== 0)
-    ) {
-      return;
-    }
-    const startPosition = getThumbPosition();
-    const track = trackRef.current?.getBoundingClientRect();
-    const maxPosition = Math.max(5, (track?.width || 54) - 49);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startPosition,
-      maxPosition,
-    };
-    setIsDragging(true);
-    setThumbPosition(startPosition);
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const handlePointerMove = (event) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const position = Math.min(
-      drag.maxPosition,
-      Math.max(5, drag.startPosition + event.clientX - drag.startX),
-    );
-    setThumbPosition(position);
-  };
-
-  const finishPointer = (event, cancelled = false) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    setIsDragging(false);
-    setThumbPosition(null);
-    if (cancelled) return;
-    const delta = event.clientX - drag.startX;
-    const threshold = Math.max(36, (trackRef.current?.clientWidth || 200) * 0.2);
-    if ((!online && delta >= threshold) || (online && delta <= -threshold)) {
-      onToggle();
-    }
-  };
-
-  const cancelPointer = (event) => finishPointer(event, true);
-
-  const handleKeyDown = (event) => {
-    const shouldToggle =
-      (!online && event.key === "ArrowRight") ||
-      (online && event.key === "ArrowLeft") ||
-      event.key === " " ||
-      event.key === "Enter";
-    if (!shouldToggle || busy) return;
-    event.preventDefault();
-    onToggle();
-  };
-
-  const isSearching = online && !busy && !hasActiveDelivery;
-
-  return (
-    <div
-      ref={trackRef}
-      role="switch"
-      aria-checked={online}
-      aria-disabled={busy}
-      aria-label={
-        busy
-          ? "Actualizando disponibilidad."
-          : hasActiveDelivery
-            ? "Tienes un domicilio en curso."
-            : online
-          ? "Buscando pedidos. Desliza a la izquierda para desconectarte."
-          : "Desliza a la derecha para conectarte."
-      }
-      tabIndex={busy ? -1 : 0}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={finishPointer}
-      onPointerCancel={cancelPointer}
-      onKeyDown={handleKeyDown}
-      className={`relative flex h-14 w-full touch-pan-y select-none items-center overflow-hidden rounded-full border px-3 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:opacity-50 ${
-        online
-          ? "border-emerald-300/30 bg-emerald-400/15"
-          : "border-white/10 bg-white/[0.05]"
-      } ${
-        busy
-          ? "cursor-wait opacity-60"
-          : isDragging
-            ? "cursor-grabbing"
-            : "cursor-grab"
-      } ${className}`}
-    >
-      {online ? (
-        <ChevronLeft
-          size={18}
-          className="absolute right-4 text-emerald-100/50"
-          aria-hidden="true"
-        />
-      ) : (
-        <ChevronRight
-          size={18}
-          className="absolute right-4 text-neutral-400"
-          aria-hidden="true"
-        />
-      )}
-      <span
-        className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-2 px-14 text-center text-sm font-extrabold sm:text-base ${
-          isSearching
-            ? "motion-safe:animate-pulse text-emerald-100"
-            : online
-              ? "text-emerald-100"
-              : "text-neutral-200"
-        }`}
-      >
-        {isSearching && (
-          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-300" />
-        )}
-        {busy ? (
-          <>
-            <LoaderCircle size={16} className="shrink-0 animate-spin" />
-            Actualizando...
-          </>
-        ) : hasActiveDelivery ? (
-          "Domicilio en curso"
-        ) : online ? (
-          "Buscando pedidos"
-        ) : (
-          "Desliza para conectarte"
-        )}
-      </span>
-      <span
-        aria-hidden="true"
-        className={`pointer-events-none absolute top-1/2 z-10 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full shadow-lg ${
-          isDragging ? "" : "transition-[left,background-color] duration-200"
-        } ${
-          online
-            ? "bg-emerald-300 text-emerald-950"
-            : "bg-neutral-100 text-neutral-900"
-        }`}
-        style={{
-          left:
-            thumbPosition == null
-              ? online
-                ? "calc(100% - 49px)"
-                : "5px"
-              : `${thumbPosition}px`,
-        }}
-      >
-        <Power size={17} />
-      </span>
-    </div>
-  );
-};
 
 const CourierActiveDelivery = ({
   order,
@@ -2960,7 +3183,7 @@ const CourierActiveDelivery = ({
               <p className="text-xs text-neutral-400">
                 {isPublic ? "Pedido público" : "Pedido de tienda"}
               </p>
-              <p className="mt-0.5 text-[11px] font-semibold text-emerald-200">
+              <p className="mt-0.5 text-[11px] font-semibold text-white">
                 {nextStopDistance == null
                   ? "Distancia no disponible"
                   : `${nextStopDistance < 0.1 ? "<0.1" : nextStopDistance.toFixed(1)} km aprox. hasta ${isPickedUp ? "el cliente" : "la tienda"}`}
@@ -2987,7 +3210,7 @@ const CourierActiveDelivery = ({
               rel="noopener noreferrer"
               aria-label="Escribir a la tienda por WhatsApp"
               title="Escribir a la tienda por WhatsApp"
-              className="mr-2 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-emerald-300 transition hover:bg-emerald-300/10 hover:text-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+              className="mr-2 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-white transition hover:bg-primary-container/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-container"
             >
               <MessageCircle size={19} aria-hidden="true" />
             </a>
@@ -2996,7 +3219,7 @@ const CourierActiveDelivery = ({
             <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
               Domicilio
             </p>
-            <p className="text-base font-black text-emerald-300">
+            <p className="text-base font-black text-white">
               {formatMoney(order.delivery_fee)}
             </p>
           </div>
@@ -3005,7 +3228,7 @@ const CourierActiveDelivery = ({
         {!isCardCollapsed && (
         <div className="space-y-3 px-4 py-3">
           <div className={`flex gap-3 ${isPickedUp ? "opacity-55" : ""}`}>
-            <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-violet-300 text-xs font-black text-neutral-950">
+            <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary-container text-xs font-black text-on-primary">
               A
             </span>
             <div className="min-w-0 flex-1">
@@ -3018,7 +3241,7 @@ const CourierActiveDelivery = ({
             </div>
           </div>
           <div className="flex gap-3">
-            <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-emerald-300 text-xs font-black text-neutral-950">
+            <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary-container text-xs font-black text-on-primary">
               B
             </span>
             <div className="min-w-0 flex-1">
@@ -3039,7 +3262,7 @@ const CourierActiveDelivery = ({
                 href={customerWhatsappUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300 hover:text-emerald-200"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary-container hover:text-white"
               >
                 <MessageCircle size={15} aria-hidden="true" />
                 Escribir al cliente por WhatsApp
@@ -3086,7 +3309,7 @@ const CourierActiveDelivery = ({
                 onUpdateStatus(order, isPickedUp ? "delivered" : "picked_up")
               }
               disabled={busy}
-              className="min-h-11 flex-1 rounded-xl bg-emerald-400 px-4 text-sm font-black text-neutral-950 transition hover:bg-emerald-300 disabled:cursor-wait disabled:opacity-50"
+              className="min-h-11 flex-1 rounded-xl bg-primary-container px-4 text-sm font-black text-on-primary transition hover:brightness-110 disabled:cursor-wait disabled:opacity-50"
             >
               {busy
                 ? "Actualizando..."
@@ -3128,13 +3351,13 @@ const CourierOfferPreview = ({
         border: "border-white/10",
         label: "text-neutral-300",
         badge: "bg-white/[0.06] text-neutral-300",
-        action: "bg-emerald-400 text-neutral-950 hover:bg-emerald-300",
+        action: "bg-primary-container text-white hover:brightness-110",
       }
     : {
         border: "border-violet-300/30",
         label: "text-violet-200",
         badge: "bg-violet-400/15 text-violet-200",
-        action: "bg-emerald-400 text-neutral-950 hover:bg-emerald-300",
+        action: "bg-primary-container text-white hover:brightness-110",
       };
 
   return (
@@ -3186,7 +3409,7 @@ const CourierOfferPreview = ({
           <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-500">
             Domicilio
           </p>
-          <p className="mt-1 text-sm font-black text-emerald-300">
+          <p className="mt-1 text-sm font-black text-violet-300">
             {formatMoney(order.delivery_fee)}
           </p>
         </div>
@@ -3205,7 +3428,7 @@ const CourierOfferPreview = ({
       </div>
       <div aria-hidden="true" className="h-1 bg-white/10">
         <div
-          className={`h-full origin-left ${isPublic ? "bg-amber-300" : "bg-violet-400"}`}
+          className="h-full origin-left bg-primary-container"
           style={{ animation: "courier-offer-countdown 15s linear forwards" }}
         />
       </div>
@@ -3216,24 +3439,27 @@ const CourierOfferPreview = ({
 const CourierMapExperience = ({
   mode,
   locationStatus,
+  menuOpen,
+  onToggleMenu,
   online,
   realtimeStatus,
   location,
+  publicRadiusKm,
+  searchingPublic,
   orders,
   activeDelivery,
   previewOrderIds,
-  previewedOrderIds,
   onFinishOrderPreview,
   activeOrderId,
   selectedOrderId,
   errorMessage,
   availabilityBusy,
   onToggleAvailability,
-  onSelectOrder,
   onClaim,
   onUpdateStatus,
 }) => {
   const [ordersExpanded, setOrdersExpanded] = useState(false);
+  const [ordersFullScreen, setOrdersFullScreen] = useState(false);
   const [recenterRequest, setRecenterRequest] = useState(0);
   const [previewCapacity, setPreviewCapacity] = useState(() =>
     typeof window === "undefined"
@@ -3253,39 +3479,22 @@ const CourierMapExperience = ({
     () => previewOrders.slice(0, previewCapacity),
     [previewCapacity, previewOrders],
   );
-  const visiblePreviewOrderIds = useMemo(
-    () => new Set(visiblePreviewOrders.map(getCourierOrderKey)),
-    [visiblePreviewOrders],
-  );
   const visibleOrders = useMemo(
     () => activeDelivery
       ? [activeDelivery]
       : [...orders]
-        .filter(
-          (order) =>
-            order.delivery_status === "available" &&
-            previewedOrderIds.has(getCourierOrderKey(order)),
-        ),
-    [activeDelivery, orders, previewedOrderIds],
+        .filter((order) => order.delivery_status === "available"),
+    [activeDelivery, orders],
   );
+
   const mapOrders = useMemo(
     () => activeDelivery
       ? []
       : orders.filter(
-        (order) =>
-          order.delivery_status === "available" &&
-          (
-            visiblePreviewOrderIds.has(getCourierOrderKey(order)) ||
-            previewedOrderIds.has(getCourierOrderKey(order))
-          ),
+        (order) => order.delivery_status === "available",
       ),
-    [activeDelivery, orders, previewedOrderIds, visiblePreviewOrderIds],
+    [activeDelivery, orders],
   );
-  const selectOrder = (orderId) => {
-    setOrdersExpanded(true);
-    onSelectOrder(orderId);
-  };
-
   useEffect(() => {
     const updatePreviewCapacity = () => {
       setPreviewCapacity(
@@ -3295,16 +3504,22 @@ const CourierMapExperience = ({
     window.addEventListener("resize", updatePreviewCapacity);
     return () => window.removeEventListener("resize", updatePreviewCapacity);
   }, []);
+  useEffect(() => {
+    if (!online || activeDelivery) {
+      setOrdersExpanded(false);
+      setOrdersFullScreen(false);
+    }
+  }, [activeDelivery, online]);
 
   return (
     <>
       <PortalDomiciliarioMap
         fullScreen
         location={location}
+        publicRadiusKm={publicRadiusKm}
+        searching={searchingPublic}
         orders={mapOrders}
         online={online}
-        selectedOrderId={selectedOrderId}
-        onSelectOrder={selectOrder}
         recenterRequest={recenterRequest}
       />
 
@@ -3352,9 +3567,13 @@ const CourierMapExperience = ({
         </div>
       )}
 
-      <div className="pointer-events-none fixed inset-x-3 bottom-3 z-20 sm:inset-x-6 sm:bottom-5">
-        {!activeDelivery && (
-          <div className="pointer-events-auto mx-auto mb-2 flex w-full max-w-xl justify-end">
+      <div
+        className={`pointer-events-none fixed inset-x-0 bottom-0 flex flex-col items-center ${
+          ordersFullScreen ? "z-40" : "z-20"
+        }`}
+      >
+        {!activeDelivery && !ordersFullScreen && (
+          <div className="pointer-events-none mb-4 flex w-full max-w-3xl justify-end px-4 sm:px-6">
             <button
               type="button"
               onClick={() => setRecenterRequest((request) => request + 1)}
@@ -3365,79 +3584,151 @@ const CourierMapExperience = ({
               }
               aria-label="Centrar mapa en mi ubicación"
               title="Centrar mapa en mi ubicación"
-              className="grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-neutral-950/95 text-emerald-200 shadow-lg shadow-black/30 backdrop-blur-xl transition hover:border-emerald-300/30 hover:bg-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+              className="pointer-events-auto grid h-11 w-11 place-items-center rounded-2xl border border-primary-container/50 bg-primary-container text-on-primary shadow-lg shadow-primary-container/30 transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-container disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <LocateFixed size={20} strokeWidth={2.2} />
+              <LocateFixed size={19} strokeWidth={2.4} />
             </button>
           </div>
         )}
-        <div className="pointer-events-auto mx-auto max-w-xl overflow-hidden rounded-full border border-white/10 bg-neutral-950/95 shadow-xl shadow-black/30 backdrop-blur-xl">
-          <div className="flex items-center gap-2 p-3">
-            <CourierAvailabilitySlider
-              online={online}
-              busy={availabilityBusy}
-              hasActiveDelivery={Boolean(activeDelivery)}
-              onToggle={onToggleAvailability}
-              className="min-w-0 flex-1"
-            />
-            <span className="sr-only" role="status">
-              {locationStatus === "error"
-                ? "Revisa el permiso de ubicación."
-                : locationStatus === "updating"
-                  ? "Actualizando ubicación."
-                  : locationStatus === "live"
-                    ? "Ubicación en vivo."
-                    : online
-                      ? "Localizando."
-                      : "Ubicación pausada."}{" "}
-              {online &&
-                (realtimeStatus === "connected"
-                  ? "Pedidos en tiempo real conectados."
-                  : realtimeStatus === "fallback"
-                    ? "Actualización automática activa."
-                    : "Conectando pedidos en tiempo real.")}
-            </span>
+        <section
+          className={`courier-bottom-sheet pointer-events-auto mx-auto w-full overflow-hidden border border-b-0 border-white/10 bg-neutral-950/95 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-2xl shadow-black/40 backdrop-blur-xl ${
+            ordersFullScreen
+              ? "flex h-[100dvh] max-h-[100dvh] max-w-none flex-col rounded-none border-x-0 border-t-0"
+              : "max-w-3xl rounded-t-3xl"
+          }`}
+        >
+          <div className="mx-auto mb-1 mt-2 h-1 w-10 rounded-full bg-white/20" />
+          <div className="flex items-center gap-3 px-4 pb-3 pt-2 sm:px-5">
+            {!activeDelivery && (
+              <>
+                <button
+                  type="button"
+                  onClick={onToggleMenu}
+                  aria-label={menuOpen ? "Cerrar menú" : "Abrir menú"}
+                  aria-expanded={menuOpen}
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-neutral-950/80 text-neutral-200 shadow-lg backdrop-blur-xl transition hover:bg-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                >
+                  {menuOpen ? <X size={19} /> : <Menu size={19} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleAvailability}
+                  disabled={online || availabilityBusy || Boolean(activeDelivery)}
+                  aria-label={online ? "Buscando pedidos" : "Conectarse"}
+                  className={`inline-flex h-12 min-w-0 flex-1 items-center justify-center gap-2 overflow-hidden rounded-2xl border px-5 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-default disabled:opacity-80 ${
+                    online || availabilityBusy
+                      ? "courier-searching-button border-violet-400/20 bg-primary-container/10 text-violet-200"
+                      : "border-primary-container bg-primary-container text-white shadow-lg shadow-primary-container/20 hover:brightness-110 active:brightness-95"
+                  }`}
+                >
+                  <span className="relative z-10 inline-flex items-center justify-center gap-2">
+                    {availabilityBusy ? (
+                      <LoaderCircle size={16} className="animate-spin" />
+                    ) : online ? (
+                      <span className="h-2 w-2 rounded-full bg-violet-300" />
+                    ) : null}
+                    {availabilityBusy
+                      ? "Conectando"
+                      : online
+                        ? "Buscando"
+                        : "Conectarse"}
+                  </span>
+                </button>
+              </>
+            )}
+            {activeDelivery && (
+              <p className="flex-1 px-1 text-sm font-semibold text-emerald-200">
+                Pedido en curso
+              </p>
+            )}
           </div>
-        </div>
+          <span className="sr-only" role="status">
+            {locationStatus === "error"
+              ? "Revisa el permiso de ubicación."
+              : locationStatus === "updating"
+                ? "Actualizando ubicación."
+                : locationStatus === "live"
+                  ? "Ubicación en vivo."
+                  : online
+                    ? "Localizando."
+                    : "Ubicación pausada."}{" "}
+            {online &&
+              (realtimeStatus === "connected"
+                ? "Pedidos en tiempo real conectados."
+                : realtimeStatus === "fallback"
+                  ? "Actualización automática activa."
+                  : "Conectando pedidos en tiempo real.")}
+          </span>
 
-        {activeDelivery ? (
-          <div className="pointer-events-auto mx-auto mt-2 max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/95 shadow-xl shadow-black/30 backdrop-blur-xl">
-            <p className="border-b border-white/[0.08] px-4 py-2.5 text-xs font-semibold text-emerald-200">
-              Solo puedes llevar un pedido a la vez
-            </p>
-            <div className="p-2.5">
+          {activeDelivery ? (
+            <div className="max-h-[42dvh] overflow-y-auto border-t border-white/[0.08] p-2.5">
               <CourierActiveDelivery
                 order={activeDelivery}
                 busy={activeOrderId === activeDelivery.order_id}
                 onUpdateStatus={onUpdateStatus}
               />
             </div>
-          </div>
-        ) : activeOrderId !== null ? (
-          <p className="pointer-events-auto mx-auto mt-2 max-w-xl rounded-2xl border border-white/10 bg-neutral-950/95 px-4 py-3 text-center text-xs text-neutral-300 shadow-xl shadow-black/30 backdrop-blur-xl">
+          ) : activeOrderId !== null ? (
+            <p className="border-t border-white/[0.08] px-4 py-3 text-center text-xs text-neutral-300">
               Confirmando tu pedido...
-          </p>
-        ) : (visibleOrders.length > 0 || previewOrderIds.length > 0) && (
-          <div className="pointer-events-auto mx-auto mt-2 max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/95 shadow-xl shadow-black/30 backdrop-blur-xl">
-              <button
-                type="button"
-                onClick={() => setOrdersExpanded((expanded) => !expanded)}
-                aria-expanded={ordersExpanded}
-                className="flex w-full items-center justify-between px-4 py-3 text-left text-xs font-semibold text-neutral-300 transition hover:bg-white/[0.04]"
-              >
-                <span>
-                  {ordersExpanded
-                    ? "Ocultar pedidos"
-                    : `Pedidos acumulados (${visibleOrders.length})`}
-                </span>
-                {ordersExpanded ? (
-                  <ChevronUp size={16} />
-                ) : (
-                  <ChevronDown size={16} />
-                )}
-              </button>
+            </p>
+          ) : online && (
+            <div
+              className={`border-t border-white/[0.08] ${
+                ordersFullScreen ? "flex min-h-0 flex-1 flex-col" : ""
+              }`}
+            >
+              <div className="flex items-center px-2 sm:px-3">
+                <button
+                  type="button"
+                  aria-pressed={ordersFullScreen}
+                  aria-label={
+                    ordersFullScreen
+                      ? "Salir de pantalla completa"
+                      : "Ver pedidos en pantalla completa"
+                  }
+                  title={
+                    ordersFullScreen
+                      ? "Salir de pantalla completa"
+                      : "Ver pedidos en pantalla completa"
+                  }
+                  onClick={() => {
+                    setOrdersExpanded(true);
+                    setOrdersFullScreen((expanded) => !expanded);
+                  }}
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-neutral-300 transition hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-container"
+                >
+                  {ordersFullScreen ? (
+                    <Minimize2 size={16} aria-hidden="true" />
+                  ) : (
+                    <Maximize2 size={16} aria-hidden="true" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (ordersExpanded) setOrdersFullScreen(false);
+                    setOrdersExpanded((expanded) => !expanded);
+                  }}
+                  aria-expanded={ordersExpanded}
+                  className="flex min-h-11 flex-1 items-center justify-between px-2 text-left text-xs font-semibold text-neutral-300 transition hover:bg-white/[0.04]"
+                >
+                  <span>Pedidos cercanos ({visibleOrders.length})</span>
+                  {ordersExpanded ? (
+                    <ChevronUp size={16} />
+                  ) : (
+                    <ChevronDown size={16} />
+                  )}
+                </button>
+              </div>
               {ordersExpanded && (
-                <div className="max-h-[32dvh] space-y-2 overflow-y-auto border-t border-white/[0.08] p-2.5">
+                <div
+                  className={`space-y-2 overflow-y-auto border-t border-white/[0.08] p-2.5 ${
+                    ordersFullScreen
+                      ? "min-h-0 flex-1"
+                      : "max-h-[32dvh]"
+                  }`}
+                >
                   {visibleOrders.length > 0 ? (
                     visibleOrders.map((order) => (
                       <OrderCard
@@ -3455,13 +3746,14 @@ const CourierMapExperience = ({
                     ))
                   ) : (
                     <p className="px-3 py-4 text-center text-xs text-neutral-500">
-                      Los pedidos aparecerán aquí al terminar su vista previa.
+                      No hay pedidos cercanos disponibles.
                     </p>
                   )}
                 </div>
               )}
-          </div>
-        )}
+            </div>
+          )}
+        </section>
       </div>
     </>
   );

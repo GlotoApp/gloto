@@ -309,6 +309,76 @@ body {
     }
 }
 
+@keyframes courier-bottom-sheet-in {
+    from {
+        opacity: 0;
+        transform: translateY(100%);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.courier-bottom-sheet {
+    animation: courier-bottom-sheet-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.courier-searching-button {
+    position: relative;
+    isolation: isolate;
+}
+
+.courier-searching-button::before,
+.courier-searching-button::after {
+    position: absolute;
+    z-index: 0;
+    top: 50%;
+    left: 50%;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        rgba(167, 139, 250, 0.18) 0%,
+        rgba(167, 139, 250, 0.1) 58%,
+        rgba(167, 139, 250, 0) 100%
+    );
+    content: "";
+    pointer-events: none;
+    transform: translate(-50%, -50%) scale(0);
+    transform-origin: center;
+    animation: courier-searching-ripple 2.4s ease-out infinite;
+}
+
+.courier-searching-button::after {
+    animation-delay: 1.2s;
+}
+
+@keyframes courier-searching-ripple {
+    0% {
+        opacity: 0.55;
+        transform: translate(-50%, -50%) scale(0.05);
+    }
+
+    75% {
+        opacity: 0.2;
+        transform: translate(-50%, -50%) scale(28);
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(44);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .courier-bottom-sheet {
+        animation: none;
+    }
+}
+
 @keyframes courier-offer-countdown {
     from {
         transform: scaleX(1);
@@ -319,36 +389,69 @@ body {
     }
 }
 
-.courier-order-logo-icon {
-    background: transparent;
-    border: 0;
-}
-
-.courier-order-logo-marker {
+.courier-store-heat-icon {
     display: grid;
-    width: 100%;
-    height: 100%;
     place-items: center;
-    overflow: hidden;
-    border: 2px solid white;
+    border: 0;
+    background: transparent;
+    overflow: visible;
+}
+
+.courier-store-heat-icon span {
+    display: block;
+    width: var(--heat-size, 140px);
+    height: var(--heat-size, 140px);
     border-radius: 50%;
-    background: #a78bfa;
-    box-shadow: 0 2px 6px rgb(0 0 0 / 45%);
+    background: radial-gradient(
+        circle,
+        rgb(239 68 68 / var(--heat-opacity, 0.4)) 0%,
+        rgb(249 115 22 / calc(var(--heat-opacity, 0.4) * 0.8)) 22%,
+        rgb(251 146 60 / calc(var(--heat-opacity, 0.4) * 0.45)) 48%,
+        rgb(251 191 36 / calc(var(--heat-opacity, 0.4) * 0.16)) 68%,
+        transparent 100%
+    );
+    filter: blur(2px);
+    mix-blend-mode: screen;
 }
 
-.courier-order-logo-marker.is-public {
-    background: #f59e0b;
+.courier-store-heat-icon i {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 8px;
+    height: 8px;
+    transform: translate(-50%, -50%);
+    border: 1px solid #fff;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 8px rgb(255 255 255 / 85%);
 }
 
-.courier-order-logo-marker.is-selected {
-    outline: 2px solid #7c3aed;
-    outline-offset: 1px;
+.courier-store-popup {
+    display: grid;
+    gap: 6px;
+    color: #18181b;
+    font-family: Inter, system-ui, sans-serif;
 }
 
-.courier-order-logo-marker img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+.courier-store-popup strong {
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.courier-store-popup p {
+    margin: 0;
+    color: #52525b;
+    font-size: 12px;
+}
+
+.courier-store-popup a {
+    width: fit-content;
+    color: #6d28d9;
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
 }
 
 .courier-route-point-icon {
@@ -388,16 +491,16 @@ body {
 
 .courier-location-dot {
     display: grid;
-    width: 32px;
-    height: 32px;
+    width: 16px;
+    height: 16px;
     place-items: center;
     border-radius: 50%;
-    background: rgb(66 133 244 / 20%);
+    background: transparent;
 }
 
 .courier-location-dot-center {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     border: 3px solid white;
     border-radius: 50%;
     background: #4285f4;

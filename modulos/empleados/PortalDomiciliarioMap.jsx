@@ -70,10 +70,10 @@ const fitActiveRouteBounds = (map, routeBounds, animate) => {
 const PortalDomiciliarioMap = ({
   location,
   orders = [],
+  publicRadiusKm,
+  searching = false,
   online = false,
-  onSelectOrder,
   fullScreen = false,
-  selectedOrderId,
   activeDelivery = null,
   recenterRequest = 0,
   fitRouteRequest = 0,
@@ -83,16 +83,24 @@ const PortalDomiciliarioMap = ({
   const leafletRef = useRef(null);
   const hasCenteredRef = useRef(false);
   const courierMarkerRef = useRef(null);
+  const coverageLayerRef = useRef(null);
   const orderMarkersRef = useRef(null);
   const routeLayerRef = useRef(null);
   const fittedRoadRouteRef = useRef(null);
   const fittedActiveDeliveryRef = useRef(null);
   const lastRecenterRequestRef = useRef(recenterRequest);
   const lastFitRouteRequestRef = useRef(fitRouteRequest);
-  const onSelectOrderRef = useRef(onSelectOrder);
   const [mapError, setMapError] = useState("");
   const [routeError, setRouteError] = useState("");
   const [mapReady, setMapReady] = useState(false);
+  const coverageRadiusMeters = Number(publicRadiusKm) * 1000;
+  const hasCoverageRadius =
+    Number.isFinite(coverageRadiusMeters) && coverageRadiusMeters > 0;
+  const hasValidLocation = isValidCoordinate(
+    location?.latitude,
+    location?.longitude,
+  );
+  const lastCoverageRadiusRef = useRef(null);
   const routeDeliveryOrderId = activeDelivery?.order_id;
   const routeDeliveryStatus = activeDelivery?.delivery_status;
   const pickupLatitude = Number(activeDelivery?.pickup_latitude);
@@ -127,10 +135,6 @@ const PortalDomiciliarioMap = ({
         : 0) +
       (isValidCoordinate(destinationLatitude, destinationLongitude) ? 1 : 0) >=
     2;
-
-  useEffect(() => {
-    onSelectOrderRef.current = onSelectOrder;
-  }, [onSelectOrder]);
 
   useEffect(() => {
     if (!containerRef.current) return undefined;
@@ -172,6 +176,7 @@ const PortalDomiciliarioMap = ({
       mapRef.current = null;
       leafletRef.current = null;
       courierMarkerRef.current = null;
+      coverageLayerRef.current = null;
       orderMarkersRef.current = null;
       routeLayerRef.current = null;
     };
@@ -182,14 +187,18 @@ const PortalDomiciliarioMap = ({
     const L = leafletRef.current;
     if (!mapReady || !map || !L) return;
 
-    if (!isValidCoordinate(location?.latitude, location?.longitude)) {
+    if (!hasValidLocation) {
       courierMarkerRef.current?.remove();
       courierMarkerRef.current = null;
+      coverageLayerRef.current?.layer.remove();
+      coverageLayerRef.current = null;
       hasCenteredRef.current = false;
+      lastCoverageRadiusRef.current = null;
       return;
     }
 
     const point = [Number(location.latitude), Number(location.longitude)];
+    const showCoverage = hasCoverageRadius && !activeDelivery;
     const courierIcon = L.divIcon({
       className: "courier-location-icon",
       html: '<span class="courier-location-dot"><span class="courier-location-dot-center"></span></span>',
@@ -208,15 +217,58 @@ const PortalDomiciliarioMap = ({
       courierMarkerRef.current.setLatLng(point);
     }
 
-    if (activeDelivery) return;
+    if (showCoverage) {
+      if (!coverageLayerRef.current) {
+        const coverageLayer = L.layerGroup();
+        const boundary = L.circle(point, {
+          radius: coverageRadiusMeters,
+          stroke: false,
+          fill: false,
+        });
+        coverageLayer.addLayer(boundary);
+        coverageLayer.addTo(map);
+        coverageLayerRef.current = { layer: coverageLayer, boundary };
+      } else {
+        const { boundary } = coverageLayerRef.current;
+        boundary.setLatLng(point).setRadius(coverageRadiusMeters);
+      }
+    } else if (coverageLayerRef.current) {
+      coverageLayerRef.current.layer.remove();
+      coverageLayerRef.current = null;
+    }
 
-    if (!hasCenteredRef.current) {
-      map.setView(point, 15, { animate: false });
+    if (activeDelivery) {
+      lastCoverageRadiusRef.current = null;
+      return;
+    }
+
+    const radiusChanged =
+      showCoverage && lastCoverageRadiusRef.current !== coverageRadiusMeters;
+    if (!hasCenteredRef.current || radiusChanged) {
+      if (showCoverage) {
+        map.fitBounds(coverageLayerRef.current.boundary.getBounds(), {
+          padding: [28, 28],
+          maxZoom: 15,
+          animate: false,
+        });
+      } else {
+        map.setView(point, 15, { animate: false });
+      }
       hasCenteredRef.current = true;
+      lastCoverageRadiusRef.current = showCoverage ? coverageRadiusMeters : null;
     } else if (online) {
       map.panTo(point, { animate: false });
     }
-  }, [activeDelivery, location, mapReady, online]);
+  }, [
+    activeDelivery,
+    coverageRadiusMeters,
+    hasCoverageRadius,
+    hasValidLocation,
+    location,
+    mapReady,
+    online,
+    searching,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -229,11 +281,19 @@ const PortalDomiciliarioMap = ({
     }
     lastRecenterRequestRef.current = recenterRequest;
     if (!isValidCoordinate(location?.latitude, location?.longitude)) return;
-    map.setView(
-      [Number(location.latitude), Number(location.longitude)],
-      15,
-      { animate: true },
-    );
+    if (coverageLayerRef.current) {
+      map.fitBounds(coverageLayerRef.current.boundary.getBounds(), {
+        padding: [28, 28],
+        maxZoom: 15,
+        animate: true,
+      });
+    } else {
+      map.setView(
+        [Number(location.latitude), Number(location.longitude)],
+        15,
+        { animate: true },
+      );
+    }
   }, [location, mapReady, recenterRequest]);
 
   useEffect(() => {
@@ -300,94 +360,62 @@ const PortalDomiciliarioMap = ({
     }
 
     fittedActiveDeliveryRef.current = null;
+    const storeDemand = new Map();
     orders.forEach((order) => {
       if (order.delivery_status !== "available") return;
-      const isPublicOrder = order.courier_mode === "public";
-      const hasPickupLocation = isValidCoordinate(
-        order.pickup_latitude,
-        order.pickup_longitude,
-      );
-      const markerLatitude =
-        isPublicOrder && hasPickupLocation
-          ? order.pickup_latitude
-          : order.destination_latitude;
-      const markerLongitude =
-        isPublicOrder && hasPickupLocation
-          ? order.pickup_longitude
-          : order.destination_longitude;
-      if (
-        !isValidCoordinate(markerLatitude, markerLongitude)
-      ) {
-        return;
-      }
+      const latitude = Number(order.pickup_latitude);
+      const longitude = Number(order.pickup_longitude);
+      if (!isValidCoordinate(latitude, longitude)) return;
 
-      const point = [
-        Number(markerLatitude),
-        Number(markerLongitude),
-      ];
-      const selected = order.order_id === selectedOrderId;
-      const logoUrl = typeof order.business_logo_url === "string"
-        ? order.business_logo_url
-        : "";
-      const safeLogoUrl = /^https?:\/\//i.test(logoUrl)
-        ? logoUrl.replace(/[&<>"']/g, (character) => ({
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&#39;",
-          })[character])
-        : "";
-      const markerSize = selected ? 24 : 18;
-      const marker = safeLogoUrl
-        ? L.marker(point, {
-            icon: L.divIcon({
-              className: "courier-order-logo-icon",
-              html: `<span class="courier-order-logo-marker ${order.courier_mode === "public" ? "is-public" : "is-store"}${selected ? " is-selected" : ""}"><img src="${safeLogoUrl}" alt="" /></span>`,
-              iconSize: [markerSize, markerSize],
-              iconAnchor: [markerSize / 2, markerSize / 2],
-            }),
-            zIndexOffset: selected ? 1000 : 0,
-          })
-        : L.circleMarker(point, {
-            radius: selected ? 12 : 9,
-            color: "#ffffff",
-            weight: selected ? 4 : 3,
-            fillColor: selected
-              ? "#7c3aed"
-              : order.courier_mode === "public"
-                ? "#f59e0b"
-                : "#a78bfa",
-            fillOpacity: 1,
-          });
+      const storeKey = order.business_id
+        ? `store:${order.business_id}`
+        : `location:${latitude.toFixed(5)}:${longitude.toFixed(5)}`;
+      const store = storeDemand.get(storeKey) || {
+        latitudeTotal: 0,
+        longitudeTotal: 0,
+        businessName: order.business_name || "",
+        count: 0,
+      };
+      store.latitudeTotal += latitude;
+      store.longitudeTotal += longitude;
+      if (!store.businessName && order.business_name) {
+        store.businessName = order.business_name;
+      }
+      store.count += 1;
+      storeDemand.set(storeKey, store);
+    });
+
+    storeDemand.forEach(({ latitudeTotal, longitudeTotal, businessName, count }) => {
+      const latitude = latitudeTotal / count;
+      const longitude = longitudeTotal / count;
+      const intensity = Math.min(Math.sqrt(count) / 2.5, 1);
+      const markerSize = Math.round(115 + intensity * 105);
+      const opacity = (0.28 + intensity * 0.42).toFixed(2);
+      const marker = L.marker([latitude, longitude], {
+        icon: L.divIcon({
+          className: "courier-store-heat-icon",
+          html: `<span style="--heat-size:${markerSize}px;--heat-opacity:${opacity}"><i></i></span>`,
+          iconSize: [markerSize, markerSize],
+          iconAnchor: [markerSize / 2, markerSize / 2],
+        }),
+        zIndexOffset: count,
+      });
       const popup = document.createElement("div");
-      const business = document.createElement("strong");
-      business.textContent = order.business_name || "Pedido disponible";
-      const source = document.createElement("div");
-      source.textContent =
-        order.courier_mode === "public" ? "Pedido público" : "Pedido de tienda";
-      const fee = document.createElement("div");
-      fee.textContent = new Intl.NumberFormat("es-CO", {
-        style: "currency",
-        currency: "COP",
-        maximumFractionDigits: 0,
-      }).format(Number(order.delivery_fee) || 0);
-      popup.append(business);
-      popup.append(source);
-      if (order.distance_km != null) {
-        const distance = document.createElement("div");
-        distance.textContent = isPublicOrder
-          ? `${Number(order.distance_km).toFixed(1)} km de la tienda`
-          : `${Number(order.distance_km).toFixed(1)} km de ti`;
-        popup.append(distance);
-      }
-      popup.append(fee);
-
-      marker.bindPopup(popup);
-      marker.on("click", () => onSelectOrderRef.current?.(order.order_id));
+      popup.className = "courier-store-popup";
+      const title = document.createElement("strong");
+      title.textContent = businessName || "Tienda cercana";
+      const orderCount = document.createElement("p");
+      orderCount.textContent = `${count} ${count === 1 ? "pedido disponible" : "pedidos disponibles"}`;
+      const directionsLink = document.createElement("a");
+      directionsLink.href = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
+      directionsLink.target = "_blank";
+      directionsLink.rel = "noopener noreferrer";
+      directionsLink.textContent = "Abrir ruta en Google Maps";
+      popup.append(title, orderCount, directionsLink);
+      marker.bindPopup(popup, { closeButton: true, minWidth: 190 });
       marker.addTo(markerLayer);
     });
-  }, [activeDelivery, location, mapReady, orders, selectedOrderId]);
+  }, [activeDelivery, location, mapReady, orders]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -511,7 +539,7 @@ const PortalDomiciliarioMap = ({
     >
       <div
         ref={containerRef}
-        className="absolute inset-0 z-0"
+        className="courier-map-container absolute inset-0 z-0"
         aria-label="Mapa de entregas cercanas"
       />
       {mapError && (

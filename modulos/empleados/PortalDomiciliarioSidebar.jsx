@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Power,
   Store,
   UserRound,
   Wallet,
@@ -41,12 +42,12 @@ const PortalDomiciliarioSidebar = ({
   publicEnabled,
   availabilityBusy,
   onToggleAvailability,
+  courierOnline,
+  onDisconnect,
   sessionEarnings,
   activityValuesVisible,
   onToggleActivityValues,
   onOpenActivity,
-  balance,
-  onOpenBalance,
   displayName,
   onSignOut,
   compact = false,
@@ -97,7 +98,7 @@ const PortalDomiciliarioSidebar = ({
           )}
         </div>
         <div
-          className={`pointer-events-auto flex items-center gap-1 rounded-xl border border-emerald-400/20 bg-neutral-950/85 p-1 text-emerald-200 shadow-lg backdrop-blur-xl ${
+          className={`pointer-events-auto flex items-center gap-1 rounded-xl border border-primary-container/30 bg-primary-container p-1 text-white shadow-lg shadow-primary-container/20 backdrop-blur-xl ${
             compact
               ? "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
               : ""
@@ -107,7 +108,7 @@ const PortalDomiciliarioSidebar = ({
             type="button"
             onClick={onOpenActivity}
             aria-label="Abrir resumen de jornada"
-            className="flex shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 transition hover:bg-neutral-900"
+            className="flex shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 transition hover:bg-white/10"
           >
             <CircleDollarSign size={17} />
             <span className="text-xs font-black sm:text-sm">Jornada</span>
@@ -124,27 +125,11 @@ const PortalDomiciliarioSidebar = ({
                 : "Mostrar ganancias de la jornada"
             }
             aria-pressed={activityValuesVisible}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg transition hover:bg-neutral-900"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/10"
           >
             {activityValuesVisible ? <Eye size={17} /> : <EyeOff size={17} />}
           </button>
         </div>
-        <button
-          type="button"
-          onClick={onOpenBalance}
-          aria-label={`Mi saldo disponible: ${formatMoney(balance)}`}
-          className={`pointer-events-auto flex shrink-0 items-center gap-2 rounded-xl border border-violet-400/20 bg-neutral-950/85 px-3 py-2 text-violet-200 shadow-lg backdrop-blur-xl transition hover:border-violet-300/40 hover:bg-neutral-900 ${
-            compact ? "absolute right-3 top-1/2 -translate-y-1/2" : ""
-          }`}
-        >
-          <Wallet size={17} />
-          <div>
-            <p className="hidden text-[9px] font-bold uppercase tracking-wider text-violet-200/70 sm:block">
-              Mi saldo
-            </p>
-            <p className="text-xs font-black sm:text-sm">{formatMoney(balance)}</p>
-          </div>
-        </button>
       </div>
     </header>
 
@@ -286,11 +271,22 @@ const PortalDomiciliarioSidebar = ({
           <div className="border-t border-white/[0.07] p-3">
             <button
               type="button"
-              onClick={onSignOut}
-              className="flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-neutral-400 transition hover:bg-rose-400/10 hover:text-rose-200"
+              onClick={courierOnline ? onDisconnect : onSignOut}
+              disabled={availabilityBusy}
+              className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
+                courierOnline
+                  ? "border border-rose-300/15 bg-rose-400/[0.08] text-rose-200 hover:bg-rose-400/[0.14]"
+                  : "text-neutral-400 hover:bg-rose-400/10 hover:text-rose-200"
+              }`}
             >
-              <LogOut size={18} />
-              Cerrar sesión
+              {availabilityBusy ? (
+                <span className="h-[18px] w-[18px] animate-spin rounded-full border-2 border-rose-200/30 border-t-rose-200" />
+              ) : courierOnline ? (
+                <Power size={18} />
+              ) : (
+                <LogOut size={18} />
+              )}
+              {courierOnline ? "Desconectarse" : "Cerrar sesión"}
             </button>
           </div>
         </aside>
