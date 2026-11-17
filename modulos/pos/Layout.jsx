@@ -6,6 +6,40 @@ import { Loading, LOADING_DURATION_MS } from "./Loading";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 
+const playOrderNotificationSound = (audioContext) => {
+  const playTone = () => {
+    if (audioContext.state !== "running") return;
+
+    try {
+      const startAt = audioContext.currentTime;
+      [880, 1174].forEach((frequency, index) => {
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        const noteStart = startAt + index * 0.18;
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(frequency, noteStart);
+        gain.gain.setValueAtTime(0.0001, noteStart);
+        gain.gain.exponentialRampToValueAtTime(0.65, noteStart + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.16);
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+        oscillator.start(noteStart);
+        oscillator.stop(noteStart + 0.17);
+      });
+    } catch (error) {
+      console.error("No se pudo reproducir el sonido del pedido:", error);
+    }
+  };
+
+  if (audioContext.state === "suspended") {
+    audioContext.resume().then(playTone).catch((error) => {
+      console.error("No se pudo reactivar el sonido de pedidos:", error);
+    });
+  } else {
+    playTone();
+  }
+};
+
 // Lógica de carga integrada globalmente en el Layout
 const ReadyGate = ({ children }) => {
   const [isReady, setIsReady] = useState(false);
@@ -47,11 +81,16 @@ const Layout = () => {
   const [notificationPromptOpen, setNotificationPromptOpen] = useState(false);
   const [notificationPromptError, setNotificationPromptError] = useState("");
   const [newOrderToast, setNewOrderToast] = useState(null);
+  const [orderBellPosition, setOrderBellPosition] = useState(null);
   const notifiedOrderIdsRef = useRef(new Set());
   const newOrderToastTimerRef = useRef(null);
+  const notificationAudioContextRef = useRef(null);
+  const orderBellDragRef = useRef(null);
+  const suppressOrderBellClickRef = useRef(false);
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
   const isPosRoute = location.pathname === "/pos";
   const isMesasRoute = location.pathname === "/pos/mesas";
+  const isKitchenRoute = location.pathname === "/pos/cocina";
 
   const toggleSidebar = () => {
     if (isSidebarPinned || isSidebarHovered) {
@@ -83,6 +122,106 @@ const Layout = () => {
     setIsSidebarHovered(false);
   };
   const sidebarPushesContent = isPosRoute && isSidebarExpanded;
+
+  useEffect(() => {
+    if (!user?.id) {
+      setOrderBellPosition(null);
+      return;
+    }
+
+    const positionKey = `gloto-order-bell-position-${user.id}`;
+    const clampPosition = (position) => ({
+      x: Math.max(8, Math.min(position.x, window.innerWidth - 64)),
+      y: Math.max(8, Math.min(position.y, window.innerHeight - 64)),
+    });
+
+    try {
+      const savedPosition = JSON.parse(
+        localStorage.getItem(positionKey) || "null",
+      );
+      if (
+        Number.isFinite(savedPosition?.x) &&
+        Number.isFinite(savedPosition?.y)
+      ) {
+        setOrderBellPosition(clampPosition(savedPosition));
+      } else {
+        setOrderBellPosition(
+          clampPosition({
+            x: window.innerWidth - 72,
+            y: 104,
+          }),
+        );
+      }
+    } catch (error) {
+      console.error("No se pudo cargar la posición del aviso de pedidos:", error);
+      setOrderBellPosition({
+        x: Math.max(8, window.innerWidth - 72),
+        y: 104,
+      });
+    }
+
+    const handleResize = () => {
+      setOrderBellPosition((current) =>
+        current ? clampPosition(current) : current,
+      );
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || !orderBellPosition) return;
+    try {
+      localStorage.setItem(
+        `gloto-order-bell-position-${user.id}`,
+        JSON.stringify(orderBellPosition),
+      );
+    } catch (error) {
+      console.error("No se pudo guardar la posición del aviso de pedidos:", error);
+    }
+  }, [orderBellPosition, user?.id]);
+
+  useEffect(() => {
+    if (!newOrderToast) return;
+    setOrderBellPosition((current) => {
+      if (!current) return current;
+      const width = Math.min(320, window.innerWidth - 32);
+      return {
+        ...current,
+        x: Math.max(8, Math.min(current.x, window.innerWidth - width - 8)),
+      };
+    });
+  }, [newOrderToast]);
+
+  useEffect(() => {
+    const unlockNotificationAudio = () => {
+      const AudioContextConstructor =
+        window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextConstructor) return;
+
+      try {
+        notificationAudioContextRef.current ||= new AudioContextConstructor();
+        if (notificationAudioContextRef.current.state === "suspended") {
+          notificationAudioContextRef.current.resume().catch((error) => {
+            console.error("No se pudo habilitar el sonido de pedidos:", error);
+          });
+        }
+      } catch (error) {
+        console.error("No se pudo inicializar el sonido de pedidos:", error);
+      }
+    };
+
+    window.addEventListener("pointerdown", unlockNotificationAudio, {
+      once: true,
+    });
+    window.addEventListener("keydown", unlockNotificationAudio, {
+      once: true,
+    });
+    return () => {
+      window.removeEventListener("pointerdown", unlockNotificationAudio);
+      window.removeEventListener("keydown", unlockNotificationAudio);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user?.id || !("Notification" in window) || !window.isSecureContext) {
@@ -147,47 +286,57 @@ const Layout = () => {
               payload.eventType !== "INSERT" ||
               !order?.id ||
               order.business_id !== profile.business_id ||
+              String(order.metadata?.canal || "").toLowerCase() !==
+                "marketplace" ||
               order.is_reservation === true
             ) {
               return;
             }
 
+            if (isKitchenRoute) return;
+
             const orderId = String(order.id);
             if (notifiedOrderIdsRef.current.has(orderId)) return;
 
+            const isForeground =
+              document.visibilityState === "visible" && document.hasFocus();
             const storageKey = `gloto-notified-orders-${profile.business_id}`;
-            try {
-              const previousIds = JSON.parse(
-                localStorage.getItem(storageKey) || "[]",
-              );
-              if (Array.isArray(previousIds) && previousIds.includes(orderId)) {
-                notifiedOrderIdsRef.current.add(orderId);
-                return;
+            if (!isForeground) {
+              try {
+                const previousIds = JSON.parse(
+                  localStorage.getItem(storageKey) || "[]",
+                );
+                if (
+                  Array.isArray(previousIds) &&
+                  previousIds.includes(orderId)
+                ) {
+                  notifiedOrderIdsRef.current.add(orderId);
+                  return;
+                }
+                localStorage.setItem(
+                  storageKey,
+                  JSON.stringify(
+                    [
+                      ...(Array.isArray(previousIds) ? previousIds : []),
+                      orderId,
+                    ].slice(-100),
+                  ),
+                );
+              } catch (error) {
+                console.error(
+                  "No se pudo guardar la deduplicación de notificaciones:",
+                  error,
+                );
               }
-              localStorage.setItem(
-                storageKey,
-                JSON.stringify(
-                  [...(Array.isArray(previousIds) ? previousIds : []), orderId]
-                    .slice(-100),
-                ),
-              );
-            } catch (error) {
-              console.error(
-                "No se pudo guardar la deduplicación de notificaciones:",
-                error,
-              );
             }
 
             notifiedOrderIdsRef.current.add(orderId);
             const orderNumber = String(
               order.order_number || String(order.id).slice(0, 8).toUpperCase(),
             ).slice(0, 40);
-            const isForeground =
-              document.visibilityState === "visible" &&
-              document.hasFocus();
-            const isLargeScreen = window.matchMedia("(min-width: 768px)").matches;
-
-            if (isForeground && isLargeScreen) {
+            if (isForeground) {
+              const audioContext = notificationAudioContextRef.current;
+              if (audioContext) playOrderNotificationSound(audioContext);
               setNewOrderToast({ id: orderId, number: orderNumber });
             }
 
@@ -198,7 +347,7 @@ const Layout = () => {
             ) {
               return;
             }
-            if (isForeground && isLargeScreen) return;
+            if (isForeground) return;
 
             let notification;
             try {
@@ -215,7 +364,9 @@ const Layout = () => {
             }
             notification.onclick = () => {
               window.focus();
-              navigate("/pos/ordenes");
+              navigate("/pos/ordenes", {
+                state: { openOrderId: orderId },
+              });
               notification.close();
             };
           },
@@ -243,7 +394,12 @@ const Layout = () => {
       cancelled = true;
       if (orderChannel) supabase.removeChannel(orderChannel);
     };
-  }, [browserNotificationPermission, navigate, user?.id]);
+  }, [
+    browserNotificationPermission,
+    isKitchenRoute,
+    navigate,
+    user?.id,
+  ]);
 
   useEffect(() => {
     if (newOrderToastTimerRef.current) {
@@ -276,6 +432,20 @@ const Layout = () => {
       setBrowserNotificationPermission(permission);
       if (permission === "granted") {
         setNotificationPromptOpen(false);
+        try {
+          new window.Notification("Notificaciones activadas", {
+            body: "Te avisaremos cuando llegue un pedido nuevo.",
+            tag: "gloto-notifications-enabled",
+          });
+        } catch (error) {
+          console.error(
+            "El permiso se concedió, pero Chrome no pudo mostrar la notificación de prueba:",
+            error,
+          );
+          setNotificationPromptError(
+            "El permiso quedó activado, pero Chrome no pudo mostrar el aviso de prueba. Revisa las notificaciones del sitio y de Windows.",
+          );
+        }
         try {
           localStorage.removeItem(
             `gloto-order-notifications-dismissed-${user.id}`,
@@ -438,43 +608,114 @@ const Layout = () => {
         </ReadyGate>
       </main>
 
-      {newOrderToast && (
+      {orderBellPosition && user?.id && (
         <section
-          role="status"
-          aria-live="polite"
-          className="fixed right-4 top-4 z-[75] hidden w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-2xl bg-neutral-900 text-white shadow-2xl ring-1 ring-white/10 md:block"
+          className={`fixed z-[75] touch-none text-white shadow-lg ring-1 transition-[width,border-radius,background-color,opacity,box-shadow] duration-300 ${
+            newOrderToast
+              ? "w-[min(320px,calc(100vw-2rem))] rounded-2xl bg-neutral-900 opacity-100 ring-white/10 shadow-2xl"
+              : "w-11 rounded-full bg-neutral-950/65 opacity-60 ring-white/5 shadow-md hover:opacity-100"
+          }`}
+          style={{ left: orderBellPosition.x, top: orderBellPosition.y }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.target.setPointerCapture(event.pointerId);
+            orderBellDragRef.current = {
+              pointerId: event.pointerId,
+              startX: event.clientX,
+              startY: event.clientY,
+              x: orderBellPosition.x,
+              y: orderBellPosition.y,
+              moved: false,
+            };
+          }}
+          onPointerMove={(event) => {
+            const drag = orderBellDragRef.current;
+            if (!drag || drag.pointerId !== event.pointerId) return;
+            const deltaX = event.clientX - drag.startX;
+            const deltaY = event.clientY - drag.startY;
+            if (Math.abs(deltaX) + Math.abs(deltaY) > 5) drag.moved = true;
+            if (!drag.moved) return;
+            event.preventDefault();
+            const bellWidth = newOrderToast
+              ? Math.min(320, window.innerWidth - 32)
+              : 44;
+            setOrderBellPosition({
+              x: Math.max(
+                8,
+                Math.min(drag.x + deltaX, window.innerWidth - bellWidth - 8),
+              ),
+              y: Math.max(8, Math.min(drag.y + deltaY, window.innerHeight - 64)),
+            });
+          }}
+          onPointerUp={(event) => {
+            const drag = orderBellDragRef.current;
+            if (!drag || drag.pointerId !== event.pointerId) return;
+            suppressOrderBellClickRef.current = drag.moved;
+            orderBellDragRef.current = null;
+          }}
+          onPointerCancel={() => {
+            orderBellDragRef.current = null;
+            suppressOrderBellClickRef.current = false;
+          }}
         >
           <button
             type="button"
             onClick={() => {
+              if (suppressOrderBellClickRef.current) {
+                suppressOrderBellClickRef.current = false;
+                return;
+              }
+              const orderId = newOrderToast?.id;
               setNewOrderToast(null);
-              navigate("/pos/ordenes");
+              navigate(
+                "/pos/ordenes",
+                orderId ? { state: { openOrderId: orderId } } : undefined,
+              );
             }}
-            className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-white/[0.04]"
+            aria-label={
+              newOrderToast
+                ? `Abrir pedido ${newOrderToast.number}`
+                : "Abrir órdenes"
+            }
+            className={`flex min-h-11 w-full items-center gap-3 text-left ${
+              newOrderToast ? "p-3 pr-10" : "justify-center"
+            } cursor-grab active:cursor-grabbing`}
           >
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-violet-500/15 text-violet-300">
-              <Bell size={21} />
+            <span
+              className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-violet-300 ${
+                newOrderToast ? "bg-violet-500/15" : "bg-white/5"
+              }`}
+            >
+              <Bell size={18} />
+              {newOrderToast && (
+                <span className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-pulse rounded-full bg-emerald-400 ring-2 ring-neutral-900" />
+              )}
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-bold">
-                ¡Llegó un nuevo pedido!
+            {newOrderToast && (
+              <span role="status" aria-live="polite" className="min-w-0 flex-1">
+                <span className="block text-sm font-bold">
+                  ¡Llegó un nuevo pedido!
+                </span>
+                <span className="mt-1 block truncate text-xs text-neutral-400">
+                  Pedido #{newOrderToast.number} · Toca para ver las órdenes
+                </span>
               </span>
-              <span className="mt-1 block truncate text-xs text-neutral-400">
-                Pedido #{newOrderToast.number} · Toca para ver las órdenes
-              </span>
-            </span>
-            <span aria-hidden="true" className="text-lg text-neutral-500">
-              ›
-            </span>
+            )}
           </button>
-          <button
-            type="button"
-            onClick={() => setNewOrderToast(null)}
-            aria-label="Cerrar aviso del pedido"
-            className="absolute right-2 top-2 rounded-full p-1 text-neutral-500 hover:bg-white/10 hover:text-white"
-          >
-            <X size={14} />
-          </button>
+          {newOrderToast && (
+            <button
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                setNewOrderToast(null);
+              }}
+              aria-label="Contraer aviso del pedido"
+              className="absolute right-2 top-2 rounded-full p-1 text-neutral-500 hover:bg-white/10 hover:text-white"
+            >
+              <X size={14} />
+            </button>
+          )}
         </section>
       )}
 

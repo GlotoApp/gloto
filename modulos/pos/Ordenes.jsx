@@ -24,7 +24,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import SubLoading from "./SubLoading";
 import OrderInvoice, { printOrderInvoice } from "./OrderInvoice";
 import {
@@ -438,9 +438,19 @@ const OrderCard = memo(
     onOpenMap,
     onStatusChange,
     canDelete,
+    autoOpen = false,
   }) => {
-    const [isOpen, setIsOpen] = useState(false);
+    const [isOpen, setIsOpen] = useState(autoOpen);
     const [loadingAction, setLoadingAction] = useState("");
+    const cardRef = useRef(null);
+    useEffect(() => {
+      if (!autoOpen) return;
+      setIsOpen(true);
+      window.requestAnimationFrame(() => {
+        cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }, [autoOpen]);
+
     const runAction = async (action, callback) => {
       if (loadingAction) return;
       setLoadingAction(action);
@@ -473,6 +483,7 @@ const OrderCard = memo(
 
     return (
       <motion.div
+        ref={cardRef}
         layout
         className={`rounded-2xl transition-all duration-300 ${
           isOpen
@@ -1416,7 +1427,11 @@ const mapDatabaseOrderToUi = (order) => {
 // --- COMPONENTE PRINCIPAL ---
 const Ordenes = () => {
   const { user } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
+  const [notificationOrderId, setNotificationOrderId] = useState(
+    location.state?.openOrderId || null,
+  );
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [ordersError, setOrdersError] = useState("");
@@ -1449,6 +1464,12 @@ const Ordenes = () => {
     phone: "",
   });
   const businessIdRef = useRef(null);
+
+  useEffect(() => {
+    if (location.state?.openOrderId) {
+      setNotificationOrderId(location.state.openOrderId);
+    }
+  }, [location.state]);
 
   const loadBusinessOrders = async () => {
     if (!user?.id) {
@@ -1614,6 +1635,31 @@ const Ordenes = () => {
     const currentMonthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     return { [currentMonthKey]: true };
   });
+
+  useEffect(() => {
+    if (!notificationOrderId) return;
+    const targetOrder = orders.find(
+      (order) => String(order.id) === String(notificationOrderId),
+    );
+    if (!targetOrder) return;
+
+    setSearchTerm("");
+    setDeliveryFilter("");
+    setDateFilter("");
+    setCustomDateRange({ start: "", end: "" });
+    const [year, month] = (targetOrder.fechaLocal || targetOrder.fecha || "")
+      .split("-")
+      .slice(0, 2);
+    if (year && month) {
+      setOpenMonths((current) => ({
+        ...current,
+        [`${year}-${month}`]: true,
+      }));
+    }
+    if (location.state?.openOrderId) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.pathname, location.state, navigate, notificationOrderId, orders]);
 
   // 1. Filtrado, búsqueda y ordenamiento de registros totales
   const filteredOrdenes = useMemo(() => {
@@ -2306,6 +2352,10 @@ const Ordenes = () => {
                                         )}
                                       <OrderCard
                                         orden={orden}
+                                        autoOpen={
+                                          String(orden.id) ===
+                                          String(notificationOrderId)
+                                        }
                                         onDelete={handleDelete}
                                         onInvoice={handleInvoice}
                                         onPrint={handlePrint}
