@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { Outlet, useLocation } from "react-router-dom";
-import { Clock } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Bell, Clock, X } from "lucide-react";
 import Sidebar from "./Sidebar";
 import { Loading, LOADING_DURATION_MS } from "./Loading";
 import { supabase } from "../../src/lib/supabaseClient";
@@ -30,6 +30,7 @@ const ReadyGate = ({ children }) => {
 
 const Layout = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
@@ -37,6 +38,17 @@ const Layout = () => {
   const [inactiveTablesPrompt, setInactiveTablesPrompt] = useState([]);
   const [isClosingInactiveTables, setIsClosingInactiveTables] = useState(false);
   const [isInactiveTablesPreview, setIsInactiveTablesPreview] = useState(false);
+  const [browserNotificationPermission, setBrowserNotificationPermission] =
+    useState(() =>
+      typeof window !== "undefined" && "Notification" in window
+        ? window.Notification.permission
+        : "unsupported",
+    );
+  const [notificationPromptOpen, setNotificationPromptOpen] = useState(false);
+  const [notificationPromptError, setNotificationPromptError] = useState("");
+  const [newOrderToast, setNewOrderToast] = useState(null);
+  const notifiedOrderIdsRef = useRef(new Set());
+  const newOrderToastTimerRef = useRef(null);
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
   const isPosRoute = location.pathname === "/pos";
   const isMesasRoute = location.pathname === "/pos/mesas";
@@ -71,6 +83,235 @@ const Layout = () => {
     setIsSidebarHovered(false);
   };
   const sidebarPushesContent = isPosRoute && isSidebarExpanded;
+
+  useEffect(() => {
+    if (!user?.id || !("Notification" in window) || !window.isSecureContext) {
+      return undefined;
+    }
+
+    const permission = window.Notification.permission;
+    setBrowserNotificationPermission(permission);
+    if (permission !== "default") return undefined;
+
+    const dismissedKey = `gloto-order-notifications-dismissed-${user.id}`;
+    try {
+      setNotificationPromptOpen(localStorage.getItem(dismissedKey) !== "true");
+    } catch (error) {
+      console.error("No se pudo leer la preferencia de notificaciones:", error);
+      setNotificationPromptOpen(true);
+    }
+
+    return undefined;
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (
+      !user?.id ||
+      typeof window === "undefined"
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let orderChannel;
+
+    const subscribeToNewOrders = async () => {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error(
+          "No se pudo cargar el negocio para las notificaciones de pedidos:",
+          profileError,
+        );
+        return;
+      }
+      if (!profile?.business_id || cancelled) return;
+
+      orderChannel = supabase
+        .channel(`browser-order-notifications-${profile.business_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "orders",
+            filter: `business_id=eq.${profile.business_id}`,
+          },
+          (payload) => {
+            const order = payload.new;
+            if (
+              payload.eventType !== "INSERT" ||
+              !order?.id ||
+              order.business_id !== profile.business_id ||
+              order.is_reservation === true
+            ) {
+              return;
+            }
+
+            const orderId = String(order.id);
+            if (notifiedOrderIdsRef.current.has(orderId)) return;
+
+            const storageKey = `gloto-notified-orders-${profile.business_id}`;
+            try {
+              const previousIds = JSON.parse(
+                localStorage.getItem(storageKey) || "[]",
+              );
+              if (Array.isArray(previousIds) && previousIds.includes(orderId)) {
+                notifiedOrderIdsRef.current.add(orderId);
+                return;
+              }
+              localStorage.setItem(
+                storageKey,
+                JSON.stringify(
+                  [...(Array.isArray(previousIds) ? previousIds : []), orderId]
+                    .slice(-100),
+                ),
+              );
+            } catch (error) {
+              console.error(
+                "No se pudo guardar la deduplicación de notificaciones:",
+                error,
+              );
+            }
+
+            notifiedOrderIdsRef.current.add(orderId);
+            const orderNumber = String(
+              order.order_number || String(order.id).slice(0, 8).toUpperCase(),
+            ).slice(0, 40);
+            const isForeground =
+              document.visibilityState === "visible" &&
+              document.hasFocus();
+            const isLargeScreen = window.matchMedia("(min-width: 768px)").matches;
+
+            if (isForeground && isLargeScreen) {
+              setNewOrderToast({ id: orderId, number: orderNumber });
+            }
+
+            if (
+              browserNotificationPermission !== "granted" ||
+              !("Notification" in window) ||
+              !window.isSecureContext
+            ) {
+              return;
+            }
+            if (isForeground && isLargeScreen) return;
+
+            let notification;
+            try {
+              notification = new window.Notification("Nuevo pedido recibido", {
+                body: `Pedido #${orderNumber}. Toca para revisarlo.`,
+                tag: `gloto-order-${orderId}`,
+              });
+            } catch (error) {
+              console.error(
+                "No se pudo mostrar la notificación del pedido:",
+                error,
+              );
+              return;
+            }
+            notification.onclick = () => {
+              window.focus();
+              navigate("/pos/ordenes");
+              notification.close();
+            };
+          },
+        )
+        .subscribe((status) => {
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.error(
+              "No se pudo mantener la escucha de pedidos para notificaciones:",
+              status,
+            );
+          }
+        });
+    };
+
+    subscribeToNewOrders().catch((error) => {
+      if (!cancelled) {
+        console.error(
+          "Error configurando las notificaciones de pedidos:",
+          error,
+        );
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (orderChannel) supabase.removeChannel(orderChannel);
+    };
+  }, [browserNotificationPermission, navigate, user?.id]);
+
+  useEffect(() => {
+    if (newOrderToastTimerRef.current) {
+      window.clearTimeout(newOrderToastTimerRef.current);
+    }
+    if (!newOrderToast) return undefined;
+
+    newOrderToastTimerRef.current = window.setTimeout(
+      () => setNewOrderToast(null),
+      8000,
+    );
+    return () => {
+      if (newOrderToastTimerRef.current) {
+        window.clearTimeout(newOrderToastTimerRef.current);
+      }
+    };
+  }, [newOrderToast]);
+
+  const enableBrowserOrderNotifications = async () => {
+    if (!("Notification" in window) || !window.isSecureContext) {
+      setNotificationPromptError(
+        "Este navegador requiere una conexión segura para mostrar notificaciones.",
+      );
+      return;
+    }
+
+    setNotificationPromptError("");
+    try {
+      const permission = await window.Notification.requestPermission();
+      setBrowserNotificationPermission(permission);
+      if (permission === "granted") {
+        setNotificationPromptOpen(false);
+        try {
+          localStorage.removeItem(
+            `gloto-order-notifications-dismissed-${user.id}`,
+          );
+        } catch (error) {
+          console.error(
+            "No se pudo guardar la preferencia de notificaciones:",
+            error,
+          );
+        }
+      } else if (permission === "denied") {
+        setNotificationPromptOpen(true);
+        setNotificationPromptError(
+          "El permiso está bloqueado. Puedes habilitarlo desde la configuración del navegador.",
+        );
+      }
+    } catch (error) {
+      console.error("No se pudo solicitar permiso para notificaciones:", error);
+      setNotificationPromptError(
+        "No se pudo solicitar el permiso. Inténtalo desde la configuración del navegador.",
+      );
+    }
+  };
+
+  const dismissBrowserNotificationPrompt = () => {
+    setNotificationPromptOpen(false);
+    if (!user?.id) return;
+    try {
+      localStorage.setItem(
+        `gloto-order-notifications-dismissed-${user.id}`,
+        "true",
+      );
+    } catch (error) {
+      console.error("No se pudo guardar la preferencia de notificaciones:", error);
+    }
+  };
 
   useEffect(() => {
     if (!user?.id) return undefined;
@@ -196,6 +437,117 @@ const Layout = () => {
           <Outlet context={{ isSidebarExpanded }} />
         </ReadyGate>
       </main>
+
+      {newOrderToast && (
+        <section
+          role="status"
+          aria-live="polite"
+          className="fixed right-4 top-4 z-[75] hidden w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-2xl bg-neutral-900 text-white shadow-2xl ring-1 ring-white/10 md:block"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setNewOrderToast(null);
+              navigate("/pos/ordenes");
+            }}
+            className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-white/[0.04]"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-violet-500/15 text-violet-300">
+              <Bell size={21} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-bold">
+                ¡Llegó un nuevo pedido!
+              </span>
+              <span className="mt-1 block truncate text-xs text-neutral-400">
+                Pedido #{newOrderToast.number} · Toca para ver las órdenes
+              </span>
+            </span>
+            <span aria-hidden="true" className="text-lg text-neutral-500">
+              ›
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setNewOrderToast(null)}
+            aria-label="Cerrar aviso del pedido"
+            className="absolute right-2 top-2 rounded-full p-1 text-neutral-500 hover:bg-white/10 hover:text-white"
+          >
+            <X size={14} />
+          </button>
+        </section>
+      )}
+
+      {(browserNotificationPermission === "default" ||
+        (browserNotificationPermission === "denied" &&
+          notificationPromptOpen)) &&
+        (notificationPromptOpen ? (
+          <section
+            aria-label="Notificaciones de pedidos"
+            className="fixed bottom-4 right-4 z-[70] w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-white/10 bg-neutral-900 p-4 text-white shadow-2xl"
+          >
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-500/15 text-violet-300">
+                <Bell size={20} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-bold">No te pierdas ningún pedido</h2>
+                <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+                  Recibe un aviso del navegador cuando llegue un pedido, incluso
+                  si estás en otra pestaña.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={dismissBrowserNotificationPrompt}
+                aria-label="Recordarme después"
+                className="rounded-full p-1 text-neutral-400 hover:bg-white/10 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {notificationPromptError && (
+              <p role="alert" className="mt-3 text-xs leading-relaxed text-amber-300">
+                {notificationPromptError}
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={dismissBrowserNotificationPrompt}
+                className="rounded-xl px-3 py-2 text-xs font-semibold text-neutral-300 hover:bg-white/5"
+              >
+                Ahora no
+              </button>
+              {browserNotificationPermission !== "denied" ? (
+                <button
+                  type="button"
+                  onClick={enableBrowserOrderNotifications}
+                  className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-500"
+                >
+                  Activar avisos
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={dismissBrowserNotificationPrompt}
+                  className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-500"
+                >
+                  Entendido
+                </button>
+              )}
+            </div>
+          </section>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setNotificationPromptOpen(true)}
+            className="fixed bottom-4 right-4 z-[70] flex items-center gap-2 rounded-full border border-white/10 bg-neutral-900 px-4 py-3 text-xs font-bold text-white shadow-xl hover:bg-neutral-800"
+          >
+            <Bell size={16} className="text-violet-300" />
+            Activar avisos de pedidos
+          </button>
+        ))}
 
       {isSidebarExpanded && (
         <div

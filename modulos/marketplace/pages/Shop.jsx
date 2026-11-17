@@ -5,9 +5,11 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Search,
   Share2,
+  ChevronLeft,
   Star,
   Clock3,
   X,
+  Menu,
   MapPin,
   Store,
   ShoppingBag,
@@ -358,8 +360,12 @@ const Shop = () => {
     finalizarPedido,
   } = useCart();
   const [marketplaceHintVisible, setMarketplaceHintVisible] = useState(true);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [filtersSticky, setFiltersSticky] = useState(false);
+  const [focusSearchOnSticky, setFocusSearchOnSticky] = useState(false);
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [pendingCategoryScroll, setPendingCategoryScroll] = useState("");
   const [shareMessage, setShareMessage] = useState("");
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [confirmCambioOpen, setConfirmCambioOpen] = useState(false);
@@ -374,6 +380,26 @@ const Shop = () => {
   const searchInputRef = useRef(null);
   const filtrosRef = useRef(null);
   const listaProductosRef = useRef(null);
+  const categorySectionRefs = useRef(new Map());
+
+  useEffect(() => {
+    const updateStickyState = () => {
+      setFiltersSticky(
+        Boolean(
+          filtrosRef.current &&
+          filtrosRef.current.getBoundingClientRect().top <= 0,
+        ),
+      );
+    };
+
+    updateStickyState();
+    window.addEventListener("scroll", updateStickyState, { passive: true });
+    window.addEventListener("resize", updateStickyState);
+    return () => {
+      window.removeEventListener("scroll", updateStickyState);
+      window.removeEventListener("resize", updateStickyState);
+    };
+  }, []);
 
   useEffect(() => {
     if (isLoadingProductos) return undefined;
@@ -952,6 +978,25 @@ const Shop = () => {
     scrollASuave();
   }, [filtroTick]);
 
+  useEffect(() => {
+    if (!pendingCategoryScroll) return;
+
+    const target =
+      pendingCategoryScroll === "Todos"
+        ? listaProductosRef.current
+        : categorySectionRefs.current.get(pendingCategoryScroll);
+    if (target) {
+      const filtrosHeight = filtrosRef.current?.offsetHeight || 0;
+      const top = window.scrollY + target.getBoundingClientRect().top;
+      window.scrollTo({
+        top: Math.max(0, top - filtrosHeight - 8),
+        behavior: "smooth",
+      });
+    }
+
+    setPendingCategoryScroll("");
+  }, [pendingCategoryScroll]);
+
   // Sincroniza con el contexto del carrito para que Carrito.jsx
   // pueda mostrar nombre/precio/imagen de cada producto agregado.
   // Si el carrito ya tenía productos de OTRA tienda, primero se pide
@@ -1028,6 +1073,26 @@ const Shop = () => {
   });
 
   const categoriasMenu = ["Todos", ...categorias.map((c) => c.nombre)];
+  const productCategoryNames = new Set(
+    productos.map((producto) => producto.cat).filter(Boolean),
+  );
+  const categoriasNavegables = categoriasMenu.filter(
+    (categoria) => categoria === "Todos" || productCategoryNames.has(categoria),
+  );
+  if (
+    productos.some(
+      (producto) =>
+        !producto.cat ||
+        !categorias.some((categoria) => categoria.nombre === producto.cat),
+    )
+  ) {
+    categoriasNavegables.push("Otros");
+  }
+  const categoriasFiltradas = categoriasNavegables.filter((categoria) =>
+    categorySearch.trim()
+      ? categoria.toLowerCase().includes(categorySearch.trim().toLowerCase())
+      : true,
+  );
 
   const productosPorCategoria =
     catActiva === "Todos"
@@ -1152,8 +1217,33 @@ const Shop = () => {
   };
 
   useEffect(() => {
-    if (searchOpen && searchInputRef.current) searchInputRef.current.focus();
-  }, [searchOpen]);
+    if (!filtersSticky || !focusSearchOnSticky || !searchInputRef.current) {
+      return;
+    }
+    searchInputRef.current.focus();
+    setFocusSearchOnSticky(false);
+  }, [filtersSticky, focusSearchOnSticky]);
+
+  useEffect(() => {
+    if (!categoryMenuOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setCategoryMenuOpen(false);
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [categoryMenuOpen]);
+
+  const irABusqueda = () => {
+    setFocusSearchOnSticky(true);
+    filtrosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const TAG_MAP = {
     "Más vendido": "#7c3aed",
@@ -1222,6 +1312,14 @@ const Shop = () => {
         @keyframes marketplaceHintIn {
           from { opacity: 0; transform: translateY(-6px) scale(0.96); }
           to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes categorySheetBackdropIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes categorySheetIn {
+          from { opacity: 0.7; transform: translateY(100%); }
+          to { opacity: 1; transform: translateY(0); }
         }
         @media (prefers-reduced-motion: reduce) {
           .marketplace-explore-shell, .marketplace-explore-button, .marketplace-explore-label { animation: none !important; transition: none !important; }
@@ -1368,22 +1466,6 @@ const Shop = () => {
                     borderRadius: "50%",
                   })}
                 />
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <div
-                    style={skeletonBlock({
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "50%",
-                    })}
-                  />
-                  <div
-                    style={skeletonBlock({
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "50%",
-                    })}
-                  />
-                </div>
               </div>
             ) : (
               <>
@@ -1466,7 +1548,8 @@ const Shop = () => {
                 <div style={{ display: "flex", gap: "10px" }}>
                   <button
                     type="button"
-                    onClick={() => setSearchOpen((s) => !s)}
+                    onClick={irABusqueda}
+                    aria-label="Buscar productos"
                     style={{
                       width: "36px",
                       height: "36px",
@@ -1478,13 +1561,13 @@ const Shop = () => {
                       justifyContent: "center",
                       cursor: "pointer",
                     }}
-                    aria-label="Buscar"
                   >
                     <Search size={17} color="#fff" />
                   </button>
                   <button
                     type="button"
                     onClick={handleShare}
+                    aria-label="Compartir"
                     style={{
                       width: "36px",
                       height: "36px",
@@ -1497,7 +1580,6 @@ const Shop = () => {
                       justifyContent: "center",
                       cursor: "pointer",
                     }}
-                    aria-label="Compartir"
                   >
                     <Share2 size={17} color="#fff" />
                   </button>
@@ -1768,105 +1850,229 @@ const Shop = () => {
             padding: "12px 16px",
           }}
         >
-          {/* ── Categorías */}
           <div
+            aria-hidden={!filtersSticky}
+            inert={!filtersSticky}
             style={{
-              display: "flex",
-              gap: "8px",
-              overflowX: "auto",
-              scrollbarWidth: "none",
-              marginBottom: searchOpen ? "10px" : "0",
+              maxHeight: filtersSticky ? "48px" : "0px",
+              marginBottom: filtersSticky ? "10px" : "0px",
+              overflow: "hidden",
+              opacity: filtersSticky ? 1 : 0,
+              transform: filtersSticky ? "translateY(0)" : "translateY(-6px)",
+              pointerEvents: filtersSticky ? "auto" : "none",
+              transition:
+                "max-height 220ms ease, margin-bottom 220ms ease, opacity 160ms ease, transform 220ms ease",
             }}
           >
-            {isLoadingProductos
-              ? Array.from({ length: 4 }).map((_, idx) => (
-                  <div
-                    key={`chip-skeleton-${idx}`}
-                    style={skeletonBlock({
-                      width: idx === 0 ? "56px" : "78px",
-                      height: "29px",
-                      borderRadius: "100px",
-                      flexShrink: 0,
-                    })}
-                  />
-                ))
-              : categoriasMenu.map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => {
-                      setCatActiva(cat);
-                      setSearchQuery("");
-                      setFiltroTick((t) => t + 1);
-                    }}
-                    style={{
-                      padding: "7px 16px",
-                      borderRadius: "100px",
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      whiteSpace: "nowrap",
-                      // Eliminamos el borde permanentemente
-                      border: "none",
-                      // El color de fondo es el único indicador visual
-                      background: catActiva === cat ? "#7c3aed" : "#1a1a1a",
-                      color:
-                        catActiva === cat ? "#fff" : "rgba(255,255,255,0.45)",
-                      cursor: "pointer",
-                      letterSpacing: "0.01em",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {cat}
-                  </button>
-                ))}
-          </div>
-
-          {/* Barra de búsqueda */}
-          {searchOpen && (
-            <div style={{ position: "relative" }}>
-              <input
-                ref={searchInputRef}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Buscar productos en todas las categorías..."
-                style={{
-                  width: "100%",
-                  padding: "10px 40px 10px 14px",
-                  borderRadius: "25px",
-                  background: "#131313",
-                  color: "#fff",
-                  fontSize: "16px",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-                aria-label="Buscar productos en todas las categorías"
-              />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                height: "38px",
+              }}
+            >
               <button
                 type="button"
-                onClick={() => {
-                  if (searchQuery.trim()) {
-                    setSearchQuery("");
-                    searchInputRef.current?.focus();
-                  } else setSearchOpen(false);
-                }}
+                onClick={() => navigate("/marketplace")}
+                aria-label="Volver al Marketplace"
+                title="Volver al Marketplace"
                 style={{
-                  position: "absolute",
-                  right: "10px",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
+                  width: "36px",
+                  height: "36px",
+                  flexShrink: 0,
+                  borderRadius: "50%",
+                  background: "transparent",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
+                  color: "#fff",
+                  cursor: "pointer",
                 }}
-                aria-label="Cerrar búsqueda"
               >
-                <X size={15} color="rgba(255,255,255,0.5)" />
+                <ChevronLeft size={22} strokeWidth={1.5} />
+              </button>
+              <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+                <input
+                  ref={searchInputRef}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar..."
+                  style={{
+                    width: "100%",
+                    padding: "9px 40px 9px 14px",
+                    borderRadius: "25px",
+                    background: "#131313",
+                    color: "#fff",
+                    fontSize: "14px",
+                    outline: "none",
+                    boxSizing: "border-box",
+                    border: "none",
+                  }}
+                  aria-label="Buscar productos en todas las categorías"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery("");
+                      searchInputRef.current?.focus();
+                    }}
+                    style={{
+                      position: "absolute",
+                      right: "10px",
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                    aria-label="Limpiar búsqueda"
+                  >
+                    <X size={15} color="rgba(255,255,255,0.5)" />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={handleShare}
+                aria-label="Compartir"
+                style={{
+                  width: "36px",
+                  height: "36px",
+                  flexShrink: 0,
+                  borderRadius: "50%",
+                  background: "transparent",
+                  border: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                <Share2 size={17} />
               </button>
             </div>
-          )}
+          </div>
+
+          {/* ── Categorías */}
+          <div
+            style={{
+              position: "relative",
+              display: "flex",
+              gap: "8px",
+              minWidth: 0,
+            }}
+          >
+            {isLoadingProductos ? (
+              <>
+                <div
+                  style={skeletonBlock({
+                    width: "36px",
+                    height: "32px",
+                    borderRadius: "10px",
+                    flexShrink: 0,
+                  })}
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "8px",
+                    flex: 1,
+                    minWidth: 0,
+                    overflowX: "auto",
+                    overscrollBehaviorX: "contain",
+                    touchAction: "pan-x",
+                    scrollbarWidth: "none",
+                  }}
+                >
+                  {Array.from({ length: 4 }).map((_, idx) => (
+                    <div
+                      key={`chip-skeleton-${idx}`}
+                      style={skeletonBlock({
+                        width: idx === 0 ? "56px" : "78px",
+                        height: "29px",
+                        borderRadius: "100px",
+                        flexShrink: 0,
+                      })}
+                    />
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCategorySearch("");
+                    setCategoryMenuOpen(true);
+                  }}
+                  aria-label="Elegir categoría"
+                  aria-haspopup="dialog"
+                  aria-expanded={categoryMenuOpen}
+                  style={{
+                    width: "36px",
+                    height: "32px",
+                    flexShrink: 0,
+                    borderRadius: "10px",
+                    background: categoryMenuOpen ? "#7c3aed" : "#1a1a1a",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  <Menu size={17} />
+                </button>
+                <div
+                  style={{
+                    display: "flex",
+                    flex: 1,
+                    minWidth: 0,
+                    gap: "8px",
+                    overflowX: "auto",
+                    overscrollBehaviorX: "contain",
+                    touchAction: "pan-x",
+                    scrollbarWidth: "none",
+                  }}
+                >
+                  {categoriasMenu.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => {
+                        setCategoryMenuOpen(false);
+                        setCatActiva(cat);
+                        setSearchQuery("");
+                        setFiltroTick((t) => t + 1);
+                      }}
+                      style={{
+                        padding: "7px 16px",
+                        borderRadius: "100px",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        whiteSpace: "nowrap",
+                        border: "none",
+                        background: catActiva === cat ? "#7c3aed" : "#1a1a1a",
+                        color:
+                          catActiva === cat ? "#fff" : "rgba(255,255,255,0.45)",
+                        cursor: "pointer",
+                        letterSpacing: "0.01em",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* ── LISTA DE PRODUCTOS ── */}
@@ -1989,7 +2195,14 @@ const Shop = () => {
             </div>
           ) : (
             displayedProductGroups.map((group, groupIndex) => (
-              <section key={group.name || catActiva}>
+              <section
+                key={group.name || catActiva}
+                ref={(node) => {
+                  if (!group.name) return;
+                  if (node) categorySectionRefs.current.set(group.name, node);
+                  else categorySectionRefs.current.delete(group.name);
+                }}
+              >
                 {group.name && (
                   <h3
                     style={{
@@ -2009,6 +2222,7 @@ const Shop = () => {
                 {group.products.map((p, idx) => {
                   const qty = obtenerCantidadProducto(p);
                   const tieneOpcionesProducto = tieneOpciones(p);
+                  const descripcionProducto = p.desc?.trim();
                   const precioExtraMax = Math.max(
                     0,
                     ...(Array.isArray(p.variantes) ? p.variantes : []).map(
@@ -2059,21 +2273,22 @@ const Shop = () => {
                           >
                             {p.nombre}
                           </h4>
-                          <p
-                            style={{
-                              display: "-webkit-box",
-                              WebkitBoxOrient: "vertical",
-                              WebkitLineClamp: 3,
-                              overflow: "hidden",
-                              height: "55.8px",
-                              fontSize: "12px",
-                              color: "rgba(255,255,255,0.4)",
-                              lineHeight: 1.55,
-                              marginBottom: "6px",
-                            }}
-                          >
-                            {p.desc}
-                          </p>
+                          {descripcionProducto && (
+                            <p
+                              style={{
+                                display: "-webkit-box",
+                                WebkitBoxOrient: "vertical",
+                                WebkitLineClamp: 2,
+                                overflow: "hidden",
+                                fontSize: "12px",
+                                color: "rgba(255,255,255,0.4)",
+                                lineHeight: 1.55,
+                                marginBottom: "4px",
+                              }}
+                            >
+                              {descripcionProducto}
+                            </p>
+                          )}
                           <div
                             style={{
                               display: "flex",
@@ -2249,6 +2464,197 @@ const Shop = () => {
           )}
         </div>
       </div>
+
+      {categoryMenuOpen &&
+        createPortal(
+          <div
+            className="category-sheet-backdrop"
+            onClick={() => setCategoryMenuOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 1100,
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "center",
+              background: "rgba(0,0,0,0.58)",
+              backdropFilter: "blur(3px)",
+              animation: "categorySheetBackdropIn 180ms ease-out both",
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="category-sheet-title"
+              onClick={(event) => event.stopPropagation()}
+              className="category-sheet-panel"
+              style={{
+                width: "100%",
+                height: "100dvh",
+                maxHeight: "100dvh",
+                display: "flex",
+                flexDirection: "column",
+                padding:
+                  "calc(12px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom))",
+                borderRadius: "24px 24px 0 0",
+                background: "#111",
+                boxShadow: "0 -16px 48px rgba(0,0,0,0.35)",
+                willChange: "transform",
+                animation:
+                  "categorySheetIn 380ms cubic-bezier(0.2,0.8,0.2,1) both",
+              }}
+            >
+              <div
+                aria-hidden="true"
+                style={{
+                  width: "36px",
+                  height: "4px",
+                  flexShrink: 0,
+                  margin: "0 auto 18px",
+                  borderRadius: "999px",
+                  background: "rgba(255,255,255,0.24)",
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                  marginBottom: "18px",
+                }}
+              >
+                <div>
+                  <h2
+                    id="category-sheet-title"
+                    style={{
+                      margin: 0,
+                      color: "#fff",
+                      fontSize: "18px",
+                      fontWeight: 750,
+                      letterSpacing: "-0.02em",
+                    }}
+                  >
+                    Categorías
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCategoryMenuOpen(false)}
+                  aria-label="Cerrar categorías"
+                  style={{
+                    width: "34px",
+                    height: "34px",
+                    flexShrink: 0,
+                    borderRadius: "50%",
+                    background: "rgba(255,255,255,0.08)",
+                    color: "rgba(255,255,255,0.8)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  <X size={17} />
+                </button>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "0 14px",
+                  borderRadius: "14px",
+                  background: "#1d1d1d",
+                  color: "rgba(255,255,255,0.48)",
+                }}
+              >
+                <Search size={17} />
+                <input
+                  value={categorySearch}
+                  onChange={(event) => setCategorySearch(event.target.value)}
+                  placeholder="Buscar categoría"
+                  aria-label="Buscar categoría"
+                  style={{
+                    width: "100%",
+                    padding: "13px 0",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    color: "#fff",
+                    fontSize: "14px",
+                  }}
+                />
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gap: "4px",
+                  overflowY: "auto",
+                  minHeight: 0,
+                  overscrollBehavior: "contain",
+                  paddingTop: "12px",
+                }}
+              >
+                {categoriasFiltradas.length > 0 ? (
+                  categoriasFiltradas.map((categoria) => (
+                    <button
+                      key={categoria}
+                      type="button"
+                      onClick={() => {
+                        setCategoryMenuOpen(false);
+                        setCatActiva("Todos");
+                        setSearchQuery("");
+                        setPendingCategoryScroll(categoria);
+                      }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        width: "100%",
+                        padding: "13px 12px",
+                        border: "none",
+                        borderRadius: "12px",
+                        background:
+                          categoria === catActiva
+                            ? "rgba(124,58,237,0.16)"
+                            : "transparent",
+                        color: categoria === catActiva ? "#c4b5fd" : "#fff",
+                        textAlign: "left",
+                        fontSize: "14px",
+                        fontWeight: categoria === catActiva ? 700 : 500,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <span>{categoria === "Todos" ? "Todos" : categoria}</span>
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          color: "rgba(255,255,255,0.35)",
+                          fontSize: "18px",
+                        }}
+                      >
+                        ›
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <p
+                    style={{
+                      padding: "18px 12px",
+                      color: "rgba(255,255,255,0.5)",
+                      textAlign: "center",
+                      fontSize: "13px",
+                    }}
+                  >
+                    No encontramos esa categoría.
+                  </p>
+                )}
+              </div>
+            </section>
+          </div>,
+          document.body,
+        )}
 
       {/* ── CARRITO ── */}
       {totalItems > 0 && tiendaSlug === slug && !confirmCambioOpen && (

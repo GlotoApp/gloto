@@ -4608,6 +4608,21 @@ const POS = () => {
             from { opacity: 0; transform: translateY(-16px) scale(0.92); }
             to   { opacity: 1; transform: translateY(0) scale(1); }
           }
+          @media (max-width: 359px) {
+            .pos-category-sidebar { width: 76px !important; padding-inline: 5px !important; }
+            .pos-category-sidebar button { padding: 6px 4px; font-size: 9px; }
+          }
+          @media (min-width: 360px) and (max-width: 419px) {
+            .pos-category-sidebar { width: 88px !important; padding-inline: 6px !important; }
+            .pos-category-sidebar button { padding: 6px 5px; font-size: 9px; }
+          }
+          @media (min-width: 420px) and (max-width: 639px) {
+            .pos-category-sidebar { width: 100px !important; padding-inline: 6px !important; }
+            .pos-category-sidebar button { padding: 7px 6px; font-size: 9px; }
+          }
+          @media (min-width: 640px) and (max-width: 1023px) {
+            .pos-category-sidebar { width: 128px !important; }
+          }
         `}</style>
         {/* Listado de Productos */}
         <div
@@ -4656,7 +4671,7 @@ const POS = () => {
           <div className="relative flex min-h-0 min-w-0 flex-1 items-stretch">
             <aside
               aria-label="Categorías de productos"
-              className="relative flex h-full min-h-0 shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-outline/50 px-2 pt-3 pb-8 custom-sidebar min-[420px]:w-28 sm:w-32 lg:px-2 lg:py-4"
+              className="pos-category-sidebar relative flex h-full min-h-0 min-w-0 shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-outline/50 px-2 pt-3 pb-8 custom-sidebar lg:px-2 lg:py-4"
               style={{ width: categoryColumnWidth }}
             >
               {isLoadingCategories
