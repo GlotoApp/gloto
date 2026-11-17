@@ -6,6 +6,36 @@ import { Loading, LOADING_DURATION_MS } from "./Loading";
 import { supabase } from "../../src/lib/supabaseClient";
 import { useAuth } from "../../src/components/AuthContext";
 
+const DEFAULT_POPUP_SETTINGS = {
+  show_widget: true,
+  notify_marketplace_orders: true,
+  notify_pos_orders: false,
+  sound_enabled: true,
+  color: "violet",
+};
+
+const POPUP_COLOR_HEX = {
+  violet: "#8b5cf6",
+  blue: "#0ea5e9",
+  emerald: "#10b981",
+  amber: "#f59e0b",
+  rose: "#f43f5e",
+};
+
+const getPopupColor = (color) => {
+  const hex = POPUP_COLOR_HEX[color] || color;
+  const match = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return { hex: POPUP_COLOR_HEX.violet, rgb: "139, 92, 246" };
+  const value = match[1];
+  return {
+    hex: `#${value}`,
+    rgb: `${parseInt(value.slice(0, 2), 16)}, ${parseInt(
+      value.slice(2, 4),
+      16,
+    )}, ${parseInt(value.slice(4, 6), 16)}`,
+  };
+};
+
 const playOrderNotificationSound = (audioContext) => {
   const playTone = () => {
     if (audioContext.state !== "running") return;
@@ -81,16 +111,114 @@ const Layout = () => {
   const [notificationPromptOpen, setNotificationPromptOpen] = useState(false);
   const [notificationPromptError, setNotificationPromptError] = useState("");
   const [newOrderToast, setNewOrderToast] = useState(null);
+  const [popupSettings, setPopupSettings] = useState(DEFAULT_POPUP_SETTINGS);
   const [orderBellPosition, setOrderBellPosition] = useState(null);
   const notifiedOrderIdsRef = useRef(new Set());
   const newOrderToastTimerRef = useRef(null);
   const notificationAudioContextRef = useRef(null);
+  const popupSettingsRef = useRef(DEFAULT_POPUP_SETTINGS);
   const orderBellDragRef = useRef(null);
   const suppressOrderBellClickRef = useRef(false);
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
   const isPosRoute = location.pathname === "/pos";
   const isMesasRoute = location.pathname === "/pos/mesas";
   const isKitchenRoute = location.pathname === "/pos/cocina";
+  const popupColor = getPopupColor(popupSettings.color);
+
+  useEffect(() => {
+    popupSettingsRef.current = popupSettings;
+  }, [popupSettings]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setPopupSettings(DEFAULT_POPUP_SETTINGS);
+      return undefined;
+    }
+
+    let active = true;
+    let settingsChannel;
+    const loadSettings = async () => {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (profileError) {
+        console.error("No se pudo identificar el negocio para Pop pup:", profileError);
+        return;
+      }
+      if (!profile?.business_id || !active) return;
+
+      const applySettings = (settings) => {
+        const nextSettings = { ...DEFAULT_POPUP_SETTINGS, ...settings };
+        setPopupSettings(nextSettings);
+        popupSettingsRef.current = nextSettings;
+      };
+      const { data, error } = await supabase
+        .from("business_popup_settings")
+        .select(
+          "show_widget, notify_marketplace_orders, notify_pos_orders, sound_enabled, color",
+        )
+        .eq("business_id", profile.business_id)
+        .maybeSingle();
+      if (error) {
+        console.error("No se pudo cargar la configuración de Pop pup:", error);
+        return;
+      }
+      if (!active) return;
+      if (data) applySettings(data);
+
+      settingsChannel = supabase
+        .channel(`popup-settings-${profile.business_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "business_popup_settings",
+            filter: `business_id=eq.${profile.business_id}`,
+          },
+          (payload) => {
+            if (!active) return;
+            applySettings(payload.new || DEFAULT_POPUP_SETTINGS);
+          },
+        )
+        .subscribe((status) => {
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.error(
+              "No se pudo mantener actualizada la configuración de Pop pup:",
+              status,
+            );
+          }
+        });
+    };
+
+    const handleSettingsChange = (event) => {
+      if (event.detail) {
+        const nextSettings = {
+          ...DEFAULT_POPUP_SETTINGS,
+          ...event.detail,
+        };
+        setPopupSettings(nextSettings);
+        popupSettingsRef.current = nextSettings;
+      }
+    };
+    window.addEventListener("gloto:popup-settings-changed", handleSettingsChange);
+    loadSettings().catch((error) => {
+      if (active) {
+        console.error("Error cargando la configuración de Pop pup:", error);
+      }
+    });
+
+    return () => {
+      active = false;
+      window.removeEventListener(
+        "gloto:popup-settings-changed",
+        handleSettingsChange,
+      );
+      if (settingsChannel) supabase.removeChannel(settingsChannel);
+    };
+  }, [user?.id]);
 
   const toggleSidebar = () => {
     if (isSidebarPinned || isSidebarHovered) {
@@ -194,6 +322,10 @@ const Layout = () => {
   }, [newOrderToast]);
 
   useEffect(() => {
+    if (!popupSettings.show_widget) setNewOrderToast(null);
+  }, [popupSettings.show_widget]);
+
+  useEffect(() => {
     const unlockNotificationAudio = () => {
       const AudioContextConstructor =
         window.AudioContext || window.webkitAudioContext;
@@ -224,7 +356,17 @@ const Layout = () => {
   }, []);
 
   useEffect(() => {
-    if (!user?.id || !("Notification" in window) || !window.isSecureContext) {
+    if (!user?.id) {
+      return undefined;
+    }
+    if (
+      !popupSettings.notify_marketplace_orders &&
+      !popupSettings.notify_pos_orders
+    ) {
+      setNotificationPromptOpen(false);
+      return undefined;
+    }
+    if (!("Notification" in window) || !window.isSecureContext) {
       return undefined;
     }
 
@@ -241,7 +383,11 @@ const Layout = () => {
     }
 
     return undefined;
-  }, [user?.id]);
+  }, [
+    popupSettings.notify_marketplace_orders,
+    popupSettings.notify_pos_orders,
+    user?.id,
+  ]);
 
   useEffect(() => {
     if (
@@ -286,14 +432,25 @@ const Layout = () => {
               payload.eventType !== "INSERT" ||
               !order?.id ||
               order.business_id !== profile.business_id ||
-              String(order.metadata?.canal || "").toLowerCase() !==
-                "marketplace" ||
               order.is_reservation === true
             ) {
               return;
             }
 
             if (isKitchenRoute) return;
+            const orderChannelName = String(
+              order.metadata?.canal || "",
+            ).toLowerCase();
+            const currentPopupSettings = popupSettingsRef.current;
+            if (
+              (orderChannelName === "marketplace" &&
+                !currentPopupSettings.notify_marketplace_orders) ||
+              (orderChannelName === "pos" &&
+                !currentPopupSettings.notify_pos_orders) ||
+              !["marketplace", "pos"].includes(orderChannelName)
+            ) {
+              return;
+            }
 
             const orderId = String(order.id);
             if (notifiedOrderIdsRef.current.has(orderId)) return;
@@ -336,8 +493,12 @@ const Layout = () => {
             ).slice(0, 40);
             if (isForeground) {
               const audioContext = notificationAudioContextRef.current;
-              if (audioContext) playOrderNotificationSound(audioContext);
-              setNewOrderToast({ id: orderId, number: orderNumber });
+              if (currentPopupSettings.sound_enabled && audioContext) {
+                playOrderNotificationSound(audioContext);
+              }
+              if (currentPopupSettings.show_widget) {
+                setNewOrderToast({ id: orderId, number: orderNumber });
+              }
             }
 
             if (
@@ -608,14 +769,18 @@ const Layout = () => {
         </ReadyGate>
       </main>
 
-      {orderBellPosition && user?.id && (
+      {orderBellPosition && user?.id && popupSettings.show_widget && (
         <section
-          className={`fixed z-[75] touch-none text-white shadow-lg ring-1 transition-[width,border-radius,background-color,opacity,box-shadow] duration-300 ${
+          className={`fixed z-[75] touch-none border text-white shadow-lg transition-[width,border-radius,background-color,opacity,box-shadow] duration-300 ${
             newOrderToast
-              ? "w-[min(320px,calc(100vw-2rem))] rounded-2xl bg-neutral-900 opacity-100 ring-white/10 shadow-2xl"
-              : "w-11 rounded-full bg-neutral-950/65 opacity-60 ring-white/5 shadow-md hover:opacity-100"
+              ? "w-[min(320px,calc(100vw-2rem))] rounded-2xl bg-neutral-900 opacity-100 shadow-2xl"
+              : "w-11 rounded-full bg-neutral-950/65 opacity-60 shadow-md hover:opacity-100"
           }`}
-          style={{ left: orderBellPosition.x, top: orderBellPosition.y }}
+          style={{
+            left: orderBellPosition.x,
+            top: orderBellPosition.y,
+            borderColor: `rgba(${popupColor.rgb}, ${newOrderToast ? 0.3 : 0.15})`,
+          }}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             event.target.setPointerCapture(event.pointerId);
@@ -682,9 +847,13 @@ const Layout = () => {
             } cursor-grab active:cursor-grabbing`}
           >
             <span
-              className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-violet-300 ${
-                newOrderToast ? "bg-violet-500/15" : "bg-white/5"
-              }`}
+              className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+              style={{
+                backgroundColor: `rgba(${popupColor.rgb}, ${
+                  newOrderToast ? 0.2 : 0.12
+                })`,
+                color: popupColor.hex,
+              }}
             >
               <Bell size={18} />
               {newOrderToast && (

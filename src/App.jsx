@@ -54,6 +54,7 @@ const MiPlan = lazy(() => import("../modulos/pos/MiPlan"));
 const HistorialPagos = lazy(() => import("../modulos/pos/HistorialPagos"));
 const Notificaciones = lazy(() => import("../modulos/pos/Notificaciones"));
 const Configuracion = lazy(() => import("../modulos/pos/Configuracion"));
+const PopPup = lazy(() => import("../modulos/pos/PopPup"));
 const GestionCompleta = lazy(() => import("../modulos/admin/GestionCompleta"));
 const EstructuraAdmin = lazy(() => import("../modulos/admin/Estructura"));
 const Resumen = lazy(() => import("../modulos/admin/Resumen"));
@@ -830,6 +831,7 @@ function App() {
             <Route path="notificaciones" element={<Notificaciones />} />
             <Route path="configuracion" element={<Configuracion />} />
             <Route path="configuracion/:section" element={<Configuracion />} />
+            <Route path="pop-pup" element={<PopPup />} />
           </Route>
         </Routes>
       </Suspense>

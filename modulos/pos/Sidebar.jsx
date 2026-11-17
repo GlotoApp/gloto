@@ -27,10 +27,7 @@ import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
 import { useEmployeeAccess } from "../../src/components/EmployeeAccessContext";
 import { getEmployeePermissionForPath } from "../../src/lib/employeePermissions";
 import { useAuth } from "../../src/components/AuthContext";
-import {
-  cacheColorMode,
-  getStoredColorMode,
-} from "../../src/lib/colorMode";
+import { cacheColorMode, getStoredColorMode } from "../../src/lib/colorMode";
 
 const Sidebar = ({
   isExpanded,
@@ -233,6 +230,7 @@ const Sidebar = ({
     { name: "Tienda", path: "/pos/configuracion/tienda" },
     { name: "Datos", path: "/pos/configuracion/datos" },
     { name: "Empleados", path: "/pos/configuracion/empleados" },
+    { name: "Pop pup", path: "/pos/pop-pup" },
     { name: "Impresoras", path: "/pos/configuracion/impresoras" },
   ];
   const visibleFinanzasSubMenu = finanzasSubMenu.filter((sub) =>
@@ -291,7 +289,8 @@ const Sidebar = ({
     location.pathname === "/pos/productos" ||
     location.pathname === "/pos/categorias";
   const isConfigSectionActive =
-    location.pathname.startsWith("/pos/configuracion");
+    location.pathname.startsWith("/pos/configuracion") ||
+    location.pathname === "/pos/pop-pup";
   const isFinanzasActive =
     location.pathname.startsWith("/pos/planes") ||
     location.pathname.startsWith("/pos/mi-plan") ||
@@ -336,17 +335,15 @@ const Sidebar = ({
 
       if (!profile?.business_id) return;
 
-      const [
-        { data: business },
-        { data: planAccess, error: planAccessError },
-      ] = await Promise.all([
-        supabase
-          .from("businesses")
-          .select("name, logo_url")
-          .eq("id", profile.business_id)
-          .maybeSingle(),
-        supabase.rpc("get_business_plan_access"),
-      ]);
+      const [{ data: business }, { data: planAccess, error: planAccessError }] =
+        await Promise.all([
+          supabase
+            .from("businesses")
+            .select("name, logo_url")
+            .eq("id", profile.business_id)
+            .maybeSingle(),
+          supabase.rpc("get_business_plan_access"),
+        ]);
 
       if (!isMounted) return;
       if (business?.name) setBusinessName(business.name);
@@ -376,7 +373,8 @@ const Sidebar = ({
   useEffect(() => {
     let isMounted = true;
     const loadDeliveryMethods = async () => {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
       if (userError) {
         console.error("No se pudo identificar el negocio:", userError);
         return;
@@ -597,7 +595,8 @@ const Sidebar = ({
       }
 
       const activeNewOrders = (orders || []).filter((order) => {
-        if (String(order.order_type || "").toLowerCase() !== "table") return true;
+        if (String(order.order_type || "").toLowerCase() !== "table")
+          return true;
         if (
           order.table_status === null ||
           order.table_status === undefined ||
@@ -621,9 +620,7 @@ const Sidebar = ({
       }
 
       setHasNewKitchenOrders(
-        activeNewOrderIds.some(
-          (id) => !seenKitchenOrderIdsRef.current.has(id),
-        ),
+        activeNewOrderIds.some((id) => !seenKitchenOrderIdsRef.current.has(id)),
       );
     };
 
@@ -806,7 +803,9 @@ const Sidebar = ({
         <button
           type="button"
           onClick={toggleSidebar}
-          aria-label={isExpanded ? "Contraer menú lateral" : "Expandir menú lateral"}
+          aria-label={
+            isExpanded ? "Contraer menú lateral" : "Expandir menú lateral"
+          }
           title={isExpanded ? "Contraer menú" : "Expandir menú"}
           className="absolute -right-3 top-12 z-[60] flex h-7 w-7 items-center justify-center rounded-full border border-primary/25 bg-background text-on-surface-variant shadow-lg shadow-black/40 transition-all hover:scale-105 hover:border-primary/50 hover:text-primary active:scale-95"
         >
@@ -816,7 +815,9 @@ const Sidebar = ({
         <div className="h-16 shrink-0 px-3 pt-3">
           <div
             className={`relative z-50 flex h-10 w-full items-center pb-2 ${
-              isExpanded ? "justify-between border-b border-white/10" : "justify-center"
+              isExpanded
+                ? "justify-between border-b border-white/10"
+                : "justify-center"
             }`}
           >
             <div
@@ -872,589 +873,597 @@ const Sidebar = ({
                 !["Mesas", "Reservas"].includes(item.name) || tablesEnabled,
             )
             .map((item) => {
-            if (item.name === "Caja") {
-              return (
-                <div
-                  key={item.path}
-                  className="flex flex-col transition-all duration-300"
-                >
-                  <button
-                    onClick={handleToggleClickCaja}
-                    className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
-                      isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
-                    } ${
-                      isCajaActive
-                        ? "text-primary"
-                        : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
-                    }`}
+              if (item.name === "Caja") {
+                return (
+                  <div
+                    key={item.path}
+                    className="flex flex-col transition-all duration-300"
                   >
-                    <span
-                      className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                    <button
+                      onClick={handleToggleClickCaja}
+                      className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                        isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
+                      } ${
                         isCajaActive
-                          ? "scale-y-100 opacity-100"
-                          : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
-                      }`}
-                    />
-                    <div
-                      className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
-                        !isExpanded && "group-hover:scale-110"
-                      } ${isCajaActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
-                    >
-                      <Banknote
-                        size={20}
-                        strokeWidth={isCajaActive ? 2.5 : 2}
-                      />
-                    </div>
-                    <span
-                      className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
-                        isCajaActive ? "text-primary-container" : ""
-                      } ${
-                        isExpanded
-                          ? "flex-1 opacity-100 translate-x-0"
-                          : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
+                          ? "text-primary"
+                          : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
                       }`}
                     >
-                      Caja
-                    </span>
-                    {isExpanded && (
-                      <ChevronDown
-                        size={14}
-                        className={`text-primary/50 transition-transform duration-300 flex-shrink-0 ${
-                          cajaOpen ? "rotate-180" : ""
+                      <span
+                        className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                          isCajaActive
+                            ? "scale-y-100 opacity-100"
+                            : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
                         }`}
                       />
-                    )}
-                    {!isExpanded && (
-                      <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                      <div
+                        className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
+                          !isExpanded && "group-hover:scale-110"
+                        } ${isCajaActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
+                      >
+                        <Banknote
+                          size={20}
+                          strokeWidth={isCajaActive ? 2.5 : 2}
+                        />
+                      </div>
+                      <span
+                        className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
+                          isCajaActive ? "text-primary-container" : ""
+                        } ${
+                          isExpanded
+                            ? "flex-1 opacity-100 translate-x-0"
+                            : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
+                        }`}
+                      >
                         Caja
+                      </span>
+                      {isExpanded && (
+                        <ChevronDown
+                          size={14}
+                          className={`text-primary/50 transition-transform duration-300 flex-shrink-0 ${
+                            cajaOpen ? "rotate-180" : ""
+                          }`}
+                        />
+                      )}
+                      {!isExpanded && (
+                        <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                          Caja
+                        </div>
+                      )}
+                    </button>
+
+                    {cajaOpen && isExpanded && (
+                      <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
+                        {cajaSubMenu
+                          .filter((sub) => canAccessPath(sub.path))
+                          .map((sub) => {
+                            const isSubActive = location.pathname === sub.path;
+                            return (
+                              <Link
+                                key={sub.path}
+                                to={sub.path}
+                                onClick={handleItemClick}
+                                className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                                  isSubActive
+                                    ? "bg-primary-container/10 text-primary"
+                                    : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                                }`}
+                              >
+                                <span
+                                  className={`absolute left-0 w-1 h-5 rounded-r-full bg-primary transition-all duration-300 ${
+                                    isSubActive
+                                      ? "scale-y-100 opacity-100"
+                                      : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
+                                  }`}
+                                />
+                                {sub.name}
+                              </Link>
+                            );
+                          })}
                       </div>
                     )}
-                  </button>
+                  </div>
+                );
+              }
 
-                  {cajaOpen && isExpanded && (
-                    <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
-                      {cajaSubMenu.filter((sub) => canAccessPath(sub.path)).map((sub) => {
-                        const isSubActive = location.pathname === sub.path;
-                        return (
-                          <Link
-                            key={sub.path}
-                            to={sub.path}
-                            onClick={handleItemClick}
-                            className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
-                              isSubActive
-                                ? "bg-primary-container/10 text-primary"
-                                : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
-                            }`}
-                          >
-                            <span
-                              className={`absolute left-0 w-1 h-5 rounded-r-full bg-primary transition-all duration-300 ${
-                                isSubActive
-                                  ? "scale-y-100 opacity-100"
-                                  : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
-                              }`}
-                            />
-                            {sub.name}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
-            if (item.name === "Órdenes") {
-              return (
-                <div
-                  key={item.path}
-                  className="flex flex-col transition-all duration-300"
-                >
-                  <button
-                    type="button"
-                    onClick={handleToggleClickOrders}
-                    className={`group relative flex h-10 w-full items-center rounded-default transition-all duration-300 ${
-                      isExpanded ? "gap-3 px-3" : "justify-center gap-0 px-0"
-                    } ${
-                      isOrdersActive
-                        ? "text-primary-container"
-                        : "text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
-                    }`}
+              if (item.name === "Órdenes") {
+                return (
+                  <div
+                    key={item.path}
+                    className="flex flex-col transition-all duration-300"
                   >
-                    <span
-                      className={`absolute left-0 h-6 w-1 rounded-r-full bg-primary-container transition-all duration-300 ${
+                    <button
+                      type="button"
+                      onClick={handleToggleClickOrders}
+                      className={`group relative flex h-10 w-full items-center rounded-default transition-all duration-300 ${
+                        isExpanded ? "gap-3 px-3" : "justify-center gap-0 px-0"
+                      } ${
                         isOrdersActive
-                          ? "scale-y-100 opacity-100"
-                          : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
-                      }`}
-                    />
-                    <div
-                      className={`flex h-5 w-5 flex-shrink-0 items-center justify-center ${isOrdersActive ? "text-primary-container" : ""}`}
-                    >
-                      <ClipboardList
-                        size={20}
-                        strokeWidth={isOrdersActive ? 2.5 : 2}
-                      />
-                    </div>
-                    <span
-                      className={`font-label-caps truncate text-left text-xs font-bold uppercase tracking-tight transition-all ${
-                        isExpanded
-                          ? "flex-1 opacity-100"
-                          : "pointer-events-none w-0 -translate-x-4 opacity-0"
+                          ? "text-primary-container"
+                          : "text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
                       }`}
                     >
-                      Órdenes
-                    </span>
-                    {isExpanded && (
-                      <ChevronDown
-                        size={14}
-                        className={`flex-shrink-0 text-primary/50 transition-transform ${ordersOpen ? "rotate-180" : ""}`}
+                      <span
+                        className={`absolute left-0 h-6 w-1 rounded-r-full bg-primary-container transition-all duration-300 ${
+                          isOrdersActive
+                            ? "scale-y-100 opacity-100"
+                            : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
+                        }`}
                       />
-                    )}
-                    {!isExpanded && (
-                      <div className="pointer-events-none fixed left-20 ml-2 rounded bg-primary-container px-3 py-1 text-[10px] font-black uppercase tracking-widest text-on-primary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                      <div
+                        className={`flex h-5 w-5 flex-shrink-0 items-center justify-center ${isOrdersActive ? "text-primary-container" : ""}`}
+                      >
+                        <ClipboardList
+                          size={20}
+                          strokeWidth={isOrdersActive ? 2.5 : 2}
+                        />
+                      </div>
+                      <span
+                        className={`font-label-caps truncate text-left text-xs font-bold uppercase tracking-tight transition-all ${
+                          isExpanded
+                            ? "flex-1 opacity-100"
+                            : "pointer-events-none w-0 -translate-x-4 opacity-0"
+                        }`}
+                      >
                         Órdenes
+                      </span>
+                      {isExpanded && (
+                        <ChevronDown
+                          size={14}
+                          className={`flex-shrink-0 text-primary/50 transition-transform ${ordersOpen ? "rotate-180" : ""}`}
+                        />
+                      )}
+                      {!isExpanded && (
+                        <div className="pointer-events-none fixed left-20 ml-2 rounded bg-primary-container px-3 py-1 text-[10px] font-black uppercase tracking-widest text-on-primary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                          Órdenes
+                        </div>
+                      )}
+                    </button>
+                    {ordersOpen && isExpanded && (
+                      <div className="ml-5 mt-1 flex flex-col space-y-0.5 border-l border-white/30 pl-2">
+                        {ordersSubMenu
+                          .filter((sub) => canAccessPath(sub.path))
+                          .map((sub) => {
+                            const isSubActive = location.pathname === sub.path;
+                            return (
+                              <Link
+                                key={sub.path}
+                                to={sub.path}
+                                onClick={handleItemClick}
+                                className={`rounded-default px-2 py-1.5 text-[11px] font-bold uppercase tracking-tight transition-all ${
+                                  isSubActive
+                                    ? "bg-primary-container/10 text-primary"
+                                    : "text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
+                                }`}
+                              >
+                                {sub.name}
+                              </Link>
+                            );
+                          })}
                       </div>
                     )}
-                  </button>
-                  {ordersOpen && isExpanded && (
-                    <div className="ml-5 mt-1 flex flex-col space-y-0.5 border-l border-white/30 pl-2">
-                      {ordersSubMenu.filter((sub) => canAccessPath(sub.path)).map((sub) => {
-                        const isSubActive = location.pathname === sub.path;
-                        return (
-                          <Link
-                            key={sub.path}
-                            to={sub.path}
-                            onClick={handleItemClick}
-                            className={`rounded-default px-2 py-1.5 text-[11px] font-bold uppercase tracking-tight transition-all ${
-                              isSubActive
-                                ? "bg-primary-container/10 text-primary"
-                                : "text-on-surface-variant hover:bg-surface-hover hover:text-on-surface"
-                            }`}
-                          >
-                            {sub.name}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            }
+                  </div>
+                );
+              }
 
-            if (item.name === "Catálogo") {
-              return (
-                <div
-                  key={item.path}
-                  className="flex flex-col transition-all duration-300"
-                >
-                  <button
-                    onClick={handleToggleClickCatalogo}
-                    className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
-                      isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
-                    } ${
-                      isCatalogoActive
-                        ? "text-primary"
-                        : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
-                    }`}
+              if (item.name === "Catálogo") {
+                return (
+                  <div
+                    key={item.path}
+                    className="flex flex-col transition-all duration-300"
                   >
-                    <span
-                      className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                    <button
+                      onClick={handleToggleClickCatalogo}
+                      className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                        isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
+                      } ${
                         isCatalogoActive
-                          ? "scale-y-100 opacity-100"
-                          : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
-                      }`}
-                    />
-                    <div
-                      className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
-                        !isExpanded && "group-hover:scale-110"
-                      } ${isCatalogoActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
-                    >
-                      <BookOpen
-                        size={20}
-                        strokeWidth={isCatalogoActive ? 2.5 : 2}
-                      />
-                    </div>
-                    <span
-                      className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
-                        isCatalogoActive ? "text-primary-container" : ""
-                      } ${
-                        isExpanded
-                          ? "flex-1 opacity-100 translate-x-0"
-                          : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
+                          ? "text-primary"
+                          : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
                       }`}
                     >
-                      Catálogo
-                    </span>
-                    {isExpanded && (
-                      <ChevronDown
-                        size={14}
-                        className={`text-primary/50 transition-transform duration-300 flex-shrink-0 ${
-                          catalogoOpen ? "rotate-180" : ""
+                      <span
+                        className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                          isCatalogoActive
+                            ? "scale-y-100 opacity-100"
+                            : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
                         }`}
                       />
-                    )}
-                    {!isExpanded && (
-                      <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                      <div
+                        className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
+                          !isExpanded && "group-hover:scale-110"
+                        } ${isCatalogoActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
+                      >
+                        <BookOpen
+                          size={20}
+                          strokeWidth={isCatalogoActive ? 2.5 : 2}
+                        />
+                      </div>
+                      <span
+                        className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
+                          isCatalogoActive ? "text-primary-container" : ""
+                        } ${
+                          isExpanded
+                            ? "flex-1 opacity-100 translate-x-0"
+                            : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
+                        }`}
+                      >
                         Catálogo
+                      </span>
+                      {isExpanded && (
+                        <ChevronDown
+                          size={14}
+                          className={`text-primary/50 transition-transform duration-300 flex-shrink-0 ${
+                            catalogoOpen ? "rotate-180" : ""
+                          }`}
+                        />
+                      )}
+                      {!isExpanded && (
+                        <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                          Catálogo
+                        </div>
+                      )}
+                    </button>
+
+                    {catalogoOpen && isExpanded && (
+                      <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
+                        {catalogoSubMenu
+                          .filter((sub) => canAccessPath(sub.path))
+                          .map((sub) => {
+                            const isSubActive = location.pathname === sub.path;
+                            return (
+                              <Link
+                                key={sub.path}
+                                to={sub.path}
+                                onClick={handleItemClick}
+                                className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                                  isSubActive
+                                    ? "bg-primary-container/10 text-primary"
+                                    : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                                }`}
+                              >
+                                <span
+                                  className={`absolute left-0 w-1 h-5 rounded-r-full bg-primary transition-all duration-300 ${
+                                    isSubActive
+                                      ? "scale-y-100 opacity-100"
+                                      : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
+                                  }`}
+                                />
+                                {sub.name}
+                              </Link>
+                            );
+                          })}
                       </div>
                     )}
-                  </button>
+                  </div>
+                );
+              }
 
-                  {catalogoOpen && isExpanded && (
-                    <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
-                      {catalogoSubMenu.filter((sub) => canAccessPath(sub.path)).map((sub) => {
-                        const isSubActive = location.pathname === sub.path;
-                        return (
-                          <Link
-                            key={sub.path}
-                            to={sub.path}
-                            onClick={handleItemClick}
-                            className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
-                              isSubActive
-                                ? "bg-primary-container/10 text-primary"
-                                : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
-                            }`}
-                          >
-                            <span
-                              className={`absolute left-0 w-1 h-5 rounded-r-full bg-primary transition-all duration-300 ${
-                                isSubActive
-                                  ? "scale-y-100 opacity-100"
-                                  : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
-                              }`}
-                            />
-                            {sub.name}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            }
+              if (item.name === "Inventario") {
+                return (
+                  <div
+                    key={item.path}
+                    className="flex flex-col transition-all duration-300"
+                  >
+                    <button
+                      onClick={handleToggleClickInventario}
+                      className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                        isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
+                      } ${
+                        isInventarioActive
+                          ? "text-primary"
+                          : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                      }`}
+                    >
+                      <span
+                        className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                          isInventarioActive
+                            ? "scale-y-100 opacity-100"
+                            : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
+                        }`}
+                      />
+                      <div
+                        className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
+                          !isExpanded && "group-hover:scale-110"
+                        } ${isInventarioActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
+                      >
+                        <Package
+                          size={20}
+                          strokeWidth={isInventarioActive ? 2.5 : 2}
+                        />
+                      </div>
+                      <span
+                        className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
+                          isInventarioActive ? "text-primary-container" : ""
+                        } ${
+                          isExpanded
+                            ? "flex-1 opacity-100 translate-x-0"
+                            : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
+                        }`}
+                      >
+                        Inventario
+                      </span>
+                      {isExpanded && (
+                        <ChevronDown
+                          size={14}
+                          className={`text-primary/50 transition-transform duration-300 flex-shrink-0 ${
+                            inventarioOpen ? "rotate-180" : ""
+                          }`}
+                        />
+                      )}
+                      {!isExpanded && (
+                        <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                          Inventario
+                        </div>
+                      )}
+                    </button>
 
-            if (item.name === "Inventario") {
+                    {inventarioOpen && isExpanded && (
+                      <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
+                        {item.subMenu
+                          .filter((sub) => canAccessPath(sub.path))
+                          .map((sub) => {
+                            const isSubActive = location.pathname === sub.path;
+                            return (
+                              <Link
+                                key={sub.path}
+                                to={sub.path}
+                                onClick={handleItemClick}
+                                className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                                  isSubActive
+                                    ? "bg-primary-container/10 text-primary"
+                                    : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                                }`}
+                              >
+                                <span
+                                  className={`absolute left-0 w-1 h-5 rounded-r-full bg-primary transition-all duration-300 ${
+                                    isSubActive
+                                      ? "scale-y-100 opacity-100"
+                                      : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
+                                  }`}
+                                />
+                                {sub.name}
+                              </Link>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              const isActive = location.pathname === item.path;
+              const isGoogleIcon = typeof item.icon === "string";
+              const Icon = item.icon;
+
               return (
-                <div
+                <Link
                   key={item.path}
-                  className="flex flex-col transition-all duration-300"
+                  to={item.path}
+                  onClick={handleItemClick}
+                  className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                    isExpanded ? "pl-3 pr-3 gap-3" : "justify-center px-0 gap-0"
+                  } ${
+                    isActive
+                      ? "text-primary font-medium"
+                      : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                  }`}
                 >
-                  <button
-                    onClick={handleToggleClickInventario}
-                    className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
-                      isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
+                  <span
+                    className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                      isActive
+                        ? "scale-y-100 opacity-100"
+                        : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
+                    }`}
+                  />
+
+                  <div
+                    className={`relative flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
+                      !isExpanded && "group-hover:scale-110"
+                    } ${isActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
+                  >
+                    {isGoogleIcon ? (
+                      <span className="material-symbols-outlined !text-[22px]">
+                        {item.icon}
+                      </span>
+                    ) : (
+                      <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+                    )}
+                    {item.name === "Cocina" && hasNewKitchenOrders && (
+                      <span
+                        className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </div>
+
+                  <span
+                    className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate transition-all duration-300 ${
+                      isActive ? "text-primary-container" : ""
                     } ${
-                      isInventarioActive
-                        ? "text-primary"
-                        : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                      isExpanded
+                        ? "flex-1 opacity-100 translate-x-0"
+                        : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
                     }`}
                   >
-                    <span
-                      className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
-                        isInventarioActive
-                          ? "scale-y-100 opacity-100"
-                          : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
-                      }`}
-                    />
-                    <div
-                      className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
-                        !isExpanded && "group-hover:scale-110"
-                      } ${isInventarioActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
-                    >
-                      <Package
-                        size={20}
-                        strokeWidth={isInventarioActive ? 2.5 : 2}
-                      />
-                    </div>
-                    <span
-                      className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
-                        isInventarioActive ? "text-primary-container" : ""
-                      } ${
-                        isExpanded
-                          ? "flex-1 opacity-100 translate-x-0"
-                          : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
-                      }`}
-                    >
-                      Inventario
-                    </span>
-                    {isExpanded && (
-                      <ChevronDown
-                        size={14}
-                        className={`text-primary/50 transition-transform duration-300 flex-shrink-0 ${
-                          inventarioOpen ? "rotate-180" : ""
-                        }`}
-                      />
-                    )}
-                    {!isExpanded && (
-                      <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
-                        Inventario
-                      </div>
-                    )}
-                  </button>
+                    {item.name}
+                  </span>
 
-                  {inventarioOpen && isExpanded && (
-                    <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
-                      {item.subMenu.filter((sub) => canAccessPath(sub.path)).map((sub) => {
-                        const isSubActive = location.pathname === sub.path;
-                        return (
-                          <Link
-                            key={sub.path}
-                            to={sub.path}
-                            onClick={handleItemClick}
-                            className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
-                              isSubActive
-                                ? "bg-primary-container/10 text-primary"
-                                : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
-                            }`}
-                          >
-                            <span
-                              className={`absolute left-0 w-1 h-5 rounded-r-full bg-primary transition-all duration-300 ${
-                                isSubActive
-                                  ? "scale-y-100 opacity-100"
-                                  : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
-                              }`}
-                            />
-                            {sub.name}
-                          </Link>
-                        );
-                      })}
+                  {!isExpanded && (
+                    <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                      {item.name}
                     </div>
                   )}
-                </div>
+                </Link>
               );
-            }
+            })}
 
-            const isActive = location.pathname === item.path;
-            const isGoogleIcon = typeof item.icon === "string";
-            const Icon = item.icon;
-
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={handleItemClick}
+          {visibleFinanzasSubMenu.length > 0 && (
+            <div className="flex flex-col transition-all duration-300">
+              <button
+                onClick={handleToggleClickFinanzas}
                 className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
-                  isExpanded ? "pl-3 pr-3 gap-3" : "justify-center px-0 gap-0"
+                  isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
                 } ${
-                  isActive
-                    ? "text-primary font-medium"
+                  isFinanzasActive
+                    ? "text-primary"
                     : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
                 }`}
               >
                 <span
                   className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
-                    isActive
+                    isFinanzasActive
                       ? "scale-y-100 opacity-100"
                       : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
                   }`}
                 />
-
                 <div
-                  className={`relative flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
+                  className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
                     !isExpanded && "group-hover:scale-110"
-                  } ${isActive ? "text-primary-container" : "group-hover:text-on-surface"}`}
+                  } ${
+                    isFinanzasActive
+                      ? "text-primary-container"
+                      : "group-hover:text-on-surface"
+                  }`}
                 >
-                  {isGoogleIcon ? (
-                    <span className="material-symbols-outlined !text-[22px]">
-                      {item.icon}
-                    </span>
-                  ) : (
-                    <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
-                  )}
-                  {item.name === "Cocina" && hasNewKitchenOrders && (
-                    <span
-                      className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500"
-                      aria-hidden="true"
-                    />
-                  )}
+                  <CreditCard
+                    size={20}
+                    strokeWidth={isFinanzasActive ? 2.5 : 2}
+                  />
                 </div>
-
                 <span
-                  className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate transition-all duration-300 ${
-                    isActive ? "text-primary-container" : ""
+                  className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
+                    isFinanzasActive ? "text-primary-container" : ""
                   } ${
                     isExpanded
                       ? "flex-1 opacity-100 translate-x-0"
                       : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
                   }`}
                 >
-                  {item.name}
+                  Finanzas
                 </span>
-
+                {isExpanded && (
+                  <ChevronDown
+                    size={14}
+                    className={`text-primary/50 transition-transform duration-300 ${
+                      finanzasOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                )}
                 {!isExpanded && (
                   <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
-                    {item.name}
+                    Finanzas
                   </div>
                 )}
-              </Link>
-            );
-          })}
+              </button>
 
-          {visibleFinanzasSubMenu.length > 0 && (
-          <div className="flex flex-col transition-all duration-300">
-            <button
-              onClick={handleToggleClickFinanzas}
-              className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
-                isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
-              } ${
-                isFinanzasActive
-                  ? "text-primary"
-                  : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
-              }`}
-            >
-              <span
-                className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
-                  isFinanzasActive
-                    ? "scale-y-100 opacity-100"
-                    : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
-                }`}
-              />
-              <div
-                className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
-                  !isExpanded && "group-hover:scale-110"
-                } ${
-                  isFinanzasActive
-                    ? "text-primary-container"
-                    : "group-hover:text-on-surface"
-                }`}
-              >
-                <CreditCard
-                  size={20}
-                  strokeWidth={isFinanzasActive ? 2.5 : 2}
-                />
-              </div>
-              <span
-                className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
-                  isFinanzasActive ? "text-primary-container" : ""
-                } ${
-                  isExpanded
-                    ? "flex-1 opacity-100 translate-x-0"
-                    : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
-                }`}
-              >
-                Finanzas
-              </span>
-              {isExpanded && (
-                <ChevronDown
-                  size={14}
-                  className={`text-primary/50 transition-transform duration-300 ${
-                    finanzasOpen ? "rotate-180" : ""
-                  }`}
-                />
-              )}
-              {!isExpanded && (
-                <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
-                  Finanzas
+              {finanzasOpen && isExpanded && (
+                <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
+                  {visibleFinanzasSubMenu.map((sub) => {
+                    const isSubActive = location.pathname === sub.path;
+                    return (
+                      <Link
+                        key={sub.path}
+                        to={sub.path}
+                        onClick={handleItemClick}
+                        className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                          isSubActive
+                            ? "bg-primary-container/10 text-primary"
+                            : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                        }`}
+                      >
+                        <span
+                          className={`absolute left-0 w-1 h-5 rounded-r-full bg-primary transition-all duration-300 ${
+                            isSubActive
+                              ? "scale-y-100 opacity-100"
+                              : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
+                          }`}
+                        />
+                        {sub.name}
+                      </Link>
+                    );
+                  })}
                 </div>
               )}
-            </button>
+            </div>
+          )}
 
-            {finanzasOpen && isExpanded && (
-              <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
-                {visibleFinanzasSubMenu.map((sub) => {
-                  const isSubActive = location.pathname === sub.path;
-                  return (
+          {visibleConfigSubMenu.length > 0 && (
+            <div className="flex flex-col transition-all duration-300">
+              <button
+                onClick={handleToggleClickConfig}
+                className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
+                  isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
+                } ${
+                  isConfigSectionActive
+                    ? "text-primary"
+                    : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
+                }`}
+              >
+                <span
+                  className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
+                    isConfigSectionActive
+                      ? "scale-y-100 opacity-100"
+                      : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
+                  }`}
+                />
+                <div
+                  className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
+                    !isExpanded && "group-hover:scale-110"
+                  } ${
+                    isConfigSectionActive
+                      ? "text-primary-container"
+                      : "group-hover:text-on-surface"
+                  }`}
+                >
+                  <Settings
+                    size={20}
+                    strokeWidth={isConfigSectionActive ? 2.5 : 2}
+                  />
+                </div>
+                <span
+                  className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
+                    isConfigSectionActive ? "text-primary-container" : ""
+                  } ${
+                    isExpanded
+                      ? "flex-1 opacity-100 translate-x-0"
+                      : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
+                  }`}
+                >
+                  Configuración
+                </span>
+                {isExpanded && (
+                  <ChevronDown
+                    size={14}
+                    className={`text-primary/50 transition-transform ${
+                      configOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                )}
+                {!isExpanded && (
+                  <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
+                    Configuración
+                  </div>
+                )}
+              </button>
+
+              {configOpen && isExpanded && (
+                <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
+                  {visibleConfigSubMenu.map((sub) => (
                     <Link
                       key={sub.path}
                       to={sub.path}
                       onClick={handleItemClick}
-                      className={`group relative flex items-center rounded-default transition-all duration-300 px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
-                        isSubActive
+                      className={`rounded-default px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
+                        location.pathname === sub.path
                           ? "bg-primary-container/10 text-primary"
                           : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
                       }`}
                     >
-                      <span
-                        className={`absolute left-0 w-1 h-5 rounded-r-full bg-primary transition-all duration-300 ${
-                          isSubActive
-                            ? "scale-y-100 opacity-100"
-                            : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50"
-                        }`}
-                      />
                       {sub.name}
                     </Link>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          )}
-
-          {visibleConfigSubMenu.length > 0 && (
-          <div className="flex flex-col transition-all duration-300">
-            <button
-              onClick={handleToggleClickConfig}
-              className={`group relative flex items-center h-10 rounded-default transition-all duration-300 w-full ${
-                isExpanded ? "px-3 gap-3" : "justify-center px-0 gap-0"
-              } ${
-                isConfigSectionActive
-                  ? "text-primary"
-                  : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
-              }`}
-            >
-              <span
-                className={`absolute left-0 w-1 h-6 rounded-r-full bg-primary-container transition-all duration-300 ${
-                  isConfigSectionActive
-                    ? "scale-y-100 opacity-100"
-                    : "scale-y-0 opacity-0 group-hover:scale-y-100 group-hover:opacity-50 group-hover:bg-primary"
-                }`}
-              />
-              <div
-                className={`flex items-center justify-center flex-shrink-0 w-5 h-5 transition-transform duration-300 ${
-                  !isExpanded && "group-hover:scale-110"
-                } ${
-                  isConfigSectionActive
-                    ? "text-primary-container"
-                    : "group-hover:text-on-surface"
-                }`}
-              >
-                <Settings
-                  size={20}
-                  strokeWidth={isConfigSectionActive ? 2.5 : 2}
-                />
-              </div>
-              <span
-                className={`font-label-caps text-xs font-bold uppercase tracking-tight truncate text-left transition-all duration-300 ${
-                  isConfigSectionActive ? "text-primary-container" : ""
-                } ${
-                  isExpanded
-                    ? "flex-1 opacity-100 translate-x-0"
-                    : "flex-none opacity-0 -translate-x-4 pointer-events-none w-0"
-                }`}
-              >
-                Configuración
-              </span>
-              {isExpanded && (
-                <ChevronDown
-                  size={14}
-                  className={`text-primary/50 transition-transform ${
-                    configOpen ? "rotate-180" : ""
-                  }`}
-                />
-              )}
-              {!isExpanded && (
-                <div className="fixed left-20 ml-2 px-3 py-1 bg-primary-container text-on-primary text-[10px] font-label-caps font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100] shadow-lg shadow-background">
-                  Configuración
+                  ))}
                 </div>
-              )}
-            </button>
-
-            {configOpen && isExpanded && (
-              <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2 animate-in slide-in-from-top-2 duration-300">
-                {visibleConfigSubMenu.map((sub) => (
-                  <Link
-                    key={sub.path}
-                    to={sub.path}
-                    onClick={handleItemClick}
-                    className={`rounded-default px-2 py-1.5 font-label-caps text-[11px] font-bold uppercase tracking-tight ${
-                      location.pathname === sub.path
-                        ? "bg-primary-container/10 text-primary"
-                        : "text-on-surface-variant hover:text-on-surface hover:bg-surface-hover"
-                    }`}
-                  >
-                    {sub.name}
-                  </Link>
-                ))}
-              </div>
               )}
             </div>
           )}
@@ -1463,33 +1472,35 @@ const Sidebar = ({
         <div className="relative border-t border-white/10 p-3">
           <div className="relative">
             {canAccessPath("/pos/notificaciones") && (
-            <div className={`mb-2 ${isExpanded ? "" : "flex justify-center"}`}>
-              <button
-                type="button"
-                onClick={() => {
-                  navigate("/pos/notificaciones");
-                  if (isExpanded) toggleSidebar();
-                }}
-                aria-label={`Notificaciones${unreadNotificationCount ? `, ${unreadNotificationCount} sin leer` : ""}`}
-                className={`relative flex h-10 w-full items-center rounded-default transition-colors hover:bg-surface-hover ${isExpanded ? "gap-3 px-3" : "w-10 justify-center"}`}
+              <div
+                className={`mb-2 ${isExpanded ? "" : "flex justify-center"}`}
               >
-                <span className="relative flex h-5 w-5 shrink-0 items-center justify-center text-on-surface-variant">
-                  <Bell size={19} />
-                  {unreadNotificationCount > 0 && (
-                    <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-error px-1 text-[9px] font-black text-white">
-                      {unreadNotificationCount > 9
-                        ? "9+"
-                        : unreadNotificationCount}
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigate("/pos/notificaciones");
+                    if (isExpanded) toggleSidebar();
+                  }}
+                  aria-label={`Notificaciones${unreadNotificationCount ? `, ${unreadNotificationCount} sin leer` : ""}`}
+                  className={`relative flex h-10 w-full items-center rounded-default transition-colors hover:bg-surface-hover ${isExpanded ? "gap-3 px-3" : "w-10 justify-center"}`}
+                >
+                  <span className="relative flex h-5 w-5 shrink-0 items-center justify-center text-on-surface-variant">
+                    <Bell size={19} />
+                    {unreadNotificationCount > 0 && (
+                      <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-error px-1 text-[9px] font-black text-white">
+                        {unreadNotificationCount > 9
+                          ? "9+"
+                          : unreadNotificationCount}
+                      </span>
+                    )}
+                  </span>
+                  {isExpanded && (
+                    <span className="truncate text-left font-label-caps text-xs font-bold uppercase tracking-tight text-on-surface-variant">
+                      Notificaciones
                     </span>
                   )}
-                </span>
-                {isExpanded && (
-                  <span className="truncate text-left font-label-caps text-xs font-bold uppercase tracking-tight text-on-surface-variant">
-                    Notificaciones
-                  </span>
-                )}
-              </button>
-            </div>
+                </button>
+              </div>
             )}
 
             <div className={`mb-2 ${isExpanded ? "" : "flex justify-center"}`}>
@@ -1524,7 +1535,9 @@ const Sidebar = ({
                 >
                   <span
                     className={`absolute top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-white text-neutral-800 shadow transition-transform ${
-                      colorMode === "dark" ? "translate-x-[22px]" : "translate-x-0.5"
+                      colorMode === "dark"
+                        ? "translate-x-[22px]"
+                        : "translate-x-0.5"
                     }`}
                   >
                     {savingColorMode ? (
@@ -1583,14 +1596,14 @@ const Sidebar = ({
                 </div>
                 {ticketUsage &&
                   (!isEmployee || permissions.finanzas === true) && (
-                  <p
-                    className={`mt-0.5 truncate text-center text-[9px] ${accountPlanStyles.details}`}
-                  >
-                    {ticketUsage.limit == null
-                      ? `${ticketUsage.used.toLocaleString("es-CO")} tickets · sin límite`
-                      : `${ticketUsage.used.toLocaleString("es-CO")} / ${ticketUsage.limit.toLocaleString("es-CO")} tickets`}
-                  </p>
-                )}
+                    <p
+                      className={`mt-0.5 truncate text-center text-[9px] ${accountPlanStyles.details}`}
+                    >
+                      {ticketUsage.limit == null
+                        ? `${ticketUsage.used.toLocaleString("es-CO")} tickets · sin límite`
+                        : `${ticketUsage.used.toLocaleString("es-CO")} / ${ticketUsage.limit.toLocaleString("es-CO")} tickets`}
+                    </p>
+                  )}
               </div>
 
               {isExpanded && (

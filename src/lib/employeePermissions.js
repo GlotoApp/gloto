@@ -42,6 +42,7 @@ export const getEmployeePermissionForPath = (pathname) => {
     return "finanzas";
   }
   if (pathname.startsWith("/pos/configuracion/empleados")) return null;
+  if (pathname.startsWith("/pos/pop-pup")) return "configuracion";
   if (pathname.startsWith("/pos/configuracion")) return "configuracion";
   if (pathname.startsWith("/pos/notificaciones")) return "notificaciones";
   return null;
