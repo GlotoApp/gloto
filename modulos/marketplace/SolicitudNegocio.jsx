@@ -1,30 +1,32 @@
-import { useState } from "react";
-import { ArrowLeft, Building2, Loader2, Store } from "lucide-react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Loader2, Store, X } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 
 const INITIAL_VALUES = {
   business_name: "",
   owner_name: "",
-  email: "",
   phone: "",
-  city: "",
-  address: "",
-  neighborhood: "",
-  business_type: "",
-  description: "",
-  legal_name: "",
-  tax_id: "",
-  opening_hours: "",
-  delivery_available: "no",
-  estimated_products: "",
+  role: "",
 };
 
-export default function SolicitudNegocio() {
+export default function SolicitudNegocio({ onClose }) {
   const [values, setValues] = useState(INITIAL_VALUES);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && onClose) onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [onClose]);
 
   const updateValue = (event) => {
     const { name, value } = event.target;
@@ -36,30 +38,14 @@ export default function SolicitudNegocio() {
     setSubmitting(true);
     setError("");
 
-    if (values.description.trim().length < 10) {
-      setError("Cuéntanos sobre el negocio con al menos 10 caracteres.");
-      setSubmitting(false);
-      return;
-    }
-
     try {
       const { error: requestError } = await supabase.rpc(
         "submit_business_join_request",
         {
-          p_business_name: values.business_name.trim(),
-          p_owner_name: values.owner_name.trim(),
-          p_email: values.email.trim().toLowerCase(),
+          p_full_name: values.owner_name.trim(),
           p_phone: values.phone.trim(),
-          p_city: values.city.trim(),
-          p_address: values.address.trim(),
-          p_neighborhood: values.neighborhood.trim(),
-          p_business_type: values.business_type,
-          p_description: values.description.trim(),
-          p_legal_name: values.legal_name.trim(),
-          p_tax_id: values.tax_id.trim(),
-          p_opening_hours: values.opening_hours.trim(),
-          p_delivery_available: values.delivery_available === "si",
-          p_estimated_products: values.estimated_products.trim(),
+          p_business_name: values.business_name.trim(),
+          p_role: values.role,
         },
       );
       if (requestError) throw requestError;
@@ -73,48 +59,60 @@ export default function SolicitudNegocio() {
 
   if (submitted) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-neutral-950 px-4 py-10 text-white">
-        <section className="w-full max-w-lg rounded-3xl border border-white/10 bg-neutral-900 p-8 text-center shadow-2xl">
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="request-success-title"
+        onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}
+      >
+        <section className="relative w-full max-w-lg rounded-3xl border border-white/10 bg-neutral-900 p-8 text-center shadow-2xl">
+          {onClose && (
+            <button type="button" onClick={onClose} aria-label="Cerrar" className="absolute right-5 top-5 flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"><X size={19} /></button>
+          )}
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-300"><Store /></div>
-          <h1 className="mt-5 text-2xl font-black">Solicitud enviada</h1>
-          <p className="mt-3 text-sm leading-6 text-neutral-400">El equipo de Gloto revisará la información. Te contactaremos por correo o teléfono cuando exista una respuesta.</p>
-          <Link to="/marketplace" className="mt-6 inline-flex rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white hover:bg-violet-400">Volver al marketplace</Link>
+          <h1 id="request-success-title" className="mt-5 text-2xl font-black">Solicitud enviada</h1>
+          {onClose && <button type="button" onClick={onClose} className="mt-6 inline-flex rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white hover:bg-violet-400">Cerrar</button>}
         </section>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 px-4 py-8 text-white sm:px-6">
-      <section className="mx-auto w-full max-w-2xl">
-        <Link to="/marketplace" className="inline-flex items-center gap-2 text-sm font-bold text-neutral-400 hover:text-white"><ArrowLeft size={18} /> Volver al marketplace</Link>
-        <div className="mt-5 rounded-3xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500 text-white"><Building2 /></div>
-            <div><p className="text-xs font-black uppercase tracking-widest text-violet-300">Únete a Gloto</p><h1 className="mt-1 text-2xl font-black">Solicita vender en la plataforma</h1></div>
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/75 px-4 py-6 text-white backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="request-title"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}
+    >
+      <section className="relative my-auto w-full max-w-lg rounded-3xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-8">
+        {onClose && (
+          <button type="button" onClick={onClose} aria-label="Cerrar" className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"><X size={19} /></button>
+        )}
+        <div>
+          <div className="pr-12">
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-300">Únete a Gloto</p>
+            <h1 id="request-title" className="mt-2 text-[28px] leading-[1.05] font-black tracking-tight">Empieza a usar Gloto</h1>
           </div>
-          <p className="mt-4 text-sm leading-6 text-neutral-400">Completa los datos de tu negocio. Esta solicitud quedará pendiente para ser revisada por el equipo de superadministración.</p>
-
-          <form onSubmit={submit} className="mt-7 grid gap-4 sm:grid-cols-2">
-            <label className="sm:col-span-2 text-sm font-bold">Nombre del negocio *<input required name="business_name" value={values.business_name} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="sm:col-span-2 text-sm font-bold">Nombre del propietario *<input required name="owner_name" value={values.owner_name} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="text-sm font-bold">Correo electrónico *<input required type="email" name="email" value={values.email} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="text-sm font-bold">Teléfono o WhatsApp *<input required name="phone" value={values.phone} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="text-sm font-bold">Ciudad *<input required name="city" value={values.city} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="text-sm font-bold">Tipo de negocio *<select required name="business_type" value={values.business_type} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 font-normal outline-none focus:border-violet-400"><option value="">Seleccionar...</option><option>Restaurante</option><option>Tiendas y supermercados</option><option>Belleza y cuidado personal</option><option>Moda y accesorios</option><option>Tecnología</option><option>Servicios</option><option>Otro</option></select></label>
-            <label className="text-sm font-bold">Dirección del negocio *<input required name="address" value={values.address} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="text-sm font-bold">Barrio o sector *<input required name="neighborhood" value={values.neighborhood} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="text-sm font-bold">Razón social<input name="legal_name" value={values.legal_name} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="text-sm font-bold">NIT o documento<input name="tax_id" value={values.tax_id} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="sm:col-span-2 text-sm font-bold">Horario de atención *<input required name="opening_hours" value={values.opening_hours} onChange={updateValue} placeholder="Ej: Lunes a sábado, 8:00 a. m. - 8:00 p. m." className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="text-sm font-bold">¿Realiza domicilios? *<select required name="delivery_available" value={values.delivery_available} onChange={updateValue} className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 font-normal outline-none focus:border-violet-400"><option value="no">No</option><option value="si">Sí</option></select></label>
-            <label className="text-sm font-bold">Cantidad aproximada de productos<input name="estimated_products" value={values.estimated_products} onChange={updateValue} placeholder="Ej: 50" className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
-            <label className="sm:col-span-2 text-sm font-bold">Cuéntanos sobre tu negocio<textarea required minLength={10} name="description" rows={4} value={values.description} onChange={updateValue} placeholder="Productos, horarios, zona de cobertura y demás información útil..." className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 font-normal outline-none focus:border-violet-400" /></label>
+          <form onSubmit={submit} className="mt-6 grid gap-3 sm:grid-cols-2">
+            <input required aria-label="Nombre completo" name="owner_name" value={values.owner_name} onChange={updateValue} autoComplete="name" placeholder="Nombre completo" className="sm:col-span-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none placeholder:text-neutral-500 focus:border-violet-400" />
+            <input required aria-label="Teléfono de WhatsApp" type="tel" inputMode="tel" name="phone" value={values.phone} onChange={updateValue} autoComplete="tel" placeholder="WhatsApp" className="sm:col-span-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none placeholder:text-neutral-500 focus:border-violet-400" />
+            <input required aria-label="Nombre del negocio" name="business_name" value={values.business_name} onChange={updateValue} placeholder="Nombre del negocio" className="sm:col-span-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none placeholder:text-neutral-500 focus:border-violet-400" />
+            <select required aria-label="Cuál es tu rol" name="role" value={values.role} onChange={updateValue} className="sm:col-span-2 w-full rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 text-sm outline-none focus:border-violet-400">
+                <option value="">¿Cuál es tu rol?</option>
+                <option value="Propietario">Propietario</option>
+                <option value="Administrador">Administrador</option>
+                <option value="Gerente">Gerente</option>
+                <option value="Empleado">Empleado</option>
+                <option value="Asesor comercial">Asesor comercial</option>
+                <option value="Otro">Otro</option>
+            </select>
             {error && <p className="sm:col-span-2 rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</p>}
             <button disabled={submitting} type="submit" className="sm:col-span-2 flex items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-3.5 text-sm font-black hover:bg-violet-400 disabled:opacity-60">{submitting && <Loader2 size={18} className="animate-spin" />}{submitting ? "Enviando solicitud..." : "Enviar solicitud"}</button>
           </form>
         </div>
       </section>
-    </main>
+    </div>
   );
 }

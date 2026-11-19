@@ -349,6 +349,8 @@ const PortalDomiciliario = () => {
   const refreshAgainRef = useRef(false);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [verificationPrompt, setVerificationPrompt] = useState(null);
+  const [verificationCode, setVerificationCode] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [availabilityBusy, setAvailabilityBusy] = useState(false);
   const [sourcePreferences, setSourcePreferences] = useState(null);
@@ -1088,28 +1090,43 @@ const PortalDomiciliario = () => {
     user?.id,
   ]);
 
-  const runOrderAction = async (orderId, rpcName, status, successMessage) => {
+  const runOrderAction = async (
+    orderId,
+    rpcName,
+    status,
+    successMessage,
+    extraParams = {},
+  ) => {
     setActiveOrderId(orderId);
     setErrorMessage("");
     setNotice("");
     try {
-      const { error } = await supabase.rpc(rpcName, {
+      const { data, error } = await supabase.rpc(rpcName, {
         p_order_id: orderId,
         ...(status ? { p_status: status } : {}),
+        ...extraParams,
       });
       if (error) throw error;
+      if (rpcName === "complete_courier_order_step" && !data?.success) {
+        const reasonMessages = {
+          invalid_code: "El código no coincide. Verifícalo con el cliente o la tienda.",
+          temporarily_locked:
+            "Se bloquearon temporalmente los intentos. Espera 15 minutos e inténtalo de nuevo.",
+          not_assigned: "Este pedido ya no está asignado a tu cuenta.",
+          invalid_step: "El pedido cambió de estado. Actualiza la lista e inténtalo de nuevo.",
+          code_unavailable: "El código ya no está disponible para este pedido.",
+          order_unavailable: "El pedido ya no está disponible.",
+          unauthorized: "Inicia sesión nuevamente para continuar.",
+        };
+        setErrorMessage(
+          reasonMessages[data?.reason] ||
+            "No se pudo validar el código del pedido.",
+        );
+        return false;
+      }
       if (status === "delivered") {
         updateOrders(
-          orders.filter(
-            (order) =>
-              !(
-                order.order_id === orderId &&
-                order.courier_mode ===
-                  (rpcName === "set_public_courier_order_status"
-                    ? "public"
-                    : "private")
-              ),
-          ),
+          orders.filter((order) => order.order_id !== orderId),
         );
       }
       setNotice(successMessage);
@@ -1143,17 +1160,24 @@ const PortalDomiciliario = () => {
     );
   };
 
-  const updateOrderStatus = async (order, status) => {
+  const updateOrderStatus = async (order, status, code) => {
+    if (!code) {
+      setErrorMessage("");
+      setVerificationCode("");
+      setVerificationPrompt({ order, status });
+      return false;
+    }
+
     const updated = await runOrderAction(
       order.order_id,
-      order.courier_mode === "public"
-        ? "set_public_courier_order_status"
-        : "set_domiciliario_order_status",
+      "complete_courier_order_step",
       status,
       status === "picked_up"
         ? "Marcaste el pedido como recogido."
         : "Marcaste el pedido como entregado.",
+      { p_code: code },
     );
+    if (updated) setVerificationPrompt(null);
     if (updated && status === "delivered") {
       recordWorkOrder(order);
       updateDailyStats((current) => {
@@ -2531,6 +2555,101 @@ const PortalDomiciliario = () => {
           }
           onClose={() => setActivityOpen(false)}
         />
+      )}
+      {verificationPrompt && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="courier-code-title"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (verificationCode.length === 4) {
+                updateOrderStatus(
+                  verificationPrompt.order,
+                  verificationPrompt.status,
+                  verificationCode,
+                );
+              }
+            }}
+            className="w-full max-w-sm rounded-2xl border border-white/10 bg-neutral-900 p-5 shadow-2xl"
+          >
+            <h2
+              id="courier-code-title"
+              className="text-lg font-black text-white"
+            >
+              {verificationPrompt.status === "picked_up"
+                ? "Confirmar recogida"
+                : "Confirmar entrega"}
+            </h2>
+            <p className="mt-2 text-sm text-neutral-400">
+              {verificationPrompt.status === "picked_up"
+                ? "Pide el código de 4 dígitos al personal de la tienda."
+                : "Pide el código de 4 dígitos al cliente."}
+            </p>
+            <label
+              htmlFor="courier-verification-code"
+              className="mt-4 block text-xs font-bold text-neutral-300"
+            >
+              Código de verificación
+            </label>
+            <input
+              id="courier-verification-code"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{4}"
+              maxLength={4}
+              value={verificationCode}
+              onChange={(event) => {
+                setVerificationCode(
+                  event.target.value.replace(/\D/g, "").slice(0, 4),
+                );
+                setErrorMessage("");
+              }}
+              autoFocus
+              className="mt-2 h-14 w-full rounded-xl border border-white/10 bg-black/30 text-center font-mono text-3xl font-black tracking-[0.35em] text-white outline-none focus:border-violet-400/60 focus:ring-2 focus:ring-violet-400/20"
+              aria-describedby={
+                errorMessage ? "courier-verification-error" : undefined
+              }
+            />
+            {errorMessage && (
+              <p
+                id="courier-verification-error"
+                role="alert"
+                className="mt-3 rounded-lg border border-rose-300/20 bg-rose-300/[0.08] px-3 py-2 text-sm text-rose-200"
+              >
+                {errorMessage}
+              </p>
+            )}
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setVerificationPrompt(null);
+                  setVerificationCode("");
+                  setErrorMessage("");
+                }}
+                disabled={activeOrderId === verificationPrompt.order.order_id}
+                className="min-h-11 flex-1 rounded-xl border border-white/10 px-4 text-sm font-bold text-neutral-300 transition hover:bg-white/[0.06] disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  verificationCode.length !== 4 ||
+                  activeOrderId === verificationPrompt.order.order_id
+                }
+                className="min-h-11 flex-1 rounded-xl bg-primary-container px-4 text-sm font-black text-on-primary transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {activeOrderId === verificationPrompt.order.order_id
+                  ? "Verificando..."
+                  : "Confirmar"}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </main>
   );

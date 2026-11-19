@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Loader2, Mail, MessageCircle, Store, X } from "lucide-react";
+import { Check, Loader2, MessageCircle, Store, X } from "lucide-react";
 import { supabase } from "../../src/lib/supabaseClient";
 import SuperAdminSectionShell from "./ContenedorSeccion";
 
@@ -21,6 +21,7 @@ const openDecisionNotifications = (request, status) => {
   const message = decisionMessages[status](request);
   const whatsapp = whatsappUrl(request.phone, message);
   if (whatsapp) window.open(whatsapp, "_blank", "noopener,noreferrer");
+  if (!request.email || request.email.endsWith("@gloto.local")) return;
   const subject = status === "approved" ? "Solicitud aceptada en Gloto" : "Respuesta a tu solicitud en Gloto";
   window.location.href = `mailto:${encodeURIComponent(request.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`;
 };
@@ -90,10 +91,17 @@ export default function SolicitudesNegocio() {
           {filtered.map((request) => (
             <article key={request.id} className="rounded-2xl border border-white/[0.08] bg-neutral-950/40 p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div><p className="text-lg font-black text-white">{request.business_name}</p><p className="mt-1 text-sm text-violet-300">{request.business_type} · {request.city}</p></div>
+                <div><p className="text-lg font-black text-white">{request.business_name}</p><p className="mt-1 text-sm text-violet-300">{request.role || "Rol no indicado"}</p></div>
                 <span className={`rounded-full px-3 py-1 text-xs font-black ${request.status === "pending" ? "bg-amber-500/15 text-amber-300" : request.status === "approved" ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300"}`}>{STATUS_LABELS[request.status]}</span>
               </div>
-              <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-neutral-500">Propietario</dt><dd className="font-bold text-neutral-200">{request.owner_name}</dd></div><div><dt className="text-neutral-500">Contacto</dt><dd className="font-bold text-neutral-200">{request.email} · {request.phone}</dd><div className="mt-2 flex flex-wrap gap-2"><a href={`mailto:${request.email}`} className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500/10 px-3 py-2 text-xs font-black text-sky-300 hover:bg-sky-500/20"><Mail size={15} /> Correo</a>{whatsappUrl(request.phone) && <a href={whatsappUrl(request.phone)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-300 hover:bg-emerald-500/20"><MessageCircle size={15} /> WhatsApp</a>}</div></div><div><dt className="text-neutral-500">Ubicación operativa</dt><dd className="font-bold text-neutral-200">{request.address || "No indicada"} · {request.neighborhood || "Sin barrio"}</dd></div><div><dt className="text-neutral-500">Horario</dt><dd className="text-neutral-200">{request.opening_hours || "No indicado"}</dd></div><div><dt className="text-neutral-500">Domicilios</dt><dd className="text-neutral-200">{request.delivery_available ? "Sí" : "No"}{request.delivery_zones ? ` · ${request.delivery_zones}` : ""}</dd></div><div><dt className="text-neutral-500">Datos comerciales</dt><dd className="text-neutral-200">{request.legal_name || "Sin razón social"} · {request.tax_id || "Sin documento"}</dd></div><div><dt className="text-neutral-500">Catálogo y pagos</dt><dd className="text-neutral-200">~{request.estimated_products || "N/D"} productos · {request.payment_methods || "No indicado"}</dd></div><div className="sm:col-span-2"><dt className="text-neutral-500">Dirección</dt><dd className="text-neutral-200">{request.address || "No indicada"}</dd></div><div className="sm:col-span-2"><dt className="text-neutral-500">Información</dt><dd className="mt-1 whitespace-pre-wrap leading-6 text-neutral-300">{request.description}</dd></div></dl>
+              <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                <div><dt className="text-neutral-500">Nombre completo</dt><dd className="font-bold text-neutral-200">{request.owner_name}</dd></div>
+                <div><dt className="text-neutral-500">Teléfono</dt><dd className="font-bold text-neutral-200">{request.phone}</dd>
+                  {whatsappUrl(request.phone) && <a href={whatsappUrl(request.phone)} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-300 hover:bg-emerald-500/20"><MessageCircle size={15} /> WhatsApp</a>}
+                </div>
+                <div><dt className="text-neutral-500">Negocio</dt><dd className="font-bold text-neutral-200">{request.business_name}</dd></div>
+                <div><dt className="text-neutral-500">Rol</dt><dd className="font-bold text-neutral-200">{request.role || "No indicado"}</dd></div>
+              </dl>
               {request.status === "pending" && <div className="mt-5 flex flex-wrap gap-2"><button type="button" disabled={updatingId === request.id} onClick={() => updateStatus(request, "approved")} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-black text-white disabled:opacity-60"><Check size={17} /> Aceptar solicitud</button><button type="button" disabled={updatingId === request.id} onClick={() => updateStatus(request, "rejected")} className="flex items-center gap-2 rounded-xl bg-red-500/15 px-4 py-2.5 text-sm font-black text-red-300 disabled:opacity-60"><X size={17} /> Rechazar</button></div>}
             </article>
           ))}

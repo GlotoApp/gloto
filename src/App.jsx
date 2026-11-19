@@ -22,6 +22,7 @@ import {
   EmployeeAccessProvider,
   EmployeeRouteGuard,
 } from "./components/EmployeeAccessContext";
+import Landing from "../modulos/landing/Landing";
 
 // Lazy imports
 const POS = lazy(() => import("../modulos/pos/POS"));
@@ -548,19 +549,23 @@ function App() {
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
+    const handleOpenRequestModal = () => setRequestModalOpen(true);
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+    window.addEventListener("open-gloto-request", handleOpenRequestModal);
 
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("open-gloto-request", handleOpenRequestModal);
     };
   }, []);
 
@@ -575,8 +580,9 @@ function App() {
   }
 
   return (
-    <Router>
-      <Suspense fallback={<Loading />}>
+    <>
+      <Router>
+        <Suspense fallback={<Loading />}>
         <Routes>
           {/* Rutas Públicas */}
           <Route path="/login" element={<Login />} />
@@ -593,7 +599,10 @@ function App() {
             }
           />
           <Route path="/acceso" element={<Acceso />} />
-          <Route path="/solicitar-negocio" element={<SolicitudNegocio />} />
+          <Route
+            path="/solicitar-negocio"
+            element={<SolicitudNegocio onClose={() => window.history.back()} />}
+          />
           <Route
             path="/login-superadmin"
             element={<Navigate to="/acceso" replace />}
@@ -608,7 +617,7 @@ function App() {
           />
           <Route path="/mostrador/:slug" element={<Mostrador />} />
           <Route path="/marketplace/*" element={<Marketplace />} />
-          <Route path="/" element={<Navigate to="/marketplace" replace />} />
+          <Route path="/" element={<Landing />} />
           <Route path="*" element={<Upss />} />
 
           {/* Área protegida de administración */}
@@ -834,8 +843,12 @@ function App() {
             <Route path="pop-pup" element={<PopPup />} />
           </Route>
         </Routes>
-      </Suspense>
-    </Router>
+        </Suspense>
+      </Router>
+      {requestModalOpen && (
+        <SolicitudNegocio onClose={() => setRequestModalOpen(false)} />
+      )}
+    </>
   );
 }
 

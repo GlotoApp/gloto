@@ -394,6 +394,7 @@ const OrderStatusSelect = memo(
               <option
                 key={option.value}
                 value={option.value}
+                disabled={isDeliveryOrder && option.value === "delivered"}
                 className="bg-neutral-900 text-white"
               >
                 {option.label}
@@ -406,6 +407,9 @@ const OrderStatusSelect = memo(
                 <option
                   key={option.value}
                   value={option.value}
+                  disabled={["picked_up", "delivered"].includes(
+                    option.databaseValue,
+                  )}
                   className="bg-neutral-900 text-white"
                 >
                   {option.label}
@@ -442,6 +446,9 @@ const OrderCard = memo(
   }) => {
     const [isOpen, setIsOpen] = useState(autoOpen);
     const [loadingAction, setLoadingAction] = useState("");
+    const [pickupCode, setPickupCode] = useState("");
+    const [pickupCodeLoading, setPickupCodeLoading] = useState(false);
+    const [pickupCodeError, setPickupCodeError] = useState("");
     const cardRef = useRef(null);
     useEffect(() => {
       if (!autoOpen) return;
@@ -450,6 +457,48 @@ const OrderCard = memo(
         cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
     }, [autoOpen]);
+
+    useEffect(() => {
+      if (
+        !isOpen ||
+        orden.metodoEntrega !== "domicilio" ||
+        orden.deliveryStatus !== "assigned" ||
+        !orden.id
+      ) {
+        setPickupCode("");
+        setPickupCodeError("");
+        return undefined;
+      }
+
+      let active = true;
+      setPickupCode("");
+      setPickupCodeError("");
+      setPickupCodeLoading(true);
+      supabase
+        .rpc("get_store_order_pickup_code", { p_order_id: orden.id })
+        .then(({ data, error }) => {
+          if (!active) return;
+          if (error) throw error;
+          if (typeof data !== "string" || !/^\d{4}$/.test(data)) {
+            throw new Error("El código de recogida no está disponible.");
+          }
+          setPickupCode(data);
+        })
+        .catch((error) => {
+          if (!active) return;
+          console.error("No se pudo consultar el código de recogida:", error);
+          setPickupCodeError(
+            error.message || "No se pudo consultar el código de recogida.",
+          );
+        })
+        .finally(() => {
+          if (active) setPickupCodeLoading(false);
+        });
+
+      return () => {
+        active = false;
+      };
+    }, [isOpen, orden.deliveryStatus, orden.id, orden.metodoEntrega]);
 
     const runAction = async (action, callback) => {
       if (loadingAction) return;
@@ -603,6 +652,35 @@ const OrderCard = memo(
                     }
                   />
                 </div>
+
+                {orden.metodoEntrega === "domicilio" &&
+                  orden.deliveryStatus === "assigned" && (
+                    <section
+                      aria-live="polite"
+                      className="rounded-xl border border-amber-300/20 bg-amber-300/[0.06] p-4"
+                    >
+                      <p className="text-[10px] font-black uppercase tracking-widest text-amber-200">
+                        Código de recogida para el domiciliario
+                      </p>
+                      {pickupCodeLoading ? (
+                        <p className="mt-2 text-sm text-neutral-300">
+                          Cargando código...
+                        </p>
+                      ) : pickupCode ? (
+                        <p className="mt-2 font-mono text-3xl font-black tracking-[0.3em] text-white">
+                          {pickupCode}
+                        </p>
+                      ) : (
+                        <p role="alert" className="mt-2 text-sm text-rose-200">
+                          {pickupCodeError ||
+                            "El código de recogida no está disponible."}
+                        </p>
+                      )}
+                      <p className="mt-2 text-xs text-neutral-400">
+                        Entrégalo al domiciliario cuando le des el pedido.
+                      </p>
+                    </section>
+                  )}
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <DetailBox label="Cliente" value={orden.cliente} />

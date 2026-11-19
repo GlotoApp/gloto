@@ -162,6 +162,9 @@ const SeguimientoPedido = ({ onCerrar }) => {
   const [fetchedPedido, setFetchedPedido] = useState(null);
   const [loadingPedido, setLoadingPedido] = useState(false);
   const [pedidoError, setPedidoError] = useState(null);
+  const [deliveryCode, setDeliveryCode] = useState("");
+  const [deliveryCodeLoading, setDeliveryCodeLoading] = useState(false);
+  const [deliveryCodeError, setDeliveryCodeError] = useState("");
   const [calificacionTienda, setCalificacionTienda] = useState(0);
   const [guardandoCalificacion, setGuardandoCalificacion] = useState(false);
   const [calificacionEnviada, setCalificacionEnviada] = useState(false);
@@ -169,7 +172,20 @@ const SeguimientoPedido = ({ onCerrar }) => {
   const whatsappRedirectTimeoutRef = useRef(null);
 
   const orderNumber = searchParams.get("order");
-  const isRemoteTracking = Boolean(orderNumber && tokenParam);
+  const trackingOrderNumber = orderNumber || pedidoActivo?.numero;
+  const trackingToken = tokenParam || pedidoActivo?.trackingToken;
+  const isRemoteTracking = Boolean(trackingOrderNumber && trackingToken);
+  const isFetchedTrackingOrder =
+    isRemoteTracking &&
+    String(fetchedPedido?.order_number || "") ===
+      String(trackingOrderNumber || "");
+  const deliveryCodeOrderNumber = trackingOrderNumber;
+  const deliveryCodeToken = trackingToken;
+  const shouldShowDeliveryCode =
+    isFetchedTrackingOrder &&
+    fetchedPedido?.metodoEntrega === "domicilio" &&
+    fetchedPedido?.delivery_status === "picked_up";
+  const shouldLoadDeliveryCode = shouldShowDeliveryCode;
   const pedido = isRemoteTracking
     ? fetchedPedido || pedidoActivo
     : pedidoActivo || fetchedPedido;
@@ -182,6 +198,51 @@ const SeguimientoPedido = ({ onCerrar }) => {
     },
     [],
   );
+
+  useEffect(() => {
+    let active = true;
+    if (!shouldLoadDeliveryCode) {
+      setDeliveryCode("");
+      setDeliveryCodeError("");
+      setDeliveryCodeLoading(false);
+      return undefined;
+    }
+
+    setDeliveryCode("");
+    setDeliveryCodeError("");
+    setDeliveryCodeLoading(true);
+    supabase
+      .rpc("get_customer_order_delivery_code", {
+        p_order_number: deliveryCodeOrderNumber,
+        p_token: deliveryCodeToken,
+      })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) throw error;
+        if (typeof data !== "string" || !/^\d{4}$/.test(data)) {
+          throw new Error("No se recibió un código válido.");
+        }
+        setDeliveryCode(data);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error("No se pudo cargar el código de entrega:", error);
+        setDeliveryCodeError(
+          "No pudimos cargar el código. Actualiza el seguimiento e inténtalo de nuevo.",
+        );
+      })
+      .finally(() => {
+        if (active) setDeliveryCodeLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    deliveryCodeOrderNumber,
+    deliveryCodeToken,
+    shouldLoadDeliveryCode,
+  ]);
 
   useEffect(() => {
     if (!pedido) return;
@@ -203,7 +264,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
   }, [pedido]);
 
   useEffect(() => {
-    if (!orderNumber || !tokenParam) return;
+    if (!trackingOrderNumber || !trackingToken) return;
 
     const fetchPedido = async () => {
       setLoadingPedido(true);
@@ -213,8 +274,8 @@ const SeguimientoPedido = ({ onCerrar }) => {
         // vía permitida para que un cliente anónimo lea un pedido, y
         // exige que order_number + token coincidan exactamente.
         const { data, error } = await supabase.rpc("get_order_by_token", {
-          p_order_number: orderNumber,
-          p_token: tokenParam,
+          p_order_number: trackingOrderNumber,
+          p_token: trackingToken,
         });
 
         if (error || !data) {
@@ -392,10 +453,12 @@ const SeguimientoPedido = ({ onCerrar }) => {
     };
 
     fetchPedido();
-  }, [pedidoActivo, orderNumber, tokenParam]);
+  }, [pedidoActivo, trackingOrderNumber, trackingToken]);
 
   useEffect(() => {
-    if (!isRemoteTracking || !orderNumber || !tokenParam) return undefined;
+    if (!isRemoteTracking || !trackingOrderNumber || !trackingToken) {
+      return undefined;
+    }
 
     let activo = true;
     let consultando = false;
@@ -408,8 +471,8 @@ const SeguimientoPedido = ({ onCerrar }) => {
       consultando = true;
       try {
         const { data, error } = await supabase.rpc("get_order_by_token", {
-          p_order_number: orderNumber,
-          p_token: tokenParam,
+          p_order_number: trackingOrderNumber,
+          p_token: trackingToken,
         });
 
         if (error) {
@@ -474,6 +537,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
                   rawStatus: data.status,
                   status: trackingStatus,
                   metodoEntrega,
+                  delivery_status: data.delivery_status,
                   total: Number(data.total) || 0,
                   delivery_fee: Number(data.delivery_fee) || 0,
                   tip_amount: Number(data.tip_amount) || 0,
@@ -524,7 +588,7 @@ const SeguimientoPedido = ({ onCerrar }) => {
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", actualizarEstado);
     };
-  }, [isRemoteTracking, orderNumber, tokenParam]);
+  }, [isRemoteTracking, trackingOrderNumber, trackingToken]);
 
   const estadoPedidoActual = isRemoteTracking
     ? pedido?.status || "recibido"
@@ -1047,6 +1111,68 @@ const SeguimientoPedido = ({ onCerrar }) => {
             {esEtapaFinal ? "Listo" : "En proceso"}
           </div>
         </div>
+
+        {shouldShowDeliveryCode && (
+            <section
+              aria-live="polite"
+              style={{
+                marginBottom: "16px",
+                padding: "16px 18px",
+                border: "1px solid rgba(167,139,250,0.28)",
+                borderRadius: "20px",
+                background: "rgba(124,58,237,0.12)",
+                textAlign: "center",
+              }}
+            >
+              <p
+                style={{
+                  margin: "0 0 6px",
+                  color: "rgba(255,255,255,0.62)",
+                  fontSize: "10px",
+                  fontWeight: 800,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Código para recibir tu pedido
+              </p>
+              {deliveryCodeLoading ? (
+                <p style={{ margin: 0, color: "#fff", fontSize: "13px" }}>
+                  Cargando código...
+                </p>
+              ) : deliveryCode ? (
+                <p
+                  style={{
+                    margin: 0,
+                    color: "#fff",
+                    fontFamily: "monospace",
+                    fontSize: "30px",
+                    fontWeight: 900,
+                    letterSpacing: "0.3em",
+                  }}
+                >
+                  {deliveryCode}
+                </p>
+              ) : (
+                <p
+                  role="alert"
+                  style={{ margin: 0, color: "#fecaca", fontSize: "12px" }}
+                >
+                  {deliveryCodeError ||
+                    "El código aparecerá cuando el domiciliario confirme la recogida."}
+                </p>
+              )}
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  color: "rgba(255,255,255,0.5)",
+                  fontSize: "11px",
+                }}
+              >
+                Compártelo con el domiciliario al recibir tu pedido.
+              </p>
+            </section>
+          )}
 
         {/* Línea de tiempo */}
         <div
