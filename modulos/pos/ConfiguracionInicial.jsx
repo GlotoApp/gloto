@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   CheckCircle2,
   Eye,
@@ -16,6 +16,9 @@ import ConfiguracionTienda from "./ConfiguracionTienda";
 const ConfiguracionInicial = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isCourierSetup =
+    new URLSearchParams(location.search).get("audience") === "courier";
   const [step, setStep] = useState("loading");
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const [newPassword, setNewPassword] = useState("");
@@ -52,7 +55,7 @@ const ConfiguracionInicial = () => {
         profile.onboarding_completed &&
         !user.user_metadata?.must_change_password
       ) {
-        navigate("/pos", { replace: true });
+        navigate(isCourierSetup ? "/domiciliarios" : "/pos", { replace: true });
         return;
       }
 
@@ -65,7 +68,7 @@ const ConfiguracionInicial = () => {
     return () => {
       isMounted = false;
     };
-  }, [navigate, user]);
+  }, [isCourierSetup, navigate, user]);
 
   const changeTemporaryPassword = async (event) => {
     event.preventDefault();
@@ -99,7 +102,7 @@ const ConfiguracionInicial = () => {
     setNewPassword("");
     setConfirmPassword("");
     if (onboardingCompleted) {
-      navigate("/pos", { replace: true });
+      navigate(isCourierSetup ? "/domiciliarios" : "/pos", { replace: true });
     } else {
       setStep("store");
     }

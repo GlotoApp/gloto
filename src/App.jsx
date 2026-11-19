@@ -18,6 +18,7 @@ import Acceso from "../modulos/admin/Acceso";
 import SolicitudNegocio from "../modulos/marketplace/SolicitudNegocio";
 import { supabase } from "./lib/supabaseClient";
 import RequireDomiciliario from "../modulos/empleados/RequireDomiciliario";
+import ConfiguracionInicialDomiciliario from "../modulos/empleados/ConfiguracionInicialDomiciliario";
 import {
   EmployeeAccessProvider,
   EmployeeRouteGuard,
@@ -150,7 +151,7 @@ const RequireAdmin = ({ children }) => {
   return status === "allowed" ? <RequireAuth>{children}</RequireAuth> : <Loading />;
 };
 
-const RequireAuth = ({ children }) => {
+const RequireAuth = ({ children, allowCourier = false }) => {
   const { user, loading } = useAuth();
   const [accessStatus, setAccessStatus] = useState("loading");
   const [retryKey, setRetryKey] = useState(0);
@@ -194,7 +195,7 @@ const RequireAuth = ({ children }) => {
   }, [retryKey, user?.id]);
 
   if (loading || (user && accessStatus === "loading")) return <Loading />;
-  if (accessStatus === "courier") {
+  if (accessStatus === "courier" && !allowCourier) {
     return <Navigate to="/domiciliarios" replace />;
   }
   if (accessStatus === "error") {
@@ -612,6 +613,14 @@ function App() {
             element={
               <RequireAuth>
                 <ConfiguracionInicial />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/domiciliarios/configuracion-inicial"
+            element={
+              <RequireAuth allowCourier>
+                <ConfiguracionInicialDomiciliario />
               </RequireAuth>
             }
           />

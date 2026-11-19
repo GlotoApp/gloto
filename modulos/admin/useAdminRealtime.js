@@ -61,6 +61,12 @@ export const useAdminRealtime = (
       }
     });
 
+    const {
+      data: { subscription: authSubscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void refresh();
+    });
+
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refresh();
     };
@@ -73,6 +79,7 @@ export const useAdminRealtime = (
     return () => {
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
+      authSubscription.unsubscribe();
       void supabase.removeChannel(channel);
     };
   }, [refreshOnMount, tableKey]);

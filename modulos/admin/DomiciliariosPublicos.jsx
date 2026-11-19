@@ -3,11 +3,15 @@ import {
   Bike,
   Check,
   Clock3,
+  Edit3,
   ExternalLink,
   LoaderCircle,
   MapPin,
   RefreshCw,
   ShieldCheck,
+  Trash2,
+  UserCheck,
+  Users,
   Wallet,
   X,
 } from "lucide-react";
@@ -37,9 +41,132 @@ const formatMoney = (value) =>
     maximumFractionDigits: 0,
   }).format(Number(value) || 0);
 
+const CourierAccountsPanel = ({
+  accounts,
+  loading,
+  search,
+  onSearchChange,
+  activeAccountId,
+  onEdit,
+  onToggleSuspension,
+  onDelete,
+}) => {
+  const filteredAccounts = accounts.filter((account) => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return (
+      !normalizedSearch ||
+      `${account.full_name || ""} ${account.email || ""}`
+        .toLowerCase()
+        .includes(normalizedSearch)
+    );
+  });
+
+  return (
+    <section className="rounded-2xl border border-white/[0.08] bg-neutral-900/60 p-4 sm:p-5">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Users size={18} className="text-sky-300" />
+          <div>
+            <h3 className="text-sm font-black">Cuentas de domiciliarios</h3>
+            <p className="mt-1 text-xs text-neutral-400">
+              Administra el acceso y el estado de todos los domiciliarios.
+            </p>
+          </div>
+        </div>
+        <input
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Buscar por nombre o correo"
+          className="min-h-9 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 text-xs text-white outline-none placeholder:text-neutral-600 focus:border-violet-400/40 sm:w-64"
+        />
+      </div>
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 py-14 text-sm text-neutral-400">
+          <LoaderCircle size={18} className="animate-spin" />
+          Cargando cuentas...
+        </div>
+      ) : filteredAccounts.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-white/10 px-4 py-14 text-center text-sm text-neutral-500">
+          No hay cuentas de domiciliarios registradas.
+        </p>
+      ) : (
+        <div className="grid gap-3">
+          {filteredAccounts.map((account) => {
+            const isBusy = activeAccountId === account.id;
+            return (
+              <article
+                key={account.id}
+                className="rounded-2xl border border-white/[0.08] bg-neutral-950/60 p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-black text-white">
+                      {account.full_name || "Sin nombre"}
+                    </h4>
+                    <p className="mt-1 text-xs text-neutral-400">
+                      {account.email || "Sin correo"}
+                      {account.phone ? ` · ${account.phone}` : ""}
+                    </p>
+                    <p className="mt-2 text-[11px] text-neutral-500">
+                      Creada: {formatDate(account.created_at)}
+                      {account.lastSignInAt
+                        ? ` · Último acceso: ${formatDate(account.lastSignInAt)}`
+                        : ""}
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase ${
+                      account.isSuspended
+                        ? "bg-rose-500/10 text-rose-300"
+                        : "bg-emerald-500/10 text-emerald-300"
+                    }`}
+                  >
+                    {account.isSuspended ? "Suspendida" : "Activa"}
+                  </span>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onEdit(account)}
+                    disabled={isBusy}
+                    className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-neutral-200 transition hover:bg-white/[0.05] disabled:opacity-50"
+                  >
+                    <Edit3 size={14} />
+                    Modificar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onToggleSuspension(account)}
+                    disabled={isBusy}
+                    className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-amber-300/20 px-3 py-2 text-xs font-bold text-amber-200 transition hover:bg-amber-400/10 disabled:opacity-50"
+                  >
+                    {account.isSuspended ? <UserCheck size={14} /> : <Clock3 size={14} />}
+                    {account.isSuspended ? "Reactivar" : "Suspender"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(account)}
+                    disabled={isBusy}
+                    className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-rose-300/20 px-3 py-2 text-xs font-bold text-rose-200 transition hover:bg-rose-400/10 disabled:opacity-50"
+                  >
+                    <Trash2 size={14} />
+                    Eliminar cuenta
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+};
+
 const DomiciliariosPublicos = () => {
   const [activeTab, setActiveTab] = useState("applications");
   const [applications, setApplications] = useState([]);
+  const [newApplications, setNewApplications] = useState([]);
+  const [newApplicationsLoading, setNewApplicationsLoading] = useState(true);
   const [filter, setFilter] = useState("pending");
   const [topups, setTopups] = useState([]);
   const [topupFilter, setTopupFilter] = useState("pending");
@@ -53,12 +180,113 @@ const DomiciliariosPublicos = () => {
   });
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [courierAccounts, setCourierAccounts] = useState([]);
+  const [courierAccountsLoading, setCourierAccountsLoading] = useState(false);
+  const [accountSearch, setAccountSearch] = useState("");
+  const [activeAccountId, setActiveAccountId] = useState("");
   const [loading, setLoading] = useState(true);
   const [activeUserId, setActiveUserId] = useState("");
   const [activeTopupId, setActiveTopupId] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [reviewNotes, setReviewNotes] = useState({});
+
+  const fetchCourierAccounts = useCallback(async () => {
+    setCourierAccountsLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "manage-courier-accounts",
+        { body: { action: "list" } },
+      );
+      if (error) throw error;
+      setCourierAccounts(data?.accounts || []);
+    } catch (error) {
+      console.error("No se pudieron cargar las cuentas de domiciliarios:", error);
+      let detailedMessage = error.message;
+      if (error.context?.json) {
+        try {
+          const responseBody = await error.context.json();
+          detailedMessage = responseBody.details
+            ? `${responseBody.error || detailedMessage} (${responseBody.details})`
+            : responseBody.error || detailedMessage;
+        } catch (parseError) {
+          console.error("No se pudo leer el detalle de la función de cuentas:", parseError);
+        }
+      }
+      setErrorMessage(detailedMessage || "No se pudieron cargar las cuentas.");
+    } finally {
+      setCourierAccountsLoading(false);
+    }
+  }, []);
+
+  const manageCourierAccount = async (account, action) => {
+    const actionLabels = {
+      suspend: "suspender",
+      restore: "reactivar",
+      delete: "eliminar definitivamente",
+    };
+    if (
+      !window.confirm(
+        `¿Confirmas ${actionLabels[action]} la cuenta de ${account.full_name || account.email}?`,
+      )
+    ) {
+      return;
+    }
+
+    setActiveAccountId(account.id);
+    setErrorMessage("");
+    setSuccessMessage("");
+    try {
+      const body = { action, userId: account.id };
+      if (action === "update") body.fullName = account.full_name;
+      const { error } = await supabase.functions.invoke(
+        "manage-courier-accounts",
+        { body },
+      );
+      if (error) throw error;
+      setSuccessMessage(
+        action === "delete"
+          ? "La cuenta fue eliminada."
+          : action === "suspend"
+            ? "La cuenta fue suspendida."
+            : action === "restore"
+              ? "La cuenta fue reactivada."
+              : "La cuenta fue actualizada.",
+      );
+      await fetchCourierAccounts();
+    } catch (error) {
+      console.error("No se pudo administrar la cuenta del domiciliario:", error);
+      setErrorMessage(error.message || "No se pudo actualizar la cuenta.");
+    } finally {
+      setActiveAccountId("");
+    }
+  };
+
+  const updateCourierName = async (account) => {
+    const fullName = window.prompt(
+      "Nombre completo del domiciliario:",
+      account.full_name || "",
+    );
+    if (fullName === null || fullName.trim() === account.full_name) return;
+    const updatedAccount = { ...account, full_name: fullName.trim() };
+    setActiveAccountId(account.id);
+    setErrorMessage("");
+    setSuccessMessage("");
+    try {
+      const { error } = await supabase.functions.invoke(
+        "manage-courier-accounts",
+        { body: { action: "update", userId: account.id, fullName: updatedAccount.full_name } },
+      );
+      if (error) throw error;
+      setSuccessMessage("El nombre de la cuenta fue actualizado.");
+      await fetchCourierAccounts();
+    } catch (error) {
+      console.error("No se pudo actualizar el nombre del domiciliario:", error);
+      setErrorMessage(error.message || "No se pudo actualizar el nombre.");
+    } finally {
+      setActiveAccountId("");
+    }
+  };
 
   const fetchApplications = useCallback(async () => {
     try {
@@ -94,6 +322,71 @@ const DomiciliariosPublicos = () => {
     }
     setLoading(false);
   }, [fetchApplications]);
+
+  const fetchNewApplications = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("public_courier_application_requests")
+        .select(
+          "id,full_name,email,phone,vehicle_type,status,review_notes,created_at,license_front_path,license_back_path,vehicle_card_front_path,vehicle_card_back_path,identity_front_path,identity_back_path,profile_photo_path",
+        )
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+
+      const rows = data || [];
+      const paths = rows.flatMap((row) => [
+        row.license_front_path,
+        row.license_back_path,
+        row.vehicle_card_front_path,
+        row.vehicle_card_back_path,
+        row.identity_front_path,
+        row.identity_back_path,
+        row.profile_photo_path,
+      ]);
+      const { data: signedFiles, error: signedFilesError } = paths.length
+        ? await supabase.storage
+            .from("courier-application-documents")
+            .createSignedUrls(paths, 600)
+        : { data: [], error: null };
+      if (signedFilesError) throw signedFilesError;
+      const urls = new Map(
+        (signedFiles || []).map((file) => [file.path, file.signedUrl]),
+      );
+      return {
+        data: rows.map((row) => ({
+          ...row,
+          documents: {
+            licenseFront: urls.get(row.license_front_path) || "",
+            licenseBack: urls.get(row.license_back_path) || "",
+            vehicleCardFront: urls.get(row.vehicle_card_front_path) || "",
+            vehicleCardBack: urls.get(row.vehicle_card_back_path) || "",
+            identityFront: urls.get(row.identity_front_path) || "",
+            identityBack: urls.get(row.identity_back_path) || "",
+            profilePhoto: urls.get(row.profile_photo_path) || "",
+          },
+        })),
+        error: null,
+      };
+    } catch (error) {
+      console.error("No se pudieron cargar las nuevas solicitudes:", error);
+      return { data: [], error };
+    }
+  }, []);
+
+  const loadNewApplications = useCallback(async () => {
+    setNewApplicationsLoading(true);
+    const { data, error } = await fetchNewApplications();
+    if (error) {
+      setErrorMessage(
+        error.message ||
+          "No se pudieron cargar las postulaciones nuevas. Verifica la migración de solicitudes de domiciliarios.",
+      );
+    } else {
+      setNewApplications(data);
+    }
+    setNewApplicationsLoading(false);
+  }, [fetchNewApplications]);
 
   const fetchTopups = useCallback(async (statusFilter = topupFilter) => {
     setTopupsLoading(true);
@@ -273,21 +566,37 @@ const DomiciliariosPublicos = () => {
 
   const refreshActiveCourierData = useCallback(async () => {
     if (activeTab === "applications") {
-      await loadApplications();
+      await Promise.all([loadApplications(), loadNewApplications()]);
     } else if (activeTab === "topups") {
       await fetchTopups();
+    } else if (activeTab === "accounts") {
+      await fetchCourierAccounts();
     }
-  }, [activeTab, fetchTopups, loadApplications]);
+  }, [
+    activeTab,
+    fetchCourierAccounts,
+    fetchTopups,
+    loadApplications,
+    loadNewApplications,
+  ]);
 
   useAdminRealtime(
-    ["public_courier_applications", "public_courier_topups"],
+    [
+      "public_courier_applications",
+      "public_courier_application_requests",
+      "public_courier_topups",
+      "profiles",
+    ],
     refreshActiveCourierData,
   );
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
-      const { data, error } = await fetchApplications();
+      const [{ data, error }, newRequests] = await Promise.all([
+        fetchApplications(),
+        fetchNewApplications(),
+      ]);
       if (!mounted) return;
       if (error) {
         setErrorMessage(
@@ -298,13 +607,17 @@ const DomiciliariosPublicos = () => {
         setErrorMessage("");
         setApplications(data);
       }
+      if (!newRequests.error) {
+        setNewApplications(newRequests.data);
+      }
       setLoading(false);
+      setNewApplicationsLoading(false);
     };
     load();
     return () => {
       mounted = false;
     };
-  }, [fetchApplications]);
+  }, [fetchApplications, fetchNewApplications]);
 
   const reviewApplication = async (application, status) => {
     const confirmation =
@@ -343,6 +656,77 @@ const DomiciliariosPublicos = () => {
     }
   };
 
+  const reviewNewApplication = async (application, status) => {
+    const action = status === "approved" ? "aprobar" : "rechazar";
+    if (
+      !window.confirm(
+        `¿Confirmas ${action} la solicitud de ${application.full_name}?`,
+      )
+    ) {
+      return;
+    }
+
+    setActiveUserId(application.id);
+    setErrorMessage("");
+    setSuccessMessage("");
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "review-public-courier-application",
+        {
+          body: {
+            requestId: application.id,
+            status,
+            notes: reviewNotes[application.id]?.trim() || null,
+          },
+        },
+      );
+      if (error) throw error;
+      if (status === "approved") {
+        const whatsappNumber = String(data?.phone || "").replace(/\D/g, "");
+        const message = [
+          `Hola ${application.full_name}, tu solicitud para ser domiciliario de Gloto fue aprobada.`,
+          "",
+          `Correo: ${data.email}`,
+          data.existingAccount
+            ? "Usa la contraseña que ya tienes registrada."
+            : `Contraseña temporal: ${data.temporaryPassword}`,
+          "",
+          data.existingAccount
+            ? "Ingresa en el portal de domiciliarios con tus credenciales actuales."
+            : "Ingresa en el portal de domiciliarios y cambia tu contraseña al entrar por primera vez.",
+        ].join("\n");
+        const whatsappUrl = whatsappNumber
+          ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
+          : "";
+        setSuccessMessage(
+          whatsappUrl
+            ? "Cuenta creada. Se abrirá WhatsApp para que envíes las credenciales."
+            : "Cuenta creada, pero el teléfono no es válido para abrir WhatsApp.",
+        );
+        if (whatsappUrl) window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+      } else {
+        setSuccessMessage(`La solicitud de ${application.full_name} fue rechazada.`);
+      }
+      await loadNewApplications();
+    } catch (error) {
+      console.error("No se pudo revisar la nueva solicitud:", error);
+      let detailedMessage = error.message;
+      if (error.context?.json) {
+        try {
+          const responseBody = await error.context.json();
+          detailedMessage = responseBody.error || detailedMessage;
+        } catch (parseError) {
+          console.error("No se pudo leer el detalle de la Edge Function:", parseError);
+        }
+      }
+      setErrorMessage(
+        detailedMessage || "No se pudo actualizar la solicitud.",
+      );
+    } finally {
+      setActiveUserId("");
+    }
+  };
+
   return (
     <SuperAdminSectionShell
       title="Domiciliarios públicos"
@@ -353,9 +737,11 @@ const DomiciliariosPublicos = () => {
           type="button"
           onClick={
             activeTab === "applications"
-              ? loadApplications
+              ? () => Promise.all([loadApplications(), loadNewApplications()])
               : activeTab === "topups"
                 ? fetchTopups
+              : activeTab === "accounts"
+                ? fetchCourierAccounts
                 : fetchCourierSettings
           }
           disabled={
@@ -363,6 +749,8 @@ const DomiciliariosPublicos = () => {
               ? loading
               : activeTab === "topups"
                 ? topupsLoading
+                : activeTab === "accounts"
+                  ? courierAccountsLoading
                 : settingsLoading
           }
           className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 px-4 text-xs font-bold text-neutral-200 transition hover:bg-white/[0.05] disabled:opacity-50"
@@ -387,6 +775,7 @@ const DomiciliariosPublicos = () => {
         {[
           ["applications", "Solicitudes de acceso"],
           ["topups", "Recargas"],
+          ["accounts", "Cuentas"],
           ["settings", "Configuración"],
         ].map(([tab, label]) => (
           <button
@@ -395,6 +784,7 @@ const DomiciliariosPublicos = () => {
             onClick={() => {
               setActiveTab(tab);
               if (tab === "topups") fetchTopups();
+              if (tab === "accounts") fetchCourierAccounts();
               if (tab === "settings") fetchCourierSettings();
             }}
             className={`rounded-lg px-4 py-2.5 text-xs font-bold transition ${
@@ -454,6 +844,121 @@ const DomiciliariosPublicos = () => {
             {successMessage}
           </p>
         )}
+
+        <section className="mb-6 rounded-2xl border border-sky-400/20 bg-sky-400/[0.04] p-4 sm:p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-sky-100">
+                Nuevas postulaciones con documentos
+              </h3>
+              <p className="mt-1 text-xs text-neutral-500">
+                Revisa cada documento antes de aprobar o rechazar.
+              </p>
+            </div>
+            {newApplicationsLoading && (
+              <LoaderCircle size={17} className="animate-spin text-sky-300" />
+            )}
+          </div>
+          {!newApplicationsLoading && newApplications.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-xs text-neutral-500">
+              No hay postulaciones nuevas.
+            </p>
+          ) : (
+            <div className="grid gap-3">
+              {newApplications.map((application) => {
+                const isBusy = activeUserId === application.id;
+                const documentLinks = [
+                  ["Licencia - frente", application.documents.licenseFront],
+                  ["Licencia - respaldo", application.documents.licenseBack],
+                  ["Tarjeta - frente", application.documents.vehicleCardFront],
+                  ["Tarjeta - respaldo", application.documents.vehicleCardBack],
+                  ["Identidad - frente", application.documents.identityFront],
+                  ["Identidad - respaldo", application.documents.identityBack],
+                  ["Foto de perfil", application.documents.profilePhoto],
+                ];
+                return (
+                  <article
+                    key={application.id}
+                    className="rounded-xl border border-white/[0.08] bg-neutral-950/70 p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-black text-white">
+                          {application.full_name}
+                        </h4>
+                        <p className="mt-1 text-xs text-neutral-400">
+                          {application.email} · {application.phone}
+                        </p>
+                        <p className="mt-1 text-xs text-neutral-500">
+                          Vehículo: {application.vehicle_type === "motorcycle" ? "Moto" : "Carro"}
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-white/10 px-3 py-1 text-[10px] font-bold text-neutral-300">
+                        {statusLabels[application.status] || application.status}
+                      </span>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {documentLinks.map(([label, url]) => (
+                        <a
+                          key={label}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-lg bg-white/[0.06] px-2.5 py-2 text-[11px] font-bold text-sky-200 hover:bg-white/[0.12]"
+                        >
+                          {label}
+                        </a>
+                      ))}
+                    </div>
+                    {(application.status === "pending" ||
+                      application.status === "approved") && (
+                      <>
+                        <input
+                          value={reviewNotes[application.id] ?? ""}
+                          onChange={(event) =>
+                            setReviewNotes((current) => ({
+                              ...current,
+                              [application.id]: event.target.value,
+                            }))
+                          }
+                          maxLength={500}
+                          placeholder="Nota de revisión (opcional)"
+                          disabled={isBusy}
+                          className="mt-4 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 py-2.5 text-xs text-white outline-none placeholder:text-neutral-600 focus:border-violet-400/40 disabled:opacity-50"
+                        />
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {application.status === "pending" && (
+                            <button
+                              type="button"
+                              onClick={() => reviewNewApplication(application, "approved")}
+                              disabled={isBusy}
+                              className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-black text-emerald-950 disabled:opacity-50"
+                            >
+                              Aprobar solicitud
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              reviewNewApplication(
+                                application,
+                                application.status === "approved" ? "suspended" : "rejected",
+                              )
+                            }
+                            disabled={isBusy}
+                            className="rounded-lg border border-rose-300/20 px-3 py-2 text-xs font-bold text-rose-200 disabled:opacity-50"
+                          >
+                            {application.status === "approved" ? "Suspender" : "Rechazar"}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-14 text-sm text-neutral-400">
@@ -607,6 +1112,40 @@ const DomiciliariosPublicos = () => {
           </div>
         )}
       </section>
+      ) : activeTab === "accounts" ? (
+        <>
+          {errorMessage && (
+            <p
+              role="alert"
+              className="mb-4 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200"
+            >
+              {errorMessage}
+            </p>
+          )}
+          {successMessage && (
+            <p
+              role="status"
+              className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200"
+            >
+              {successMessage}
+            </p>
+          )}
+          <CourierAccountsPanel
+            accounts={courierAccounts}
+            loading={courierAccountsLoading}
+            search={accountSearch}
+            onSearchChange={setAccountSearch}
+            activeAccountId={activeAccountId}
+            onEdit={updateCourierName}
+            onToggleSuspension={(account) =>
+              manageCourierAccount(
+                account,
+                account.isSuspended ? "restore" : "suspend",
+              )
+            }
+            onDelete={(account) => manageCourierAccount(account, "delete")}
+          />
+        </>
       ) : activeTab === "topups" ? (
         <section className="rounded-2xl border border-white/[0.08] bg-neutral-900/60 p-4 sm:p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -671,6 +1210,120 @@ const DomiciliariosPublicos = () => {
                   : "No encontramos recargas para este filtro"}
               </p>
             </div>
+          ) : activeTab === "accounts" ? (
+            <section className="rounded-2xl border border-white/[0.08] bg-neutral-900/60 p-4 sm:p-5">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Users size={18} className="text-sky-300" />
+                  <div>
+                    <h3 className="text-sm font-black">Cuentas de domiciliarios</h3>
+                    <p className="mt-1 text-xs text-neutral-400">
+                      Administra el acceso y el estado de todos los domiciliarios.
+                    </p>
+                  </div>
+                </div>
+                <input
+                  value={accountSearch}
+                  onChange={(event) => setAccountSearch(event.target.value)}
+                  placeholder="Buscar por nombre o correo"
+                  className="min-h-9 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 text-xs text-white outline-none placeholder:text-neutral-600 focus:border-violet-400/40 sm:w-64"
+                />
+              </div>
+
+              {errorMessage && (
+                <p role="alert" className="mb-4 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
+                  {errorMessage}
+                </p>
+              )}
+              {successMessage && (
+                <p role="status" className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">
+                  {successMessage}
+                </p>
+              )}
+
+              {courierAccountsLoading ? (
+                <div className="flex items-center justify-center gap-2 py-14 text-sm text-neutral-400">
+                  <LoaderCircle size={18} className="animate-spin" />
+                  Cargando cuentas...
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {courierAccounts
+                    .filter((account) => {
+                      const search = accountSearch.trim().toLowerCase();
+                      return !search ||
+                        `${account.full_name || ""} ${account.email || ""}`
+                          .toLowerCase()
+                          .includes(search);
+                    })
+                    .map((account) => {
+                      const isBusy = activeAccountId === account.id;
+                      return (
+                        <article
+                          key={account.id}
+                          className="rounded-2xl border border-white/[0.08] bg-neutral-950/60 p-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <h4 className="text-sm font-black text-white">
+                                {account.full_name || "Sin nombre"}
+                              </h4>
+                              <p className="mt-1 text-xs text-neutral-400">
+                                {account.email || "Sin correo"} {account.phone ? `· ${account.phone}` : ""}
+                              </p>
+                              <p className="mt-2 text-[11px] text-neutral-500">
+                                Creada: {formatDate(account.created_at)}
+                                {account.lastSignInAt ? ` · Último acceso: ${formatDate(account.lastSignInAt)}` : ""}
+                              </p>
+                            </div>
+                            <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase ${
+                              account.isSuspended
+                                ? "bg-rose-500/10 text-rose-300"
+                                : "bg-emerald-500/10 text-emerald-300"
+                            }`}>
+                              {account.isSuspended ? "Suspendida" : "Activa"}
+                            </span>
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => updateCourierName(account)}
+                              disabled={isBusy}
+                              className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-neutral-200 transition hover:bg-white/[0.05] disabled:opacity-50"
+                            >
+                              <Edit3 size={14} />
+                              Modificar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => manageCourierAccount(account, account.isSuspended ? "restore" : "suspend")}
+                              disabled={isBusy}
+                              className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-amber-300/20 px-3 py-2 text-xs font-bold text-amber-200 transition hover:bg-amber-400/10 disabled:opacity-50"
+                            >
+                              {account.isSuspended ? <UserCheck size={14} /> : <Clock3 size={14} />}
+                              {account.isSuspended ? "Reactivar" : "Suspender"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => manageCourierAccount(account, "delete")}
+                              disabled={isBusy}
+                              className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-rose-300/20 px-3 py-2 text-xs font-bold text-rose-200 transition hover:bg-rose-400/10 disabled:opacity-50"
+                            >
+                              <Trash2 size={14} />
+                              Eliminar cuenta
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  {courierAccounts.length === 0 && (
+                    <p className="rounded-xl border border-dashed border-white/10 px-4 py-14 text-center text-sm text-neutral-500">
+                      No hay cuentas de domiciliarios registradas.
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
           ) : (
             <div className="grid gap-3">
               {topups.map((topup) => {

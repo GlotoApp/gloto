@@ -132,7 +132,21 @@ const Login = ({ audience = "pos" }) => {
       }
 
       resetAttempts();
-      navigate(isCourierLogin ? "/domiciliarios" : "/pos");
+      const { data: currentUserData, error: currentUserError } =
+        await supabase.auth.getUser();
+      if (currentUserError || !currentUserData.user) {
+        throw currentUserError || new Error("No se pudo actualizar la sesión.");
+      }
+      const mustChangePassword = Boolean(
+        currentUserData.user.user_metadata?.must_change_password,
+      );
+      navigate(
+        isCourierLogin && mustChangePassword
+          ? "/domiciliarios/configuracion-inicial"
+          : isCourierLogin
+            ? "/domiciliarios"
+            : "/pos",
+      );
     } catch (error) {
       console.error("Error al iniciar sesión:", error);
       if (isCourierLogin) {

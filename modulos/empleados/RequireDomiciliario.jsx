@@ -29,10 +29,25 @@ const RequireDomiciliario = ({ children }) => {
           setStatus("error");
           return;
         }
+        if (String(profile?.role || "").toLowerCase() !== "domiciliario") {
+          setStatus("denied");
+          return;
+        }
+
+        const { data: currentUser, error: currentUserError } =
+          await supabase.auth.getUser();
+        if (currentUserError || !currentUser.user) {
+          console.error(
+            "No se pudo actualizar la sesión del domiciliario:",
+            currentUserError,
+          );
+          setStatus("error");
+          return;
+        }
         setStatus(
-          String(profile?.role || "").toLowerCase() === "domiciliario"
-            ? "allowed"
-            : "denied",
+          currentUser.user.user_metadata?.must_change_password
+            ? "password"
+            : "allowed",
         );
       } catch (error) {
         if (!isMounted) return;
@@ -58,6 +73,9 @@ const RequireDomiciliario = ({ children }) => {
   if (!user) return <Navigate to="/domiciliarios/login" replace />;
   if (status === "denied") {
     return <Navigate to="/domiciliarios/login" replace />;
+  }
+  if (status === "password") {
+    return <Navigate to="/domiciliarios/configuracion-inicial" replace />;
   }
   if (status === "error") {
     return (

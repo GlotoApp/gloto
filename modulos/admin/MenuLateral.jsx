@@ -82,6 +82,7 @@ const SuperAdminSidebar = ({
   );
   const [pendingCounts, setPendingCounts] = useState(null);
   const [pendingBusinessRequests, setPendingBusinessRequests] = useState(0);
+  const [pendingCourierApplications, setPendingCourierApplications] = useState(0);
   const [paymentsOpen, setPaymentsOpen] = useState(() =>
     location.pathname.startsWith("/gestion/finanzas/pagos"),
   );
@@ -170,11 +171,33 @@ const SuperAdminSidebar = ({
   }, []);
 
   const loadPendingBusinessRequests = useCallback(async () => {
-    const { count, error } = await supabase
+    const { data, error } = await supabase
       .from("business_join_requests")
-      .select("id", { count: "exact", head: true })
+      .select("id")
       .eq("status", "pending");
-    if (!error) setPendingBusinessRequests(count || 0);
+    if (!error) {
+      setPendingBusinessRequests(data?.length || 0);
+    } else {
+      console.error(
+        "No se pudo actualizar el contador de solicitudes de negocio:",
+        error,
+      );
+    }
+  }, []);
+
+  const loadPendingCourierApplications = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("public_courier_application_requests")
+      .select("id")
+      .eq("status", "pending");
+    if (!error) {
+      setPendingCourierApplications(data?.length || 0);
+    } else {
+      console.error(
+        "No se pudo actualizar el contador de postulaciones de domiciliarios:",
+        error,
+      );
+    }
   }, []);
 
   useAdminRealtime(
@@ -182,6 +205,12 @@ const SuperAdminSidebar = ({
       "business_join_requests",
     ],
     loadPendingBusinessRequests,
+    true,
+  );
+
+  useAdminRealtime(
+    ["public_courier_application_requests"],
+    loadPendingCourierApplications,
     true,
   );
 
@@ -300,13 +329,12 @@ const SuperAdminSidebar = ({
                     {label}
                   </span>
                 )}
-                {path === "/gestion/solicitudes-negocio" && pendingBusinessRequests > 0 && (
-                  <span
-                    aria-label={`${pendingBusinessRequests} solicitudes nuevas`}
-                    className={isExpanded ? "ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-pink-500 px-1.5 py-0.5 text-[10px] font-black leading-none text-white shadow-[0_0_12px_rgba(236,72,153,.45)]" : "absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-neutral-950 bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,.8)]"}
-                  >
-                    {isExpanded ? (pendingBusinessRequests > 99 ? "99+" : pendingBusinessRequests) : null}
-                  </span>
+                {path === "/gestion/solicitudes-negocio" && (
+                  <PendingBadge
+                    count={pendingBusinessRequests}
+                    label="solicitudes de negocio"
+                    compact={!isExpanded}
+                  />
                 )}
               </>
             )}
@@ -459,6 +487,13 @@ const SuperAdminSidebar = ({
                   <span className="truncate text-xs font-bold uppercase tracking-tight">
                     {label}
                   </span>
+                )}
+                {path === "/gestion/domiciliarios" && (
+                  <PendingBadge
+                    count={pendingCourierApplications}
+                    label="postulaciones de domiciliarios"
+                    compact={!isExpanded}
+                  />
                 )}
               </>
             )}

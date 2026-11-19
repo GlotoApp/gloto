@@ -9,7 +9,6 @@ import {
   Routes,
   Route,
   useLocation,
-  useNavigate,
   Link,
 } from "react-router-dom";
 import {
@@ -22,6 +21,7 @@ import {
   Menu,
   ShieldCheck,
   Store,
+  Bike,
   X,
 } from "lucide-react";
 
@@ -29,6 +29,7 @@ import { CartProvider } from "./pages/CartContext";
 import MarketplaceLoading from "./pages/MarketplaceLoading";
 import TerminosCondiciones from "./pages/TerminosCondiciones";
 import PoliticaPrivacidad from "./pages/PoliticaPrivacidad";
+import SolicitudDomiciliario from "./SolicitudDomiciliario";
 
 const Home = lazy(() => import("./pages/Home"));
 const Shop = lazy(() => import("./pages/Shop"));
@@ -104,8 +105,9 @@ const readSavedLocation = () => {
 
 const Marketplace = () => {
   const location = useLocation();
-  const navigate = useNavigate();
   const isShopPage = location.pathname.includes("/tienda/");
+  const isCourierApplicationPage =
+    location.pathname === "/marketplace/solicitar-domiciliario";
   const isHomePage =
     location.pathname === "/marketplace" ||
     location.pathname === "/marketplace/";
@@ -203,7 +205,9 @@ const Marketplace = () => {
   return (
     <div className="min-h-screen bg-background text-on-surface">
       {/* HEADER */}
-      {!isShopPage && (!isHomePage || !showHomeLoader) && (
+      {!isShopPage &&
+        !isCourierApplicationPage &&
+        (!isHomePage || !showHomeLoader) && (
         <header className="sticky top-0 z-50 bg-background">
           <div className="px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -285,6 +289,10 @@ const Marketplace = () => {
               />
               <Route path="/tienda/:slug" element={<Shop />} />
               <Route path="/seguimiento" element={<SeguimientoPedido />} />
+              <Route
+                path="/solicitar-domiciliario"
+                element={<SolicitudDomiciliario />}
+              />
             </Routes>
           </Suspense>
         </CartProvider>
@@ -385,6 +393,21 @@ const Marketplace = () => {
                     Solicitar unirse a Gloto
                     <ExternalLink size={16} />
                   </button>
+                </div>
+                <div className="mt-3 rounded-2xl border border-sky-400/15 bg-gradient-to-br from-sky-500/10 to-sky-950/20 p-4">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500 text-white shadow-lg shadow-sky-950/30"><Bike size={22} /></div>
+                  <h2 className="mt-4 text-lg font-black text-white">¿Quieres ser repartidor?</h2>
+                  <p className="mt-1 text-sm leading-5 text-neutral-400">Solicita acceso a la red de entregas públicas de Gloto.</p>
+                  <a
+                    href="/marketplace/solicitar-domiciliario"
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => setMenuOpen(false)}
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 px-4 py-3 text-sm font-black text-white transition hover:bg-sky-400"
+                  >
+                    Solicitar ser repartidor
+                    <ExternalLink size={16} />
+                  </a>
                 </div>
               </div>
             )}
