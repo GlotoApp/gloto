@@ -3,6 +3,8 @@ import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER = [4.5709, -74.2973];
 const ROUTING_URL = "https://router.project-osrm.org/route/v1/driving";
+const ROUTE_PIN_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>';
 
 const isValidCoordinate = (latitude, longitude) =>
   latitude !== null &&
@@ -29,7 +31,7 @@ const fitActiveDeliveryBounds = (map, L, delivery, location, animate) => {
   if (points.length === 0) return;
   const bounds = L.latLngBounds(points);
   const deliveryCard = document.querySelector(
-    ".courier-active-delivery-card",
+    ".courier-active-delivery-card, .courier-offer-preview-card",
   );
   const mapHeight = map.getSize().y || window.innerHeight;
   const deliveryCardTop =
@@ -53,7 +55,7 @@ const fitActiveRouteBounds = (map, routeBounds, animate) => {
   if (!map || !routeBounds?.isValid()) return;
   const mapHeight = map.getSize().y || window.innerHeight;
   const deliveryCard = document.querySelector(
-    ".courier-active-delivery-card",
+    ".courier-active-delivery-card, .courier-offer-preview-card",
   );
   const deliveryCardTop =
     deliveryCard?.getBoundingClientRect().top ?? mapHeight;
@@ -70,11 +72,14 @@ const fitActiveRouteBounds = (map, routeBounds, animate) => {
 const PortalDomiciliarioMap = ({
   location,
   orders = [],
+  hotZones = [],
+  hotZoneError = "",
   publicRadiusKm,
   searching = false,
   online = false,
   fullScreen = false,
   activeDelivery = null,
+  previewOffer = null,
   recenterRequest = 0,
   fitRouteRequest = 0,
 }) => {
@@ -101,12 +106,13 @@ const PortalDomiciliarioMap = ({
     location?.longitude,
   );
   const lastCoverageRadiusRef = useRef(null);
-  const routeDeliveryOrderId = activeDelivery?.order_id;
-  const routeDeliveryStatus = activeDelivery?.delivery_status;
-  const pickupLatitude = Number(activeDelivery?.pickup_latitude);
-  const pickupLongitude = Number(activeDelivery?.pickup_longitude);
-  const destinationLatitude = Number(activeDelivery?.destination_latitude);
-  const destinationLongitude = Number(activeDelivery?.destination_longitude);
+  const routeOrder = activeDelivery || previewOffer;
+  const routeDeliveryOrderId = routeOrder?.order_id;
+  const routeDeliveryStatus = routeOrder?.delivery_status;
+  const pickupLatitude = Number(routeOrder?.pickup_latitude);
+  const pickupLongitude = Number(routeOrder?.pickup_longitude);
+  const destinationLatitude = Number(routeOrder?.destination_latitude);
+  const destinationLongitude = Number(routeOrder?.destination_longitude);
   const routeLocationLatitude = isValidCoordinate(
     location?.latitude,
     location?.longitude,
@@ -117,24 +123,28 @@ const PortalDomiciliarioMap = ({
     ? null
     : Math.round(Number(location.longitude) * 1000) / 1000;
   const hasActiveDelivery = Boolean(activeDelivery);
+  const hasRoutePreview = Boolean(previewOffer && !activeDelivery);
   const routeKey = [
+    hasActiveDelivery ? "active" : hasRoutePreview ? "preview" : "none",
     routeDeliveryOrderId,
     routeDeliveryStatus,
-    routeLocationLatitude,
-    routeLocationLongitude,
+    hasActiveDelivery ? routeLocationLatitude : null,
+    hasActiveDelivery ? routeLocationLongitude : null,
     pickupLatitude,
     pickupLongitude,
     destinationLatitude,
     destinationLongitude,
   ].join(":");
-  const hasEnoughRoutePoints =
-    (routeLocationLatitude !== null ? 1 : 0) +
+  const hasEnoughRoutePoints = hasRoutePreview
+    ? isValidCoordinate(pickupLatitude, pickupLongitude) &&
+      isValidCoordinate(destinationLatitude, destinationLongitude)
+    : (routeLocationLatitude !== null ? 1 : 0) +
       (routeDeliveryStatus !== "picked_up" &&
       isValidCoordinate(pickupLatitude, pickupLongitude)
         ? 1
         : 0) +
       (isValidCoordinate(destinationLatitude, destinationLongitude) ? 1 : 0) >=
-    2;
+        2;
 
   useEffect(() => {
     if (!containerRef.current) return undefined;
@@ -198,7 +208,8 @@ const PortalDomiciliarioMap = ({
     }
 
     const point = [Number(location.latitude), Number(location.longitude)];
-    const showCoverage = hasCoverageRadius && !activeDelivery;
+    const showCoverage =
+      hasCoverageRadius && !activeDelivery && !previewOffer;
     const courierIcon = L.divIcon({
       className: "courier-location-icon",
       html: '<span class="courier-location-dot"><span class="courier-location-dot-center"></span></span>',
@@ -237,7 +248,7 @@ const PortalDomiciliarioMap = ({
       coverageLayerRef.current = null;
     }
 
-    if (activeDelivery) {
+    if (activeDelivery || previewOffer) {
       lastCoverageRadiusRef.current = null;
       return;
     }
@@ -267,6 +278,7 @@ const PortalDomiciliarioMap = ({
     location,
     mapReady,
     online,
+    previewOffer,
     searching,
   ]);
 
@@ -302,66 +314,27 @@ const PortalDomiciliarioMap = ({
     if (!mapReady || !L || !markerLayer) return;
 
     markerLayer.clearLayers();
-    if (activeDelivery) {
-      const pickupValid = isValidCoordinate(
-        activeDelivery.pickup_latitude,
-        activeDelivery.pickup_longitude,
-      );
-      const destinationValid = isValidCoordinate(
-        activeDelivery.destination_latitude,
-        activeDelivery.destination_longitude,
-      );
-      const pickup = pickupValid
-        ? [
-            Number(activeDelivery.pickup_latitude),
-            Number(activeDelivery.pickup_longitude),
-          ]
-        : null;
-      const destination = destinationValid
-        ? [
-            Number(activeDelivery.destination_latitude),
-            Number(activeDelivery.destination_longitude),
-          ]
-        : null;
-      const routePoints = [pickup, destination].filter(Boolean);
-
-      [
-        { point: pickup, label: "A", className: "pickup" },
-        { point: destination, label: "B", className: "destination" },
-      ].forEach(({ point, label, className }) => {
-        if (!point) return;
-        const completedPickup =
-          label === "A" && activeDelivery.delivery_status === "picked_up";
-        const marker = L.marker(point, {
-          icon: L.divIcon({
-            className: "courier-route-point-icon",
-            html: `<span class="courier-route-point courier-route-point--${className}${completedPickup ? " is-complete" : ""}">${label}</span>`,
-            iconSize: [34, 34],
-            iconAnchor: [17, 17],
-          }),
-          zIndexOffset: 1100,
-        });
-        marker.bindTooltip(
-          label === "A" ? "A · Recogida" : "B · Entrega",
-          { direction: "top", offset: [0, -15] },
-        );
-        marker.addTo(markerLayer);
-      });
-
-      const activeRouteKey = `${activeDelivery.order_id}:${activeDelivery.delivery_status}`;
-      if (
-        fittedActiveDeliveryRef.current !== activeRouteKey &&
-        routePoints.length > 0
-      ) {
-        fitActiveDeliveryBounds(mapRef.current, L, activeDelivery, location, false);
-        fittedActiveDeliveryRef.current = activeRouteKey;
-      }
-      return;
-    }
-
-    fittedActiveDeliveryRef.current = null;
     const storeDemand = new Map();
-    orders.forEach((order) => {
+    const showStoreDemand = !activeDelivery && !previewOffer;
+    const visibleHotZones = showStoreDemand ? hotZones : [];
+    const visibleOrders = showStoreDemand ? orders : [];
+    visibleHotZones.forEach((zone) => {
+      const latitude = Number(zone.latitude);
+      const longitude = Number(zone.longitude);
+      if (!isValidCoordinate(latitude, longitude)) return;
+
+      const storeKey = zone.business_id
+        ? `store:${zone.business_id}`
+        : `location:${latitude.toFixed(5)}:${longitude.toFixed(5)}`;
+      storeDemand.set(storeKey, {
+        latitude,
+        longitude,
+        dailyCount: Number(zone.order_count) || 0,
+        availableCount: 0,
+      });
+    });
+
+    visibleOrders.forEach((order) => {
       if (order.delivery_status !== "available") return;
       const latitude = Number(order.pickup_latitude);
       const longitude = Number(order.pickup_longitude);
@@ -371,58 +344,114 @@ const PortalDomiciliarioMap = ({
         ? `store:${order.business_id}`
         : `location:${latitude.toFixed(5)}:${longitude.toFixed(5)}`;
       const store = storeDemand.get(storeKey) || {
-        latitudeTotal: 0,
-        longitudeTotal: 0,
-        businessName: order.business_name || "",
-        count: 0,
+        latitude,
+        longitude,
+        dailyCount: 0,
+        availableCount: 0,
       };
-      store.latitudeTotal += latitude;
-      store.longitudeTotal += longitude;
-      if (!store.businessName && order.business_name) {
-        store.businessName = order.business_name;
-      }
-      store.count += 1;
+      store.availableCount += 1;
       storeDemand.set(storeKey, store);
     });
 
-    storeDemand.forEach(({ latitudeTotal, longitudeTotal, businessName, count }) => {
-      const latitude = latitudeTotal / count;
-      const longitude = longitudeTotal / count;
-      const intensity = Math.min(Math.sqrt(count) / 2.5, 1);
-      const markerSize = Math.round(115 + intensity * 105);
-      const opacity = (0.28 + intensity * 0.42).toFixed(2);
-      const marker = L.marker([latitude, longitude], {
-        icon: L.divIcon({
-          className: "courier-store-heat-icon",
-          html: `<span style="--heat-size:${markerSize}px;--heat-opacity:${opacity}"><i></i></span>`,
-          iconSize: [markerSize, markerSize],
-          iconAnchor: [markerSize / 2, markerSize / 2],
-        }),
-        zIndexOffset: count,
+    storeDemand.forEach(
+      ({ latitude, longitude, dailyCount, availableCount }) => {
+        const totalCount = Math.max(dailyCount, availableCount);
+        const intensity = Math.min(Math.sqrt(totalCount) / 2.5, 1);
+        const markerSize = Math.round(115 + intensity * 105);
+        const opacity = (0.28 + intensity * 0.42).toFixed(2);
+        const marker = L.marker([latitude, longitude], {
+          icon: L.divIcon({
+            className: "courier-store-heat-icon",
+            html: `<span style="--heat-size:${markerSize}px;--heat-opacity:${opacity}"><i></i></span>`,
+            iconSize: [markerSize, markerSize],
+            iconAnchor: [markerSize / 2, markerSize / 2],
+          }),
+          zIndexOffset: totalCount,
+        });
+        const popup = document.createElement("div");
+        popup.className = "courier-store-popup";
+        const goLink = document.createElement("a");
+        goLink.href = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+        goLink.target = "_blank";
+        goLink.rel = "noopener noreferrer";
+        goLink.textContent = "Ir a la tienda";
+        goLink.setAttribute("aria-label", "Ir a la tienda");
+        popup.append(goLink);
+        marker.bindPopup(popup, { closeButton: false, minWidth: 120 });
+        marker.addTo(markerLayer);
+      },
+    );
+
+    const routeOrder = activeDelivery || previewOffer;
+    if (routeOrder) {
+      const pickupValid = isValidCoordinate(
+        routeOrder.pickup_latitude,
+        routeOrder.pickup_longitude,
+      );
+      const destinationValid = isValidCoordinate(
+        routeOrder.destination_latitude,
+        routeOrder.destination_longitude,
+      );
+      const pickup = pickupValid
+        ? [
+            Number(routeOrder.pickup_latitude),
+            Number(routeOrder.pickup_longitude),
+          ]
+        : null;
+      const destination = destinationValid
+        ? [
+            Number(routeOrder.destination_latitude),
+            Number(routeOrder.destination_longitude),
+          ]
+        : null;
+      const routePoints = [pickup, destination].filter(Boolean);
+
+      [
+        { point: pickup, className: "pickup", tooltip: "Tienda" },
+        { point: destination, className: "destination", tooltip: "Cliente" },
+      ].forEach(({ point, className, tooltip }) => {
+        if (!point) return;
+        const completedPickup =
+          className === "pickup" &&
+          activeDelivery?.delivery_status === "picked_up";
+        const marker = L.marker(point, {
+          icon: L.divIcon({
+            className: "courier-route-point-icon",
+            html: `<span class="courier-route-point courier-route-point--${className}${completedPickup ? " is-complete" : ""}">${ROUTE_PIN_ICON}</span>`,
+            iconSize: [42, 48],
+            iconAnchor: [21, 44],
+          }),
+          zIndexOffset: 1100,
+        });
+        marker.bindTooltip(
+          tooltip,
+          { direction: "top", offset: [0, -15] },
+        );
+        marker.addTo(markerLayer);
       });
-      const popup = document.createElement("div");
-      popup.className = "courier-store-popup";
-      const title = document.createElement("strong");
-      title.textContent = businessName || "Tienda cercana";
-      const orderCount = document.createElement("p");
-      orderCount.textContent = `${count} ${count === 1 ? "pedido disponible" : "pedidos disponibles"}`;
-      const directionsLink = document.createElement("a");
-      directionsLink.href = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
-      directionsLink.target = "_blank";
-      directionsLink.rel = "noopener noreferrer";
-      directionsLink.textContent = "Abrir ruta en Google Maps";
-      popup.append(title, orderCount, directionsLink);
-      marker.bindPopup(popup, { closeButton: true, minWidth: 190 });
-      marker.addTo(markerLayer);
-    });
-  }, [activeDelivery, location, mapReady, orders]);
+
+      if (activeDelivery) {
+        const activeRouteKey = `${activeDelivery.order_id}:${activeDelivery.delivery_status}`;
+        if (
+          fittedActiveDeliveryRef.current !== activeRouteKey &&
+          routePoints.length > 0
+        ) {
+          fitActiveDeliveryBounds(mapRef.current, L, activeDelivery, location, false);
+          fittedActiveDeliveryRef.current = activeRouteKey;
+        }
+      }
+      return;
+    }
+
+    fittedActiveDeliveryRef.current = null;
+  }, [activeDelivery, hotZones, location, mapReady, orders, previewOffer]);
 
   useEffect(() => {
     const map = mapRef.current;
     const L = leafletRef.current;
     if (!mapReady || !map || !L) return undefined;
 
-    if (!hasActiveDelivery) {
+    if (!hasActiveDelivery && !hasRoutePreview) {
       routeLayerRef.current?.remove();
       routeLayerRef.current = null;
       fittedRoadRouteRef.current = null;
@@ -433,11 +462,11 @@ const PortalDomiciliarioMap = ({
     routeLayerRef.current = null;
 
     const points = [];
-    if (routeLocationLatitude !== null) {
+    if (hasActiveDelivery && routeLocationLatitude !== null) {
       points.push([routeLocationLongitude, routeLocationLatitude]);
     }
     if (
-      routeDeliveryStatus !== "picked_up" &&
+      (hasRoutePreview || routeDeliveryStatus !== "picked_up") &&
       isValidCoordinate(pickupLatitude, pickupLongitude)
     ) {
       points.push([pickupLongitude, pickupLatitude]);
@@ -477,7 +506,7 @@ const PortalDomiciliarioMap = ({
           },
         }).addTo(map);
         routeLayerRef.current = routeLayer;
-        const roadRouteKey = `${routeDeliveryOrderId}:${routeDeliveryStatus}`;
+        const roadRouteKey = routeKey;
         if (fittedRoadRouteRef.current !== roadRouteKey) {
           fitActiveRouteBounds(map, routeLayer.getBounds(), false);
           fittedRoadRouteRef.current = roadRouteKey;
@@ -499,6 +528,7 @@ const PortalDomiciliarioMap = ({
     destinationLatitude,
     destinationLongitude,
     hasActiveDelivery,
+    hasRoutePreview,
     mapReady,
     pickupLatitude,
     pickupLongitude,
@@ -542,15 +572,17 @@ const PortalDomiciliarioMap = ({
         className="courier-map-container absolute inset-0 z-0"
         aria-label="Mapa de entregas cercanas"
       />
-      {mapError && (
+      {(mapError || hotZoneError) && (
         <div
           role="alert"
           className="absolute inset-x-3 bottom-3 z-[400] rounded-xl border border-rose-400/20 bg-neutral-950/90 px-3 py-2 text-xs text-rose-200"
         >
-          {mapError}
+          {mapError && <p>{mapError}</p>}
+          {hotZoneError && <p>{hotZoneError}</p>}
         </div>
       )}
-      {hasActiveDelivery && (!hasEnoughRoutePoints || routeError?.routeKey === routeKey) && (
+      {(hasActiveDelivery || hasRoutePreview) &&
+        (!hasEnoughRoutePoints || routeError?.routeKey === routeKey) && (
         <div
           role="alert"
           className="absolute inset-x-3 top-[128px] z-[400] mx-auto max-w-lg rounded-xl border border-amber-300/20 bg-neutral-950/95 px-3 py-2 text-xs text-amber-100 shadow-lg backdrop-blur"

@@ -446,12 +446,29 @@ body {
 }
 
 .courier-store-popup a {
-    width: fit-content;
+    display: flex;
+    width: 100%;
+    min-height: 36px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #ddd6fe;
+    border-radius: 8px;
+    background: #f5f3ff;
     color: #6d28d9;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
-    text-decoration: underline;
-    text-underline-offset: 2px;
+    text-decoration: none;
+    transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.courier-store-popup a:hover {
+    border-color: #c4b5fd;
+    background: #ede9fe;
+}
+
+.courier-store-popup a:focus-visible {
+    outline: 2px solid #8b5cf6;
+    outline-offset: 2px;
 }
 
 .courier-route-point-icon {
@@ -461,23 +478,30 @@ body {
 
 .courier-route-point {
     display: grid;
-    width: 34px;
-    height: 34px;
+    width: 42px;
+    height: 48px;
     place-items: center;
-    border: 3px solid white;
-    border-radius: 50%;
-    color: #09090f;
-    font-size: 13px;
-    font-weight: 900;
-    box-shadow: 0 3px 12px rgb(0 0 0 / 45%);
 }
 
 .courier-route-point--pickup {
-    background: #c4b5fd;
+    color: #8b5cf6;
+}
+
+.courier-route-point--pickup svg,
+.courier-route-point--destination svg {
+    width: 42px;
+    height: 48px;
+    fill: currentColor;
+    stroke: none;
 }
 
 .courier-route-point--destination {
-    background: #34d399;
+    color: #ef4444;
+}
+
+.courier-route-point--pickup circle,
+.courier-route-point--destination circle {
+    fill: #fff;
 }
 
 .courier-route-point.is-complete {

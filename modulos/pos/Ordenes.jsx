@@ -14,6 +14,8 @@ import {
   Filter,
   X,
   Clipboard,
+  Copy,
+  Check,
   Edit3,
   ArrowUpDown,
   RefreshCcw,
@@ -72,6 +74,10 @@ const DELIVERY_STATUS_LABELS = {
   picked_up: "En camino",
   delivered: "Entregado",
 };
+
+const isDeliveryLockedInPos = (orden) =>
+  orden.metodoEntrega === "domicilio" &&
+  ["assigned", "picked_up", "delivered"].includes(orden.deliveryStatus);
 
 const DELIVERY_STATUS_STYLES = {
   available: "bg-neutral-500/20 text-neutral-300",
@@ -318,7 +324,13 @@ const formatDateTime = (value) => {
 };
 
 const OrderStatusSelect = memo(
-  ({ orden, showDeliveryStatus, statusClass, onStatusChange }) => {
+  ({
+    orden,
+    showDeliveryStatus,
+    statusClass,
+    onStatusChange,
+    onStatusBlocked,
+  }) => {
     const [updating, setUpdating] = useState(false);
     const useDeliveryValue =
       orden.metodoEntrega === "domicilio" &&
@@ -352,6 +364,10 @@ const OrderStatusSelect = memo(
     const handleChange = async (event) => {
       const nextValue = event.target.value;
       if (!nextValue || nextValue === value) return;
+      if (isDeliveryLockedInPos(orden)) {
+        onStatusBlocked(orden);
+        return;
+      }
 
       setUpdating(true);
       try {
@@ -441,6 +457,7 @@ const OrderCard = memo(
     onEdit,
     onOpenMap,
     onStatusChange,
+    onStatusBlocked,
     canDelete,
     autoOpen = false,
   }) => {
@@ -449,6 +466,8 @@ const OrderCard = memo(
     const [pickupCode, setPickupCode] = useState("");
     const [pickupCodeLoading, setPickupCodeLoading] = useState(false);
     const [pickupCodeError, setPickupCodeError] = useState("");
+    const [pickupCodeCopied, setPickupCodeCopied] = useState(false);
+    const [pickupCodeCopyError, setPickupCodeCopyError] = useState("");
     const cardRef = useRef(null);
     useEffect(() => {
       if (!autoOpen) return;
@@ -460,7 +479,6 @@ const OrderCard = memo(
 
     useEffect(() => {
       if (
-        !isOpen ||
         orden.metodoEntrega !== "domicilio" ||
         orden.deliveryStatus !== "assigned" ||
         !orden.id
@@ -473,6 +491,8 @@ const OrderCard = memo(
       let active = true;
       setPickupCode("");
       setPickupCodeError("");
+      setPickupCodeCopied(false);
+      setPickupCodeCopyError("");
       setPickupCodeLoading(true);
       supabase
         .rpc("get_store_order_pickup_code", { p_order_id: orden.id })
@@ -498,7 +518,24 @@ const OrderCard = memo(
       return () => {
         active = false;
       };
-    }, [isOpen, orden.deliveryStatus, orden.id, orden.metodoEntrega]);
+    }, [orden.deliveryStatus, orden.id, orden.metodoEntrega]);
+
+    const handleCopyPickupCode = async (event) => {
+      event.stopPropagation();
+      setPickupCodeCopyError("");
+      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+        setPickupCodeCopyError("No se pudo copiar el código.");
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(pickupCode);
+        setPickupCodeCopied(true);
+      } catch (error) {
+        console.error("No se pudo copiar el código de recogida:", error);
+        setPickupCodeCopyError("No se pudo copiar el código.");
+      }
+    };
 
     const runAction = async (action, callback) => {
       if (loadingAction) return;
@@ -529,6 +566,9 @@ const OrderCard = memo(
         : orden.status === "preparando"
           ? "bg-amber-500/20 text-amber-400"
           : "bg-neutral-500/20 text-neutral-400";
+    const showPickupCode =
+      orden.metodoEntrega === "domicilio" &&
+      orden.deliveryStatus === "assigned";
 
     return (
       <motion.div
@@ -571,13 +611,14 @@ const OrderCard = memo(
               <span
                 className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${getDeliveryBadgeClass(orden.metodoEntrega)}`}
               >
-                {displayOrderType(orden.metodoEntrega)}
+                {getOrderDeliveryBadgeLabel(orden)}
               </span>
               <OrderStatusSelect
                 orden={orden}
                 showDeliveryStatus={showDeliveryStatus}
                 statusClass={statusClass}
                 onStatusChange={onStatusChange}
+                onStatusBlocked={onStatusBlocked}
               />
             </div>
           </div>
@@ -597,7 +638,7 @@ const OrderCard = memo(
               <p
                 className={`inline-flex max-w-full truncate rounded-full px-2.5 py-1 text-xs font-bold ${getDeliveryBadgeClass(orden.metodoEntrega)}`}
               >
-                {displayOrderType(orden.metodoEntrega)}
+                {getOrderDeliveryBadgeLabel(orden)}
               </p>
             </div>
             <div className="col-span-2">
@@ -618,9 +659,65 @@ const OrderCard = memo(
                 showDeliveryStatus={showDeliveryStatus}
                 statusClass={statusClass}
                 onStatusChange={onStatusChange}
+                onStatusBlocked={onStatusBlocked}
               />
             </div>
           </div>
+          {showPickupCode && (
+            <div
+              aria-live="polite"
+              className="mt-1 inline-flex min-h-8 max-w-full items-center gap-2 rounded-lg border border-amber-300/15 bg-amber-300/[0.04] px-2.5 py-1"
+            >
+              <span className="text-[9px] font-semibold uppercase tracking-wide text-amber-100/80">
+                Código de recogida
+              </span>
+              <span
+                aria-hidden="true"
+                className="h-4 w-px shrink-0 bg-amber-200/20"
+              />
+              {pickupCodeLoading ? (
+                <LoaderCircle
+                  size={14}
+                  className="animate-spin text-amber-100"
+                  aria-label="Cargando código de recogida"
+                />
+              ) : pickupCode ? (
+                <>
+                  <span className="font-mono text-sm font-bold tracking-[0.2em] text-white">
+                    {pickupCode}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopyPickupCode}
+                    onKeyDown={(event) => event.stopPropagation()}
+                    aria-label={
+                      pickupCodeCopied
+                        ? "Código copiado"
+                        : "Copiar código de recogida"
+                    }
+                    title={
+                      pickupCodeCopied
+                        ? "Código copiado"
+                        : "Copiar código"
+                    }
+                    className="ml-1 inline-flex h-6 items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-2 text-[10px] font-semibold text-neutral-300 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/50"
+                  >
+                    {pickupCodeCopied ? <Check size={12} /> : <Copy size={12} />}
+                    {pickupCodeCopied ? "Copiado" : "Copiar"}
+                  </button>
+                </>
+              ) : (
+                <span role="alert" className="text-[10px] text-rose-200">
+                  {pickupCodeError || "Código no disponible"}
+                </span>
+              )}
+            </div>
+          )}
+          {showPickupCode && pickupCodeCopyError && (
+            <p role="alert" className="mt-1 text-[10px] text-rose-200">
+              {pickupCodeCopyError}
+            </p>
+          )}
         </div>
 
         {/* EXPAND */}
@@ -1148,6 +1245,11 @@ const displayOrderType = (orderType) => {
   );
 };
 
+const getOrderDeliveryBadgeLabel = (order) =>
+  normalizeOrderType(order?.metodoEntrega) === "mesa" && order?.mesa
+    ? `Mesa ${order.mesa}`
+    : displayOrderType(order?.metodoEntrega);
+
 const getDeliveryBadgeClass = (orderType) =>
   METODO_ENTREGA_ESTILOS[normalizeOrderType(orderType)] ||
   "bg-neutral-500/10 text-neutral-300";
@@ -1511,6 +1613,7 @@ const Ordenes = () => {
     location.state?.openOrderId || null,
   );
   const [orders, setOrders] = useState([]);
+  const [ordersBusinessId, setOrdersBusinessId] = useState(null);
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [ordersError, setOrdersError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -1529,6 +1632,7 @@ const Ordenes = () => {
   const [loadingMoreOrders, setLoadingMoreOrders] = useState(false);
   const [invoiceOrder, setInvoiceOrder] = useState(null);
   const [trackingOrder, setTrackingOrder] = useState(null);
+  const [blockedEditOrder, setBlockedEditOrder] = useState(null);
   const [orderPendingDeletion, setOrderPendingDeletion] = useState(null);
   const [deleteConfirmationNumber, setDeleteConfirmationNumber] = useState("");
   const [deleteReasonCode, setDeleteReasonCode] = useState("");
@@ -1552,6 +1656,7 @@ const Ordenes = () => {
   const loadBusinessOrders = async () => {
     if (!user?.id) {
       setOrders([]);
+      setOrdersBusinessId(null);
       setInvoiceBusiness({ name: "", logoUrl: "", address: "", phone: "" });
       setOrdersError("");
       setLoadingOrders(false);
@@ -1573,6 +1678,7 @@ const Ordenes = () => {
 
       if (profileError || !profile?.business_id) {
         setOrders([]);
+        setOrdersBusinessId(null);
         setCanDelete(false);
         setOrdersError(
           profileError?.message ||
@@ -1616,6 +1722,7 @@ const Ordenes = () => {
       if (error) {
         console.error("Error cargando órdenes por negocio:", error);
         setOrders([]);
+        setOrdersBusinessId(null);
         setOrdersError(error.message || "No se pudieron cargar las órdenes.");
         return;
       }
@@ -1642,12 +1749,14 @@ const Ordenes = () => {
       businessIdRef.current = profile.business_id;
       const ordersWithUnits = await hydrateOrderItemUnits(data || []);
       setOrders(ordersWithUnits.map(mapDatabaseOrderToUi));
+      setOrdersBusinessId(profile.business_id);
       setOrdersPage(0);
       setHasMoreOrders((data || []).length === 30);
       setLastUpdated(new Date());
     } catch (error) {
       console.error("Error al cargar órdenes:", error);
       setOrders([]);
+      setOrdersBusinessId(null);
       setOrdersError(
         error?.message ||
           "No se pudo conectar con Supabase. Revisa tu conexión a internet.",
@@ -1661,6 +1770,51 @@ const Ordenes = () => {
   useEffect(() => {
     loadBusinessOrders();
   }, [user]);
+
+  useEffect(() => {
+    if (!ordersBusinessId) return undefined;
+
+    const subscription = supabase
+      .channel(`pos-orders-status-${ordersBusinessId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "orders",
+          filter: `business_id=eq.${ordersBusinessId}`,
+        },
+        ({ new: updatedOrder }) => {
+          setLastUpdated(new Date());
+          const databaseStatus = String(
+            updatedOrder.status || "pending",
+          ).toLowerCase();
+          setOrders((current) =>
+            current.map((order) =>
+              String(order.id) === String(updatedOrder.id)
+                ? {
+                    ...order,
+                    status: normalizeStatus(databaseStatus),
+                    databaseStatus,
+                    deliveryStatus: String(
+                      updatedOrder.delivery_status || "",
+                    ).toLowerCase(),
+                  }
+                : order,
+            ),
+          );
+        },
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("Realtime de órdenes no disponible:", status);
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(subscription);
+    };
+  }, [ordersBusinessId]);
 
   const loadMoreOrders = async () => {
     if (
@@ -1839,6 +1993,11 @@ const Ordenes = () => {
   const yesterdayKey = getLocalDateKey(yesterday);
 
   const handleStatusChange = async (orden, type, value) => {
+    if (isDeliveryLockedInPos(orden)) {
+      setBlockedEditOrder(orden);
+      return;
+    }
+
     const updates =
       type === "delivery"
         ? {
@@ -2009,6 +2168,11 @@ const Ordenes = () => {
   };
 
   const handleEdit = (orden) => {
+    if (isDeliveryLockedInPos(orden)) {
+      setBlockedEditOrder(orden);
+      return;
+    }
+
     const deliveryMethodMap = {
       mesa: "table",
       recoger: "pickup",
@@ -2444,6 +2608,7 @@ const Ordenes = () => {
                                         onEdit={handleEdit}
                                         onOpenMap={handleOpenMap}
                                         onStatusChange={handleStatusChange}
+                                        onStatusBlocked={setBlockedEditOrder}
                                         canDelete={canDelete}
                                       />
                                     </React.Fragment>
@@ -2531,6 +2696,62 @@ const Ordenes = () => {
               src={trackingOrder.trackingUrl}
               className="min-h-0 w-full flex-1 border-0 bg-neutral-950"
             />
+          </section>
+        </div>
+      )}
+      {blockedEditOrder && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setBlockedEditOrder(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="blocked-order-edit-title"
+            className="w-full max-w-md rounded-2xl border border-amber-300/20 bg-neutral-900 p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2
+                  id="blocked-order-edit-title"
+                  className="text-lg font-black text-white"
+                >
+                  No se puede modificar este pedido
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-neutral-300">
+                  El pedido ya está asignado al domiciliario. Para evitar
+                  cambios mientras se realiza la entrega, no puedes editarlo ni
+                  cambiar su estado desde el POS.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBlockedEditOrder(null)}
+                aria-label="Cerrar"
+                className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-neutral-400">
+                Pedido {blockedEditOrder.numeroFactura}
+              </p>
+              <p className="mt-2 text-sm font-bold text-amber-200">
+                Estado del domicilio:{" "}
+                {DELIVERY_STATUS_LABELS[blockedEditOrder.deliveryStatus] ||
+                  blockedEditOrder.deliveryStatus}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBlockedEditOrder(null)}
+              className="mt-5 min-h-11 w-full rounded-xl bg-amber-300/10 px-4 py-2.5 text-sm font-bold text-amber-100 transition-colors hover:bg-amber-300/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60"
+            >
+              Entendido
+            </button>
           </section>
         </div>
       )}

@@ -14,12 +14,11 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import logoPng from "/logo.png";
 
 const sections = [
   { id: "orders", label: "Inicio", icon: LayoutDashboard },
   { id: "history", label: "Historial", icon: History },
-  { id: "wallet", label: "Mi saldo", icon: Wallet, publicOnly: true },
+  { id: "wallet", label: "Mi saldo / Recargar", icon: Wallet, publicOnly: true },
   { id: "profile", label: "Mi perfil", icon: UserRound },
 ];
 
@@ -49,6 +48,7 @@ const PortalDomiciliarioSidebar = ({
   onToggleActivityValues,
   onOpenActivity,
   displayName,
+  profilePhotoUrl,
   onSignOut,
   compact = false,
 }) => (
@@ -81,11 +81,15 @@ const PortalDomiciliarioSidebar = ({
           </button>
           {!compact && (
             <>
-              <img
-                src={logoPng}
-                alt="Gloto"
-                className="h-10 w-10 shrink-0 rounded-xl object-contain"
-              />
+              <button
+                type="button"
+                onClick={() => onSectionChange("profile")}
+                aria-label="Abrir mi perfil"
+                title="Mi perfil"
+                className="shrink-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+              >
+                <CourierAvatar photoUrl={profilePhotoUrl} name={displayName} />
+              </button>
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-300">
                   Portal de domiciliarios
@@ -130,6 +134,7 @@ const PortalDomiciliarioSidebar = ({
             {activityValuesVisible ? <Eye size={17} /> : <EyeOff size={17} />}
           </button>
         </div>
+
       </div>
     </header>
 
@@ -144,11 +149,18 @@ const PortalDomiciliarioSidebar = ({
         <aside className="fixed inset-y-0 left-0 z-50 flex w-[min(20rem,88vw)] flex-col border-r border-white/10 bg-neutral-950 shadow-2xl shadow-black/50">
           <div className="flex items-center justify-between border-b border-white/[0.07] p-5">
             <div className="flex items-center gap-3">
-              <img
-                src={logoPng}
-                alt="Gloto"
-                className="h-10 w-10 shrink-0 rounded-xl object-contain"
-              />
+              <button
+                type="button"
+                onClick={() => {
+                  onSectionChange("profile");
+                  onClose();
+                }}
+                aria-label="Abrir mi perfil"
+                title="Mi perfil"
+                className="shrink-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+              >
+                <CourierAvatar photoUrl={profilePhotoUrl} name={displayName} />
+              </button>
               <div className="min-w-0">
                 <p className="max-w-48 truncate text-sm font-black text-white">
                   {displayName}
@@ -301,6 +313,27 @@ const formatMoney = (amount) =>
     currency: "COP",
     maximumFractionDigits: 0,
   }).format(Number(amount) || 0);
+
+  const CourierAvatar = ({ photoUrl, name }) => {
+    const [imageFailed, setImageFailed] = useState(false);
+
+    return (
+      <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-violet-300/20 bg-violet-400/10 text-violet-200">
+        {photoUrl && !imageFailed ? (
+          <img
+            src={photoUrl}
+            alt={`Foto de ${name}`}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setImageFailed(true)}
+            className="h-full w-full object-cover object-top"
+          />
+        ) : (
+          <UserRound size={18} aria-hidden="true" />
+        )}
+      </span>
+    );
+  };
 
 const AvailabilitySwitch = ({
   label,

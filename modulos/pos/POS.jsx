@@ -792,6 +792,65 @@ const hasUsableProductImage = (value) => {
   return imageUrl !== "" && !imageUrl.includes("placehold.co");
 };
 
+const FLOOR_TABLE_STATUS_STYLES = {
+  available: {
+    label: "Libre",
+    className: "border-emerald-400/70 bg-neutral-900/90 text-emerald-50",
+    indicatorClassName: "bg-emerald-400",
+  },
+  occupied: {
+    label: "Ocupada",
+    className: "border-orange-400/80 bg-neutral-900/95 text-orange-50",
+    indicatorClassName: "bg-orange-400",
+  },
+  reserved: {
+    label: "Reserva",
+    className: "border-blue-400/80 bg-neutral-900/95 text-blue-50",
+    indicatorClassName: "bg-blue-400",
+  },
+  dirty: {
+    label: "Por limpiar",
+    className: "border-red-400/80 bg-neutral-900/95 text-red-50",
+    indicatorClassName: "bg-red-400",
+  },
+  unknown: {
+    label: "Sin estado",
+    className: "border-outline bg-neutral-900/90 text-on-surface-variant",
+    indicatorClassName: "bg-neutral-400",
+  },
+};
+
+const fitFloorTablesToCanvas = (tables) => {
+  if (!tables.length) return {};
+
+  const coordinates = tables.map((table) => ({
+    id: table.id,
+    x: (Number(table.positionX) / 100) * 1600,
+    y: (Number(table.positionY) / 100) * 1000,
+  }));
+  const minX = Math.min(...coordinates.map((point) => point.x));
+  const maxX = Math.max(...coordinates.map((point) => point.x));
+  const minY = Math.min(...coordinates.map((point) => point.y));
+  const maxY = Math.max(...coordinates.map((point) => point.y));
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  const zoom = Math.min(
+    spanX > 0 ? 1280 / spanX : Infinity,
+    spanY > 0 ? 640 / spanY : Infinity,
+  );
+  const scale = Number.isFinite(zoom) ? zoom : 1;
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+
+  return coordinates.reduce((positions, point) => {
+    positions[point.id] = {
+      x: 50 + ((point.x - centerX) * scale) / 16,
+      y: 50 + ((point.y - centerY) * scale) / 10,
+    };
+    return positions;
+  }, {});
+};
+
 const POS = () => {
   const { user } = useAuth();
   const location = useLocation();
@@ -841,6 +900,11 @@ const POS = () => {
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [mobilePanel, setMobilePanel] = useState("products");
+  const [isMobileViewport, setIsMobileViewport] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 1023px)").matches,
+  );
   const [toastItems, setToastItems] = useState([]);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([{ id: "all", name: "Todo" }]);
@@ -851,6 +915,8 @@ const POS = () => {
   const [businessId, setBusinessId] = useState(null);
   const [floorAreas, setFloorAreas] = useState([]);
   const [configuredTables, setConfiguredTables] = useState([]);
+  const [floorTableStatuses, setFloorTableStatuses] = useState(null);
+  const [floorTableStatusError, setFloorTableStatusError] = useState("");
   const [isLoadingConfiguredTables, setIsLoadingConfiguredTables] =
     useState(false);
   const [configuredTablesError, setConfiguredTablesError] = useState("");
@@ -873,6 +939,27 @@ const POS = () => {
   const toastTimers = useRef({});
   const submittingOrderRef = useRef(false);
   const cartScrollRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mobileViewport = window.matchMedia("(max-width: 1023px)");
+    const updateMobileViewport = (event) =>
+      setIsMobileViewport(event.matches);
+
+    if (mobileViewport.addEventListener) {
+      mobileViewport.addEventListener("change", updateMobileViewport);
+    } else {
+      mobileViewport.addListener(updateMobileViewport);
+    }
+
+    return () => {
+      if (mobileViewport.removeEventListener) {
+        mobileViewport.removeEventListener("change", updateMobileViewport);
+      } else {
+        mobileViewport.removeListener(updateMobileViewport);
+      }
+    };
+  }, []);
   const cartScrollRefMobile = useRef(null);
   const optionQuantityInputRef = useRef(null);
   const optionNoteInputRef = useRef(null);
@@ -1247,11 +1334,80 @@ const POS = () => {
     if (!businessId) {
       setFloorAreas([]);
       setConfiguredTables([]);
+      setFloorTableStatuses(null);
+      setFloorTableStatusError("");
       setConfiguredTablesError("");
       return undefined;
     }
 
     let cancelled = false;
+    const loadFloorTableStatuses = async () => {
+      const { data, error } = await supabase
+        .from("orders")
+        .select(
+          "mesa, status, table_status, is_reservation, fecha_reserva, created_at",
+        )
+        .eq("business_id", businessId)
+        .eq("order_type", "table")
+        .order("created_at", { ascending: false })
+        .limit(300);
+
+      if (cancelled) return;
+      if (error) {
+        console.error("Error cargando estados de mesas:", error);
+        setFloorTableStatusError("No se pudieron actualizar los estados.");
+        return;
+      }
+
+      const activeStatuses = [
+        "pending",
+        "confirmed",
+        "preparing",
+        "ready",
+        "complete",
+      ];
+      const today = getLocalDateKey();
+      const statuses = {};
+      (data || []).forEach((order) => {
+        const label = String(order.mesa ?? "").trim();
+        if (!label || Object.prototype.hasOwnProperty.call(statuses, label)) {
+          return;
+        }
+
+        const tableStatus = String(order.table_status ?? "")
+          .trim()
+          .toLowerCase();
+        const orderStatus = String(order.status ?? "")
+          .trim()
+          .toLowerCase();
+        if (tableStatus === "cerrada") return;
+
+        if (Boolean(order.is_reservation) || tableStatus === "reserva") {
+          if (!order.fecha_reserva || order.fecha_reserva === today) {
+            statuses[label] = "reserved";
+          }
+          return;
+        }
+
+        if (order.table_status == null) {
+          if (activeStatuses.includes(orderStatus)) {
+            statuses[label] = "occupied";
+          }
+          return;
+        }
+
+        if (["", "clean", "limpia"].includes(tableStatus)) {
+          statuses[label] = "available";
+        } else if (tableStatus === "sucio") {
+          statuses[label] = "dirty";
+        } else {
+          statuses[label] = "occupied";
+        }
+      });
+      setFloorTableStatuses(statuses);
+      setFloorTableStatusError("");
+    };
+
     const loadConfiguredTables = async () => {
       setIsLoadingConfiguredTables(true);
       const [areasResult, tablesResult] = await Promise.all([
@@ -1262,7 +1418,7 @@ const POS = () => {
           .order("created_at", { ascending: true }),
         supabase
           .from("restaurant_floor_tables")
-          .select("id, area_id, label")
+          .select("id, area_id, label, position_x, position_y, shape")
           .eq("business_id", businessId),
       ]);
 
@@ -1279,11 +1435,26 @@ const POS = () => {
         const areas = areasResult.data || [];
         setConfiguredTables(
           (tablesResult.data || [])
-            .map((table) => ({
-              id: table.id,
-              areaId: table.area_id,
-              label: table.label,
-            }))
+            .map((table, index) => {
+              const positionX = Number(table.position_x);
+              const positionY = Number(table.position_y);
+              return {
+                id: table.id,
+                areaId: table.area_id,
+                label: table.label,
+                positionX:
+                  table.position_x != null && Number.isFinite(positionX)
+                    ? positionX
+                    : 12 + (index % 5) * 19,
+                positionY:
+                  table.position_y != null && Number.isFinite(positionY)
+                    ? positionY
+                    : Math.min(90, 20 + Math.floor(index / 5) * 24),
+                shape: ["round", "square", "rectangle"].includes(table.shape)
+                  ? table.shape
+                  : "round",
+              };
+            })
             .sort((first, second) =>
               first.label.localeCompare(second.label, "es", { numeric: true }),
             ),
@@ -1300,6 +1471,7 @@ const POS = () => {
     };
 
     loadConfiguredTables();
+    loadFloorTableStatuses();
     const channel = supabase
       .channel(`pos-floor-layout-${businessId}`)
       .on(
@@ -1321,6 +1493,16 @@ const POS = () => {
           filter: `business_id=eq.${businessId}`,
         },
         loadConfiguredTables,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+          filter: `business_id=eq.${businessId}`,
+        },
+        loadFloorTableStatuses,
       )
       .subscribe();
 
@@ -1594,6 +1776,27 @@ const POS = () => {
   const [customerName, setCustomerName] = useState("");
   const [customerNumber, setCustomerNumber] = useState("");
   const [selectedTable, setSelectedTable] = useState("");
+  const selectedAreaTables = useMemo(
+    () =>
+      configuredTables.filter((table) => table.areaId === selectedTableAreaId),
+    [configuredTables, selectedTableAreaId],
+  );
+  const fittedFloorTablePositions = useMemo(
+    () => fitFloorTablesToCanvas(selectedAreaTables),
+    [selectedAreaTables],
+  );
+  const selectedFloorTable = selectedAreaTables.find(
+    (table) => table.label === selectedTable,
+  );
+  const selectedFloorTableStatus = selectedFloorTable
+    ? floorTableStatuses
+      ? floorTableStatuses[selectedFloorTable.label] || "available"
+      : "unknown"
+    : null;
+  const selectedFloorTableAppearance = selectedFloorTableStatus
+    ? FLOOR_TABLE_STATUS_STYLES[selectedFloorTableStatus] ||
+      FLOOR_TABLE_STATUS_STYLES.unknown
+    : null;
   const [tableOccupancyWarning, setTableOccupancyWarning] = useState(null);
   const [showReservationModal, setShowReservationModal] = useState(false);
   const [reservationData, setReservationData] = useState({
@@ -4125,7 +4328,8 @@ const POS = () => {
                 <input
                   id="cash-amount-received"
                   type="text"
-                  inputMode="numeric"
+                  inputMode={isMobileViewport ? "none" : "numeric"}
+                  readOnly={isMobileViewport}
                   aria-invalid={isCashPaymentBelowTotal}
                   value={
                     moneyPaid ? Number(moneyPaid).toLocaleString("es-CO") : ""
@@ -4140,6 +4344,53 @@ const POS = () => {
                   }`}
                 />
               </div>
+            </div>
+            <div
+              role="group"
+              aria-label="Teclado numérico para el monto recibido"
+              className="mt-2 grid grid-cols-3 gap-1"
+            >
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(
+                (digit) => (
+                  <button
+                    key={digit}
+                    type="button"
+                    onClick={() =>
+                      setMoneyPaid((currentAmount) => currentAmount + digit)
+                    }
+                    className="h-7 rounded-md border border-white/5 bg-white/[0.04] text-xs font-bold text-neutral-200 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+                  >
+                    {digit}
+                  </button>
+                ),
+              )}
+              <button
+                type="button"
+                onClick={() => setMoneyPaid("")}
+                aria-label="Limpiar monto recibido"
+                className="h-7 rounded-md border border-white/5 bg-white/[0.04] text-[10px] font-bold text-neutral-400 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+              >
+                C
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setMoneyPaid((currentAmount) => `${currentAmount}0`)
+                }
+                className="h-7 rounded-md border border-white/5 bg-white/[0.04] text-xs font-bold text-neutral-200 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+              >
+                0
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setMoneyPaid((currentAmount) => currentAmount.slice(0, -1))
+                }
+                aria-label="Borrar último dígito"
+                className="h-7 rounded-md border border-white/5 bg-white/[0.04] text-xs font-bold text-neutral-400 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+              >
+                ⌫
+              </button>
             </div>
             {isCashPaymentBelowTotal && paidAmount > 0 && (
               <p className="mt-1.5 text-right text-[10px] font-medium text-red-300">
@@ -5069,10 +5320,10 @@ const POS = () => {
                           key={area.id}
                           type="button"
                           onClick={() => setSelectedTableAreaId(area.id)}
-                          className={`rounded-lg px-2 py-1 text-[9px] font-bold transition-all ${
+                          className={`rounded-full border px-3 py-1 text-[9px] font-bold transition-all ${
                             selectedTableAreaId === area.id
-                              ? "bg-primary-container text-on-surface"
-                              : "border border-outline bg-surface text-on-surface-variant hover:text-on-surface"
+                              ? "border-violet-400/40 bg-violet-500/15 text-violet-100"
+                              : "border-white/10 bg-white/[0.03] text-on-surface-variant hover:border-white/20 hover:text-on-surface"
                           }`}
                         >
                           {area.name}
@@ -5094,23 +5345,101 @@ const POS = () => {
                   </p>
                 ) : (
                   <>
-                    <div className="grid grid-cols-5 gap-1 mt-2">
-                      {configuredTables
-                        .filter((table) => table.areaId === selectedTableAreaId)
-                        .map((table) => (
+                    <div className="relative mt-2 aspect-[8/5] overflow-hidden rounded-2xl border border-white/10 bg-[#111315] shadow-inner">
+                      <div
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 opacity-80"
+                        style={{
+                          backgroundImage:
+                            "radial-gradient(ellipse at center, rgba(124,58,237,0.08), transparent 72%), linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px)",
+                          backgroundSize: "100% 100%, 24px 24px, 24px 24px",
+                        }}
+                      />
+                      <div
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-2 rounded-xl border border-dashed border-white/[0.08]"
+                      />
+                      <div className="absolute left-4 right-4 top-3 flex items-center justify-between text-[8px] font-bold uppercase tracking-[0.16em] text-neutral-500">
+                        <span>
+                          {floorAreas.find(
+                            (area) => area.id === selectedTableAreaId,
+                          )?.name || "Plano del salón"}
+                        </span>
+                        <span>
+                          {selectedAreaTables.length}{" "}
+                          {selectedAreaTables.length === 1 ? "mesa" : "mesas"}
+                        </span>
+                      </div>
+                      {selectedAreaTables.map((table) => {
+                        const status = floorTableStatuses
+                          ? floorTableStatuses[table.label] || "available"
+                          : "unknown";
+                        const appearance =
+                          FLOOR_TABLE_STATUS_STYLES[status] ||
+                          FLOOR_TABLE_STATUS_STYLES.unknown;
+                        const shapeClass =
+                          table.shape === "rectangle"
+                            ? "h-10 w-16 rounded-xl"
+                            : table.shape === "square"
+                              ? "h-12 w-12 rounded-2xl"
+                              : "h-12 w-12 rounded-full";
+                        const selected = selectedTable === table.label;
+                        const position = fittedFloorTablePositions[table.id] || {
+                          x: table.positionX,
+                          y: table.positionY,
+                        };
+
+                        return (
                           <button
                             key={table.id}
                             type="button"
                             onClick={() => setSelectedTable(table.label)}
-                            className={`p-2 rounded-lg font-bold text-xs transition-all ${
-                              selectedTable === table.label
-                                ? "bg-primary-container text-on-surface border-primary"
-                                : "bg-surface border-outline text-on-surface-variant hover:border-outline"
+                            aria-label={`Mesa ${table.label}, ${appearance.label}`}
+                            aria-pressed={selected}
+                            title={`Mesa ${table.label} · ${appearance.label}`}
+                            style={{
+                              left: `${position.x}%`,
+                              top: `${position.y}%`,
+                            }}
+                            className={`absolute z-10 grid -translate-x-1/2 -translate-y-1/2 place-items-center border-2 font-extrabold shadow-lg transition-[transform,box-shadow] hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 ${shapeClass} ${appearance.className} ${
+                              selected
+                                ? "z-20 scale-110 ring-2 ring-violet-400 ring-offset-2 ring-offset-[#111315]"
+                                : ""
                             }`}
                           >
-                            {table.label}
+                            <span className="text-sm leading-none">
+                              {table.label}
+                            </span>
+                            <span
+                              aria-hidden="true"
+                              className={`absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-[#111315] ${appearance.indicatorClassName}`}
+                            />
                           </button>
-                        ))}
+                        );
+                      })}
+                      {selectedAreaTables.length === 0 && (
+                        <p className="absolute inset-0 flex items-center justify-center px-3 text-center text-[10px] text-on-surface-variant">
+                          No hay mesas en esta área todavía.
+                        </p>
+                      )}
+                    </div>
+                    <div className="mt-2 flex min-h-8 items-center justify-between gap-2">
+                      {selectedFloorTable ? (
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] font-semibold ${selectedFloorTableAppearance.className}`}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`h-1.5 w-1.5 rounded-full ${selectedFloorTableAppearance.indicatorClassName}`}
+                          />
+                          Mesa {selectedFloorTable.label} ·{" "}
+                          {selectedFloorTableAppearance.label}
+                        </span>
+                      ) : (
+                        <span className="text-[9px] text-on-surface-variant">
+                          Selecciona una mesa en el plano
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -5126,21 +5455,41 @@ const POS = () => {
                           setIsAddingConfiguredTable(true);
                         }}
                         disabled={isAddingConfiguredTable}
-                        className="flex items-center justify-center rounded-lg border border-dashed border-primary/50 p-2 text-primary transition-all hover:bg-primary/10 disabled:opacity-40"
+                        className="flex shrink-0 items-center justify-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-primary transition-all hover:border-violet-400/30 hover:bg-violet-500/10 disabled:opacity-40"
                         title="Agregar mesa"
                         aria-label="Agregar mesa"
                       >
-                        <Plus size={14} />
+                        <Plus size={13} />
+                        <span className="text-[9px] font-bold">Agregar</span>
                       </button>
                     </div>
-                    {configuredTables.filter(
-                      (table) => table.areaId === selectedTableAreaId,
-                    ).length === 0 &&
-                      !isAddingConfiguredTable && (
-                        <p className="mt-2 text-[10px] text-on-surface-variant">
-                          No hay mesas en esta área todavía.
-                        </p>
-                      )}
+                    <div className="flex flex-wrap gap-1">
+                      {[
+                        "available",
+                        "occupied",
+                        "reserved",
+                        "dirty",
+                      ].map((status) => {
+                        const appearance = FLOOR_TABLE_STATUS_STYLES[status];
+                        return (
+                          <span
+                            key={status}
+                            className="flex items-center gap-1 rounded-full border border-white/[0.06] bg-white/[0.025] px-2 py-1 text-[9px] text-on-surface-variant"
+                          >
+                            <span
+                              aria-hidden="true"
+                              className={`h-1.5 w-1.5 rounded-full ${appearance.indicatorClassName}`}
+                            />
+                            {appearance.label}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    {floorTableStatusError && (
+                      <p role="alert" className="mt-1 text-[9px] text-red-400">
+                        {floorTableStatusError}
+                      </p>
+                    )}
                     {isAddingConfiguredTable && (
                       <div className="mt-2 space-y-2 rounded-lg border border-outline p-2">
                         <label className="block text-[9px] font-bold text-on-surface-variant">
