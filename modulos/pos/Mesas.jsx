@@ -140,16 +140,13 @@ const calc = (c) =>
   );
 
 // El estado de la mesa depende únicamente de table_status, no del estado de la orden.
-const mapTableStatusToTableState = (tableStatus) =>
-  ["", "clean", "limpia"].includes(
-    String(tableStatus ?? "")
-      .trim()
-      .toLowerCase(),
-  )
-    ? "clean"
-    : String(tableStatus ?? "")
-        .trim()
-        .toLowerCase();
+const mapTableStatusToTableState = (tableStatus) => {
+  const normalizedStatus = String(tableStatus ?? "")
+    .trim()
+    .toLowerCase();
+  if (["", "clean", "limpia"].includes(normalizedStatus)) return "clean";
+  return ESTADO[normalizedStatus] ? normalizedStatus : "ocupada";
+};
 
 const getTableStateFromOrder = (order) => {
   // Un table_status vacio significa mesa limpia. Solo usamos status como
@@ -392,7 +389,7 @@ function PanelBody({
     mesa.reserva?.personas || 1,
   );
   const timer = useTimer(mesa.startTime);
-  const cfg = ESTADO[mesa.estado];
+  const cfg = ESTADO[mesa.estado] || ESTADO.ocupada;
   const total = calc(mesa.comanda);
 
   const handleEstado = (s) => {
@@ -1351,9 +1348,11 @@ export default function MesasPOS() {
             return false;
           }
 
+          const tableState = getTableStateFromOrder(orden);
+          if (!tableState) return false;
+
           const isReservation =
-            Boolean(orden.is_reservation) ||
-            getTableStateFromOrder(orden) === "reserva";
+            Boolean(orden.is_reservation) || tableState === "reserva";
 
           return !isReservation || orden.fecha_reserva === today;
         })
