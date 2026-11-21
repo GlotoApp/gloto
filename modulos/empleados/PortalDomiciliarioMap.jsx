@@ -315,7 +315,7 @@ const PortalDomiciliarioMap = ({
 
     markerLayer.clearLayers();
     const storeDemand = new Map();
-    const showStoreDemand = !activeDelivery && !previewOffer;
+    const showStoreDemand = online && !activeDelivery && !previewOffer;
     const visibleHotZones = showStoreDemand ? hotZones : [];
     const visibleOrders = showStoreDemand ? orders : [];
     visibleHotZones.forEach((zone) => {
@@ -357,7 +357,7 @@ const PortalDomiciliarioMap = ({
       ({ latitude, longitude, dailyCount, availableCount }) => {
         const totalCount = Math.max(dailyCount, availableCount);
         const intensity = Math.min(Math.sqrt(totalCount) / 2.5, 1);
-        const markerSize = Math.round(115 + intensity * 105);
+        const markerSize = Math.round(48 + intensity * 24);
         const opacity = (0.28 + intensity * 0.42).toFixed(2);
         const marker = L.marker([latitude, longitude], {
           icon: L.divIcon({
@@ -444,7 +444,7 @@ const PortalDomiciliarioMap = ({
     }
 
     fittedActiveDeliveryRef.current = null;
-  }, [activeDelivery, hotZones, location, mapReady, orders, previewOffer]);
+  }, [activeDelivery, hotZones, location, mapReady, online, orders, previewOffer]);
 
   useEffect(() => {
     const map = mapRef.current;

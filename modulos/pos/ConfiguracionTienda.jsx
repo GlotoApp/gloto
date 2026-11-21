@@ -22,6 +22,10 @@ import {
   DELIVERY_METHODS,
   getEnabledDeliveryMethods,
 } from "../../src/lib/deliveryMethods";
+import {
+  PAYMENT_METHODS,
+  getEnabledPaymentMethods,
+} from "../../src/lib/paymentMethods";
 import ConfiguracionField from "./ConfiguracionField";
 import ImageCropEditor from "./ImageCropEditor";
 import SubLoading from "./SubLoading";
@@ -38,6 +42,7 @@ const EMPTY_DATA = {
   min_delivery_fee: "",
   max_delivery_fee: "",
   delivery_methods: getEnabledDeliveryMethods(),
+  payment_methods: getEnabledPaymentMethods(),
   night_delivery_surcharge_enabled: false,
   night_delivery_surcharge_start: "21:00",
   night_delivery_surcharge_end: "06:00",
@@ -292,7 +297,7 @@ const ConfiguracionTienda = ({
         supabase
           .from("business_info")
           .select(
-            "address,whatsapp_phone,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,delivery_methods,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent,category_id,category_ids,categoria,latitude,longitude",
+            "address,whatsapp_phone,delivery_time_min,delivery_time_max,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,delivery_methods,payment_methods,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent,category_id,category_ids,categoria,latitude,longitude",
           )
           .eq("business_id", profile.business_id)
           .maybeSingle(),
@@ -326,6 +331,7 @@ const ConfiguracionTienda = ({
         min_delivery_fee: info?.min_delivery_fee ?? "",
         max_delivery_fee: info?.max_delivery_fee ?? "",
         delivery_methods: getEnabledDeliveryMethods(info?.delivery_methods),
+        payment_methods: getEnabledPaymentMethods(info?.payment_methods),
         night_delivery_surcharge_enabled:
           info?.night_delivery_surcharge_enabled ?? false,
         night_delivery_surcharge_start:
@@ -724,6 +730,11 @@ const ConfiguracionTienda = ({
       setMessage("Activa al menos un método de entrega.");
       return;
     }
+    if (!data.payment_methods.length) {
+      setMessageType("error");
+      setMessage("Activa al menos un método de pago.");
+      return;
+    }
 
     const minimumDelivery = parseThousands(data.min_delivery_fee);
     const maximumDelivery = parseThousands(data.max_delivery_fee);
@@ -811,6 +822,7 @@ const ConfiguracionTienda = ({
           min_delivery_fee: parseThousands(data.min_delivery_fee),
           max_delivery_fee: parseThousands(data.max_delivery_fee),
           delivery_methods: getEnabledDeliveryMethods(data.delivery_methods),
+          payment_methods: getEnabledPaymentMethods(data.payment_methods),
           night_delivery_surcharge_enabled:
             data.night_delivery_surcharge_enabled,
           night_delivery_surcharge_start: data.night_delivery_surcharge_enabled
@@ -843,6 +855,7 @@ const ConfiguracionTienda = ({
     const savedData = {
       ...data,
       delivery_methods: getEnabledDeliveryMethods(data.delivery_methods),
+      payment_methods: getEnabledPaymentMethods(data.payment_methods),
     };
     setData(savedData);
     setInitialData(savedData);
@@ -1461,6 +1474,87 @@ const ConfiguracionTienda = ({
                 placeholder="573001234567"
               />
             </div>
+          </div>
+          <div className="rounded-2xl bg-neutral-900/45 p-5 md:p-6">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-400/10 text-violet-300">
+                  <span className="material-symbols-outlined text-xl leading-none">
+                    payments
+                  </span>
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-neutral-100">
+                    Métodos de pago
+                  </h3>
+                  <p className="mt-1 text-xs text-neutral-500">
+                    Opciones disponibles para tus clientes al pagar
+                  </p>
+                </div>
+              </div>
+              <span className="text-[11px] text-neutral-500">
+                {data.payment_methods.length} activos
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {PAYMENT_METHODS.map(({ id, label }) => {
+                const checked = data.payment_methods.includes(id);
+                return (
+                  <label
+                    key={id}
+                    className={`flex min-h-[64px] cursor-pointer items-center justify-between gap-3 rounded-xl border p-3 transition-colors focus-within:ring-2 focus-within:ring-violet-400/60 ${
+                      checked
+                        ? "border-violet-400/35 bg-violet-400/[0.08]"
+                        : "border-white/[0.06] bg-neutral-950/35 hover:bg-neutral-800/55"
+                    } ${
+                      checked && data.payment_methods.length === 1
+                        ? "cursor-not-allowed"
+                        : ""
+                    }`}
+                  >
+                    <span className="flex items-center gap-3">
+                      <span
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                          checked
+                            ? "bg-violet-400/10 text-violet-300"
+                            : "bg-neutral-800 text-neutral-400"
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-lg leading-none">
+                          {id === "Efectivo"
+                            ? "payments"
+                            : id === "Tarjeta"
+                              ? "credit_card"
+                              : "account_balance"}
+                        </span>
+                      </span>
+                      <span className="text-sm font-bold text-neutral-100">
+                        {label}
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={checked && data.payment_methods.length === 1}
+                      onChange={(event) =>
+                        setData((current) => ({
+                          ...current,
+                          payment_methods: event.target.checked
+                            ? [...current.payment_methods, id]
+                            : current.payment_methods.filter(
+                                (method) => method !== id,
+                              ),
+                        }))
+                      }
+                      className="h-4 w-4 shrink-0 accent-violet-400"
+                    />
+                  </label>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-[11px] leading-5 text-neutral-500">
+              Debe quedar al menos un método activo.
+            </p>
           </div>
           <div className="rounded-2xl bg-neutral-900/45 p-5 md:p-6">
             <div className="mb-5 flex flex-wrap items-start justify-between gap-3">

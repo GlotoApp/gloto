@@ -15,6 +15,7 @@ export default function SplitPaymentModal({
   updateSplitPayment,
   initializeSplits,
   removePaymentRow,
+  availablePaymentMethods = ["efectivo", "tarjeta", "transferencia"],
 }) {
   if (!isOpen) return null;
 
@@ -113,9 +114,15 @@ export default function SplitPaymentModal({
                     <option value="" disabled>
                       Seleccionar
                     </option>
-                    <option value="efectivo">Efectivo</option>
-                    <option value="tarjeta">Tarjeta</option>
-                    <option value="transferencia">Transferencia</option>
+                      {availablePaymentMethods.includes("efectivo") && (
+                        <option value="efectivo">Efectivo</option>
+                      )}
+                      {availablePaymentMethods.includes("tarjeta") && (
+                        <option value="tarjeta">Tarjeta</option>
+                      )}
+                      {availablePaymentMethods.includes("transferencia") && (
+                        <option value="transferencia">Transferencia</option>
+                      )}
                   </select>
                 </div>
 

@@ -26,6 +26,7 @@ import {
   getSelectedProductOptions,
 } from "../../src/lib/productOptions";
 import { getEnabledDeliveryMethods } from "../../src/lib/deliveryMethods";
+import { getEnabledPaymentMethods } from "../../src/lib/paymentMethods";
 import {
   calculateDeliveryPricing,
   calculateTipAmount,
@@ -182,16 +183,18 @@ const TextField = ({
   onPasteValue,
   onClear,
   size = "sm",
+  hideLabel = false,
 }) => (
   <div>
     <label
-      className={`block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant ${size === "compact" ? "mb-0.5" : "mb-1"}`}
+      className={`${hideLabel ? "sr-only" : "block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant"} ${size === "compact" ? "mb-0.5" : "mb-1"}`}
     >
       {label}
     </label>
     <div className="relative">
       <input
         ref={inputRef}
+        aria-label={hideLabel ? label : undefined}
         type={type}
         value={value}
         inputMode={type === "number" ? "numeric" : undefined}
@@ -231,9 +234,9 @@ const TextField = ({
         onFocus={() => {
           if (!value) pasteToField(setValue, onPasteValue);
         }}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
+        className="absolute right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 cursor-pointer items-center justify-center text-on-surface-variant opacity-80 transition-opacity hover:opacity-100"
       >
-        <span className="material-symbols-outlined text-base mt-2">
+        <span className="material-symbols-outlined !text-base !leading-none">
           {value ? "close" : "content_paste"}
         </span>
       </span>
@@ -1607,7 +1610,7 @@ const POS = () => {
         const { data, error } = await supabase
           .from("business_info")
           .select(
-            "latitude,longitude,address,whatsapp_phone,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,delivery_methods,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent",
+            "latitude,longitude,address,whatsapp_phone,delivery_fee_per_km,min_delivery_fee,max_delivery_fee,delivery_methods,payment_methods,night_delivery_surcharge_enabled,night_delivery_surcharge_start,night_delivery_surcharge_end,night_delivery_surcharge_percent,tip_percent",
           )
           .eq("business_id", businessId)
           .maybeSingle();
@@ -2097,6 +2100,18 @@ const POS = () => {
     return cleaned;
   };
 
+  const formatCustomerName = (value) =>
+    String(value ?? "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(
+        (word) =>
+          word.charAt(0).toLocaleUpperCase("es-CO") +
+          word.slice(1).toLocaleLowerCase("es-CO"),
+      )
+      .join(" ");
+
   const normalizeDeliveryMethod = (value) => {
     const method = String(value ?? "")
       .trim()
@@ -2272,6 +2287,38 @@ const POS = () => {
     () => getEnabledDeliveryMethods(deliverySettings?.delivery_methods),
     [deliverySettings?.delivery_methods],
   );
+  const enabledPaymentMethods = useMemo(
+    () =>
+      getEnabledPaymentMethods(deliverySettings?.payment_methods).map(
+        (method) =>
+          ({
+            Efectivo: "efectivo",
+            Tarjeta: "tarjeta",
+            Transferencia: "transferencia",
+          })[method],
+      ),
+    [deliverySettings?.payment_methods],
+  );
+
+  useEffect(() => {
+    if (
+      paymentMethod &&
+      ["efectivo", "tarjeta", "transferencia"].includes(paymentMethod) &&
+      !enabledPaymentMethods.includes(paymentMethod)
+    ) {
+      setPaymentMethod("");
+      setMoneyPaid("");
+    }
+    if (paymentMethod === "dividir") {
+      setSplitPayments((payments) =>
+        payments.map((payment) =>
+          payment.method && !enabledPaymentMethods.includes(payment.method)
+            ? { ...payment, method: "" }
+            : payment,
+        ),
+      );
+    }
+  }, [enabledPaymentMethods.join("|"), paymentMethod]);
 
   const paymentLabels = {
     efectivo: { label: "Efectivo", icon: "payments" },
@@ -4277,8 +4324,13 @@ const POS = () => {
         </label>
       </div>
 
-      <div className="grid grid-cols-5 gap-1.5">
-        {["efectivo", "tarjeta", "transferencia", "dividir", "variado"].map(
+      <div
+        className="grid gap-1.5"
+        style={{
+          gridTemplateColumns: `repeat(${enabledPaymentMethods.length + (enabledPaymentMethods.length > 1 ? 1 : 0)}, minmax(0, 1fr))`,
+        }}
+      >
+        {[...enabledPaymentMethods, ...(enabledPaymentMethods.length > 1 ? ["dividir"] : [])].map(
           (method) => (
             <button
               key={method}
@@ -4411,6 +4463,7 @@ const POS = () => {
         setValue={setAddress}
         placeholder="Ingresa el barrio"
         size={isDeliveryMapFullscreen ? "md" : "compact"}
+        hideLabel
         onChange={(event) => {
           const value = event.target.value;
           setAddress(value);
@@ -4489,6 +4542,7 @@ const POS = () => {
       setValue={setDeliveryCoordinatesInput}
       placeholder="Pega el enlace o escribe latitud, longitud"
       size={isDeliveryMapFullscreen ? "md" : "compact"}
+      hideLabel
       onChange={(event) => {
         const value = event.target.value;
         setDeliveryCoordinatesInput(value);
@@ -4792,6 +4846,7 @@ const POS = () => {
                   setValue={setReferencePoint}
                   placeholder="Ingresa el punto de referencia"
                   size="md"
+                  hideLabel
                 />
                 {deliveryMapStatus}
                 {deliveryCostSummary}
@@ -5256,6 +5311,10 @@ const POS = () => {
                 setValue={setCustomerName}
                 placeholder="Ingresa el nombre"
                 size="compact"
+                hideLabel
+                onBlur={(event) =>
+                  setCustomerName(formatCustomerName(event.target.value))
+                }
               />
               <TextField
                 label="Número"
@@ -5264,6 +5323,7 @@ const POS = () => {
                 placeholder="Ingresa el número"
                 type="number"
                 size="compact"
+                hideLabel
                 onChange={(e) =>
                   setCustomerNumber(normalizePhoneNumber(e.target.value))
                 }
@@ -5288,6 +5348,10 @@ const POS = () => {
                 setValue={setCustomerName}
                 placeholder="Ingresa el nombre"
                 size="compact"
+                hideLabel
+                onBlur={(event) =>
+                  setCustomerName(formatCustomerName(event.target.value))
+                }
               />
               <TextField
                 label="Número"
@@ -5296,6 +5360,7 @@ const POS = () => {
                 placeholder="Ingresa el número"
                 type="number"
                 size="compact"
+                hideLabel
                 onChange={(e) =>
                   setCustomerNumber(normalizePhoneNumber(e.target.value))
                 }
@@ -5566,6 +5631,10 @@ const POS = () => {
                 setValue={setCustomerName}
                 placeholder="Ingresa el nombre"
                 size="compact"
+                hideLabel
+                onBlur={(event) =>
+                  setCustomerName(formatCustomerName(event.target.value))
+                }
               />
               <TextField
                 label="Número"
@@ -5574,6 +5643,7 @@ const POS = () => {
                 placeholder="Ingresa el número"
                 type="number"
                 size="compact"
+                hideLabel
                 onChange={(e) =>
                   setCustomerNumber(normalizePhoneNumber(e.target.value))
                 }
@@ -5586,6 +5656,7 @@ const POS = () => {
                 setValue={setReferencePoint}
                 placeholder="Ingresa el punto de referencia"
                 size={isDeliveryMapFullscreen ? "md" : "compact"}
+                hideLabel
               />
 
               {!isDeliveryMapFullscreen && (
@@ -5624,6 +5695,10 @@ const POS = () => {
                 setValue={setCustomerName}
                 placeholder="Ingresa el nombre"
                 size="compact"
+                hideLabel
+                onBlur={(event) =>
+                  setCustomerName(formatCustomerName(event.target.value))
+                }
               />
               <TextField
                 label="Número"
@@ -5632,6 +5707,7 @@ const POS = () => {
                 placeholder="Ingresa el número"
                 type="number"
                 size="compact"
+                hideLabel
                 onChange={(e) =>
                   setCustomerNumber(normalizePhoneNumber(e.target.value))
                 }
@@ -5642,6 +5718,7 @@ const POS = () => {
                 setValue={setLocationText}
                 placeholder="Ingresa la ubicación"
                 size="compact"
+                hideLabel
               />
             </div>
           )}
@@ -5871,7 +5948,7 @@ const POS = () => {
                   ? "Mostrar panel de pago"
                   : "Ocultar panel de pago"
               }
-              className="absolute -top-8 left-0 z-10 flex h-8 w-8 items-center justify-center   bg-surface/70 text-on-surface-variant shadow-md transition-colors hover:text-on-surface"
+              className="absolute -top-5 left-3 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-outline bg-surface text-on-surface-variant shadow-md transition-colors hover:text-on-surface"
             >
               {checkoutFooterCollapsed ? (
                 <ChevronUp size={20} />
@@ -7261,6 +7338,7 @@ const POS = () => {
         updateSplitPayment={updateSplitPayment}
         initializeSplits={initializeSplits}
         removePaymentRow={removePaymentRow}
+        availablePaymentMethods={enabledPaymentMethods}
       />
     </>
   );

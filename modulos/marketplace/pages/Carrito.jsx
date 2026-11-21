@@ -12,6 +12,7 @@ import {
   Store,
 } from "lucide-react";
 import { useCart } from "./CartContext";
+import { getEnabledPaymentMethods } from "../../../src/lib/paymentMethods";
 
 const fmt = (n) =>
   new Intl.NumberFormat("es-CO", {
@@ -59,10 +60,24 @@ const Carrito = ({ onIrAPagar, tiendaAbierta = true }) => {
     totalItems,
     totalPrecio,
     totalPagado,
+    deliverySettings,
   } = useCart();
 
   const hayFilaSinMetodo =
     metodoPago.length > 1 && metodoPago.some((it) => !it.metodo);
+  const enabledPaymentMethods = getEnabledPaymentMethods(
+    deliverySettings?.payment_methods,
+  );
+  const availablePaymentMethods = METODOS_PAGO.filter(({ id }) =>
+    enabledPaymentMethods.includes(id),
+  );
+  const paymentButtons =
+    enabledPaymentMethods.length > 1
+      ? [
+          ...availablePaymentMethods,
+          { id: "Dividir", label: "Dividir", Icon: Split },
+        ]
+      : availablePaymentMethods;
 
   useEffect(() => {
     setImageError(false);
@@ -73,6 +88,27 @@ const Carrito = ({ onIrAPagar, tiendaAbierta = true }) => {
       setMetodoPago((prev) => [{ ...prev[0], monto: totalPrecio }]);
     }
   }, [totalPrecio]);
+
+  useEffect(() => {
+    if (metodoPago.length === 1) {
+      const selectedMethod = metodoPago[0]?.metodo;
+      if (
+        selectedMethod &&
+        !enabledPaymentMethods.includes(selectedMethod)
+      ) {
+        setMetodoPago([]);
+      }
+    }
+    if (metodoPago.length > 1) {
+      setMetodoPago((prev) =>
+        prev.map((item) =>
+          item.metodo && !enabledPaymentMethods.includes(item.metodo)
+            ? { ...item, metodo: "" }
+            : item,
+        ),
+      );
+    }
+  }, [enabledPaymentMethods.join("|")]);
 
   const [confirmVaciarOpen, setConfirmVaciarOpen] = useState(false);
   const [removingItems, setRemovingItems] = useState([]);
@@ -601,13 +637,13 @@ const Carrito = ({ onIrAPagar, tiendaAbierta = true }) => {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(4, 1fr)",
+                  gridTemplateColumns: `repeat(${paymentButtons.length}, 1fr)`,
                   gap: "10px",
                   marginBottom: "15px",
                   justifyItems: "center",
                 }}
               >
-                {METODOS_PAGO.map(({ id, label, Icon }) => {
+                {paymentButtons.map(({ id, label, Icon }) => {
                   // Definimos si el botón está activo:
                   // - Si es Dividir: está activo si hay más de 1 elemento en el array.
                   // - Si es otro método: está activo si hay exactamente 1 elemento y es ese método.
@@ -740,9 +776,11 @@ const Carrito = ({ onIrAPagar, tiendaAbierta = true }) => {
                         <option value="" disabled>
                           Método
                         </option>
-                        <option value="Efectivo">Efectivo</option>
-                        <option value="Tarjeta">Tarjeta</option>
-                        <option value="Transferencia">Transferencia</option>
+                        {availablePaymentMethods.map(({ id, label }) => (
+                          <option key={id} value={id}>
+                            {label}
+                          </option>
+                        ))}
                       </select>
 
                       {/* Contenedor del input para que el signo $ se vea integrado */}

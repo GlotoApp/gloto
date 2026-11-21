@@ -27,6 +27,7 @@ import {
   Search,
   ShieldAlert,
   Store,
+  Trash2,
   UserRound,
   Wallet,
   X,
@@ -71,6 +72,64 @@ const courierWorkSessionKey = (userId) =>
 
 const courierDailyStatsKey = (userId) =>
   `gloto:courier-daily-stats:${userId}`;
+
+const courierProfilePhotoCacheName = "gloto-courier-profile-photos-v1";
+
+const loadCourierProfilePhotoUrl = async (photoPath) => {
+  let photoCache = null;
+  let cacheKey = null;
+
+  if (typeof window !== "undefined" && "caches" in window) {
+    try {
+      photoCache = await window.caches.open(courierProfilePhotoCacheName);
+      cacheKey = new Request(
+        `${window.location.origin}/__gloto-cache/courier-profile-photo?path=${encodeURIComponent(photoPath)}`,
+      );
+      const cachedResponse = await photoCache.match(cacheKey);
+      if (cachedResponse) {
+        return URL.createObjectURL(await cachedResponse.blob());
+      }
+    } catch (error) {
+      console.error("No se pudo leer la caché de la foto del domiciliario:", error);
+      photoCache = null;
+      cacheKey = null;
+    }
+  }
+
+  const { data, error } = await supabase.storage
+    .from("courier-application-documents")
+    .createSignedUrl(photoPath, 60 * 60);
+  if (error) throw error;
+  if (!data?.signedUrl) {
+    throw new Error("No se recibió la URL de la foto del perfil.");
+  }
+  if (!photoCache || !cacheKey) return data.signedUrl;
+
+  try {
+    const response = await fetch(data.signedUrl);
+    if (!response.ok) {
+      throw new Error(`No se pudo descargar la foto (HTTP ${response.status}).`);
+    }
+    const photoBlob = await response.blob();
+    try {
+      await photoCache.put(
+        cacheKey,
+        new Response(photoBlob, {
+          headers: { "Content-Type": photoBlob.type },
+        }),
+      );
+    } catch (error) {
+      console.error("No se pudo guardar la foto del domiciliario en caché:", error);
+    }
+    return URL.createObjectURL(photoBlob);
+  } catch (error) {
+    console.error(
+      "No se pudo cargar la foto para guardarla en caché; se usará la URL firmada:",
+      error,
+    );
+    return data.signedUrl;
+  }
+};
 
 const playCourierOrderArrivalSound = (audioContext) => {
   const notes = [880, 1174, 1568, 1174, 880, 1174, 1568];
@@ -341,6 +400,7 @@ const PortalDomiciliario = () => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [section, setSection] = useState("orders");
   const [mode, setMode] = useState("private");
+  const [storeOrdersExpanded, setStoreOrdersExpanded] = useState(true);
   const [summary, setSummary] = useState(null);
   const [workSession, setWorkSession] = useState(() =>
     readCourierWorkSession(user?.id),
@@ -385,6 +445,12 @@ const PortalDomiciliario = () => {
   const verificationSubmissionRef = useRef(false);
   const [swipeResetRequest, setSwipeResetRequest] = useState(0);
   const [savingPhone, setSavingPhone] = useState(false);
+  const [savingCedula, setSavingCedula] = useState(false);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [deleteAccountConfirmation, setDeleteAccountConfirmation] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [unlinkStoreOpen, setUnlinkStoreOpen] = useState(false);
+  const [unlinkingStore, setUnlinkingStore] = useState(false);
   const [availabilityBusy, setAvailabilityBusy] = useState(false);
   const [sourcePreferences, setSourcePreferences] = useState(null);
   const sourcePreferencesLoadedRef = useRef(false);
@@ -397,6 +463,8 @@ const PortalDomiciliario = () => {
     user?.user_metadata?.full_name || "",
   );
   const [phone, setPhone] = useState(user?.user_metadata?.phone || "");
+  const [courierCedula, setCourierCedula] = useState("");
+  const [savedCourierCedula, setSavedCourierCedula] = useState("");
   const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
   const [profilePhotoError, setProfilePhotoError] = useState("");
   const [topupAmount, setTopupAmount] = useState("");
@@ -404,7 +472,7 @@ const PortalDomiciliario = () => {
   const [courierTopupLinks, setCourierTopupLinks] = useState({});
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [activityOpen, setActivityOpen] = useState(false);
-  const [activityValuesVisible, setActivityValuesVisible] = useState(true);
+  const [activityValuesVisible, setActivityValuesVisible] = useState(false);
   const [orderSoundError, setOrderSoundError] = useState("");
   const orderAudioContextRef = useRef(null);
 
@@ -415,6 +483,11 @@ const PortalDomiciliario = () => {
   const activeDelivery = orders.find((order) =>
     ["assigned", "picked_up"].includes(order.delivery_status),
   ) || null;
+  const hasActivePublicDelivery = orders.some(
+    (order) =>
+      order.courier_mode === "public" &&
+      ["assigned", "picked_up"].includes(order.delivery_status),
+  );
   const currentCourierOffer = useMemo(() => {
     const ordersByKey = new Map(
       orders.map((order) => [getCourierOrderKey(order), order]),
@@ -437,6 +510,7 @@ const PortalDomiciliario = () => {
       orders.filter(
         (order) =>
           order.delivery_status !== "available" ||
+          order.courier_mode === "private" ||
           (currentCourierOffer &&
             getCourierOrderKey(order) ===
               getCourierOrderKey(currentCourierOffer)),
@@ -448,13 +522,25 @@ const PortalDomiciliario = () => {
       ordersForDisplay.filter((order) => order.courier_mode === "public"),
     [ordersForDisplay],
   );
+  const otherStoreOrdersForDisplay = useMemo(
+    () =>
+      ordersForDisplay.filter(
+        (order) =>
+          order.courier_mode === "private" &&
+          order.order_id !== activeDelivery?.order_id,
+      ),
+    [activeDelivery?.order_id, ordersForDisplay],
+  );
   const canUsePrivate = Boolean(summary?.private_business_id);
+  const privateStoreAvailable = Boolean(
+    canUsePrivate && summary?.private_store_available,
+  );
   const privateSourceEnabled =
-    sourcePreferences?.private ?? canUsePrivate;
+    privateStoreAvailable && (sourcePreferences?.private ?? true);
   const publicSourceEnabled =
     sourcePreferences?.public ?? isPublicApproved;
   const hasEnabledSources =
-    (canUsePrivate && privateSourceEnabled) ||
+    (privateStoreAvailable && privateSourceEnabled) ||
     (isPublicApproved && publicSourceEnabled);
   const balance = Number(summary?.wallet_balance || 0);
   const displayName =
@@ -655,8 +741,11 @@ const PortalDomiciliario = () => {
   const updateOrders = useCallback((nextOrders) => {
     setOrders(nextOrders);
 
-    const availableOrders = sortCourierOrdersByAge(
-      nextOrders.filter((order) => order.delivery_status === "available"),
+    const availableOrders = nextOrders.filter(
+      (order) => order.delivery_status === "available",
+    );
+    const publicOffers = sortCourierOrdersByAge(
+      availableOrders.filter((order) => order.courier_mode === "public"),
     ).slice(0, 1);
     const availableIds = new Set(availableOrders.map(getCourierOrderKey));
 
@@ -669,7 +758,7 @@ const PortalDomiciliario = () => {
 
     if (!offerBaselineReadyRef.current) {
       availableIds.forEach((id) => seenOfferIdsRef.current.add(id));
-      setPreviewOrderIds(availableOrders.map(getCourierOrderKey));
+      setPreviewOrderIds(publicOffers.map(getCourierOrderKey));
       offerBaselineReadyRef.current = true;
       return;
     }
@@ -680,7 +769,7 @@ const PortalDomiciliario = () => {
     newOfferIds.forEach((id) => seenOfferIdsRef.current.add(id));
     if (newOfferIds.length > 0) ringForNewOrder();
 
-    setPreviewOrderIds(availableOrders.map(getCourierOrderKey));
+    setPreviewOrderIds(publicOffers.map(getCourierOrderKey));
   }, [isCourierOnline, ringForNewOrder]);
 
   const syncLiveLocation = useCallback(
@@ -725,19 +814,55 @@ const PortalDomiciliario = () => {
     [isPrivateOnline, isPublicOnline],
   );
 
+  const loadPrivateStoreAssignment = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("business_id,store_orders_enabled,delivery_available")
+      .eq("auth_user_id", user?.id || "")
+      .ilike("area", "%domiciliario%")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  }, [user?.id]);
+
   const loadSummary = useCallback(async () => {
     const [
       { data, error },
       { data: profileName, error: profileNameError },
       { data: topupLinksData },
+      privateStoreAssignment,
+      { data: savedCedula, error: cedulaError },
     ] = await Promise.all([
       supabase.rpc("get_public_courier_portal_summary"),
       supabase.rpc("get_my_courier_profile_name"),
       supabase.from("courier_topup_payment_links").select("amount,payment_url"),
+      loadPrivateStoreAssignment(),
+      supabase.rpc("get_my_courier_cedula"),
     ]);
     if (error) throw error;
     if (profileNameError) throw profileNameError;
-    setSummary(data || null);
+    if (cedulaError) throw cedulaError;
+    const summaryData = data
+      ? {
+          ...data,
+          private_business_id: privateStoreAssignment?.business_id || null,
+          private_business_name: privateStoreAssignment?.business_id
+            ? data.private_business_name
+            : null,
+          private_store_available: Boolean(
+            privateStoreAssignment &&
+              privateStoreAssignment.store_orders_enabled !== false,
+          ),
+          private_is_online: Boolean(
+            privateStoreAssignment &&
+              privateStoreAssignment.store_orders_enabled !== false &&
+              privateStoreAssignment.delivery_available,
+          ),
+        }
+      : null;
+    setSummary(summaryData);
     setCourierTopupLinks(
       Object.fromEntries(
         (topupLinksData || []).map((link) => [link.amount, link.payment_url]),
@@ -770,13 +895,13 @@ const PortalDomiciliario = () => {
       }
       setSourcePreferences(
         preferences || {
-          private: Boolean(data?.private_business_id),
-          public: data?.application_status === "approved",
+          private: Boolean(summaryData?.private_business_id),
+          public: summaryData?.application_status === "approved",
         },
       );
       sourcePreferencesLoadedRef.current = true;
     }
-    setMode(data?.private_business_id ? "private" : "public");
+    setMode(summaryData?.private_business_id ? "private" : "public");
     const savedName =
       typeof profileName === "string" ? profileName.trim() : "";
     if (savedName) {
@@ -787,7 +912,33 @@ const PortalDomiciliario = () => {
       setFullName(user.user_metadata.full_name);
     }
     if (data?.phone) setPhone(data.phone);
-  }, [user?.id]);
+    const cedulaValue = typeof savedCedula === "string" ? savedCedula : "";
+    setCourierCedula((current) => cedulaValue || current);
+    setSavedCourierCedula(cedulaValue);
+  }, [loadPrivateStoreAssignment, user?.id]);
+
+  const refreshPrivateStoreAssignment = useCallback(async () => {
+    const assignment = await loadPrivateStoreAssignment();
+    setSummary((current) => {
+      if (!current) return current;
+      const hasAssignment = Boolean(assignment?.business_id);
+      return {
+        ...current,
+        private_business_id: assignment?.business_id || null,
+        private_business_name: hasAssignment
+          ? current.private_business_name
+          : null,
+        private_store_available: Boolean(
+          assignment && assignment.store_orders_enabled !== false,
+        ),
+        private_is_online: Boolean(
+          assignment &&
+            assignment.store_orders_enabled !== false &&
+            assignment.delivery_available,
+        ),
+      };
+    });
+  }, [loadPrivateStoreAssignment]);
 
   const requestOrders = useCallback(async () => {
     const requests = [];
@@ -815,14 +966,16 @@ const PortalDomiciliario = () => {
     if (failed?.error) throw failed.error;
     if (offerResult.error) throw offerResult.error;
     const assignedOffer = offerResult.data;
-    const privateOrders = (
-      results.find(({ source }) => source === "private")?.data || []
-    ).filter((order) => order.delivery_status !== "available");
+    const privateOrders = [
+      ...(results.find(({ source }) => source === "private")?.data || []),
+    ];
     const publicOrders = (
       results.find(({ source }) => source === "public")?.data || []
     ).filter((order) => order.delivery_status !== "available");
     if (assignedOffer?.courier_mode === "private") {
-      privateOrders.push(assignedOffer);
+      if (!privateOrders.some((order) => order.order_id === assignedOffer.order_id)) {
+        privateOrders.push(assignedOffer);
+      }
     } else if (assignedOffer?.courier_mode === "public") {
       publicOrders.push(assignedOffer);
     }
@@ -1022,7 +1175,59 @@ const PortalDomiciliario = () => {
   }, [loadSummary]);
 
   useEffect(() => {
-    if (!summaryLoaded || (!canUsePrivate && !isPublicApproved)) {
+    if (!summaryLoaded || !user?.id) return undefined;
+    let active = true;
+    const refreshAssignment = async () => {
+      try {
+        await refreshPrivateStoreAssignment();
+      } catch (error) {
+        console.error("No se pudo actualizar el vínculo de la tienda:", error);
+        if (active) {
+          setErrorMessage(
+            error.message || "No se pudo actualizar la disponibilidad de la tienda.",
+          );
+        }
+      }
+    };
+    const channel = supabase
+      .channel(`courier-store-assignment:${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "employees",
+          filter: `auth_user_id=eq.${user.id}`,
+        },
+        () => {
+          refreshAssignment();
+        },
+      )
+      .subscribe((status) => {
+        if (
+          status === "CHANNEL_ERROR" ||
+          status === "TIMED_OUT" ||
+          status === "CLOSED"
+        ) {
+          console.error("Realtime del vínculo de tienda no disponible:", status);
+        }
+      });
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") refreshAssignment();
+    }, 10000);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      supabase.removeChannel(channel);
+    };
+  }, [refreshPrivateStoreAssignment, summaryLoaded, user?.id]);
+
+  useEffect(() => {
+    if (
+      !summaryLoaded ||
+      !isCourierOnline ||
+      (!canUsePrivate && !isPublicApproved)
+    ) {
       return undefined;
     }
 
@@ -1054,6 +1259,7 @@ const PortalDomiciliario = () => {
     };
   }, [
     canUsePrivate,
+    isCourierOnline,
     isPublicApproved,
     loadCourierHotZones,
     summaryLoaded,
@@ -1061,6 +1267,7 @@ const PortalDomiciliario = () => {
 
   useEffect(() => {
     let active = true;
+    let profilePhotoObjectUrl = null;
     const authPhotoUrl =
       [
         user?.user_metadata?.avatar_url,
@@ -1072,30 +1279,31 @@ const PortalDomiciliario = () => {
       if (!user?.id) return undefined;
 
     const loadProfilePhoto = async () => {
-        let photoLoadStep = "ruta";
+      let photoLoadStep = "ruta";
       try {
         const { data: photoPath, error: photoPathError } = await supabase.rpc(
           "get_my_courier_profile_photo_path",
         );
         if (photoPathError) throw photoPathError;
-          if (!photoPath) {
-            if (active && !authPhotoUrl) {
-              setProfilePhotoError(
-                "Esta cuenta no tiene una foto de perfil vinculada.",
-              );
-            }
-            return;
+        if (!photoPath) {
+          if (active && !authPhotoUrl) {
+            setProfilePhotoError(
+              "Esta cuenta no tiene una foto de perfil vinculada.",
+            );
           }
-
-          photoLoadStep = "enlace";
-        const { data, error } = await supabase.storage
-          .from("courier-application-documents")
-          .createSignedUrl(photoPath, 60 * 60);
-        if (error) throw error;
-        if (!data?.signedUrl) {
-          throw new Error("No se recibió la URL de la foto del perfil.");
+          return;
         }
-        if (active) setProfilePhotoUrl(data.signedUrl);
+
+        photoLoadStep = "enlace";
+        const photoUrl = await loadCourierProfilePhotoUrl(photoPath);
+        if (photoUrl.startsWith("blob:")) {
+          if (active) {
+            profilePhotoObjectUrl = photoUrl;
+          } else {
+            URL.revokeObjectURL(photoUrl);
+          }
+        }
+        if (active) setProfilePhotoUrl(photoUrl);
       } catch (error) {
         if (!active) return;
         console.error("No se pudo cargar la foto del domiciliario:", error);
@@ -1119,6 +1327,9 @@ const PortalDomiciliario = () => {
     loadProfilePhoto();
     return () => {
       active = false;
+      if (profilePhotoObjectUrl) {
+        URL.revokeObjectURL(profilePhotoObjectUrl);
+      }
     };
   }, [
     user?.id,
@@ -1435,9 +1646,13 @@ const PortalDomiciliario = () => {
   };
 
   const claimOrder = async (order) => {
-    if (activeDelivery || activeOrderId) {
+    if (
+      activeOrderId ||
+      hasActivePublicDelivery ||
+      (order.courier_mode === "public" && activeDelivery)
+    ) {
       setErrorMessage(
-        "Ya tienes un domicilio activo. Complétalo antes de aceptar otro.",
+        "Completa tu entrega actual antes de aceptar una oferta pública o de otra fuente.",
       );
       return;
     }
@@ -1453,12 +1668,16 @@ const PortalDomiciliario = () => {
     }
     await runOrderAction(
       order.order_id,
-      "claim_my_courier_order_offer",
+      order.courier_mode === "private"
+        ? "claim_domiciliario_order"
+        : "claim_my_courier_order_offer",
       null,
       order.courier_mode === "public"
         ? "Pedido público aceptado. El saldo solo aplica a las entregas públicas."
-        : "Pedido de tienda asignado.",
-      { p_courier_mode: order.courier_mode },
+        : "Pedido de tienda acumulado.",
+      order.courier_mode === "public"
+        ? { p_courier_mode: order.courier_mode }
+        : {},
     );
   };
 
@@ -1828,6 +2047,34 @@ const PortalDomiciliario = () => {
     }
   };
 
+  const saveCourierCedula = async (event) => {
+    event.preventDefault();
+    const nextCedula = courierCedula.replace(/\D/g, "");
+    if (!/^[0-9]{5,15}$/.test(nextCedula)) {
+      setErrorMessage("La cédula debe tener entre 5 y 15 dígitos.");
+      return;
+    }
+
+    setSavingCedula(true);
+    setErrorMessage("");
+    setNotice("");
+    try {
+      const { data, error } = await supabase.rpc("set_my_courier_cedula", {
+        p_cedula: nextCedula,
+      });
+      if (error) throw error;
+      const savedCedula = typeof data === "string" ? data : nextCedula;
+      setCourierCedula(savedCedula);
+      setSavedCourierCedula(savedCedula);
+      setNotice("Tu cédula se guardó correctamente. Ya pueden vincularte a una tienda.");
+    } catch (error) {
+      console.error("No se pudo guardar la cédula del domiciliario:", error);
+      setErrorMessage(error.message || "No se pudo guardar tu cédula.");
+    } finally {
+      setSavingCedula(false);
+    }
+  };
+
   const submitTopup = async (event) => {
     event.preventDefault();
     if (!topupProof) {
@@ -1903,6 +2150,102 @@ const PortalDomiciliario = () => {
     } catch (error) {
       console.error("No se pudo cerrar la sesión del domiciliario:", error);
       setErrorMessage("No se pudo cerrar la sesión. Intenta de nuevo.");
+    }
+  };
+
+  const deleteCourierAccount = async (event) => {
+    event.preventDefault();
+    if (deleteAccountConfirmation !== "ELIMINAR") {
+      setErrorMessage('Escribe "ELIMINAR" para confirmar la eliminación de tu cuenta.');
+      return;
+    }
+
+    setDeletingAccount(true);
+    setErrorMessage("");
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "eliminar-mi-cuenta-domiciliario",
+        { body: { confirmation: deleteAccountConfirmation } },
+      );
+      if (error) {
+        let errorMessage = error.message || "No se pudo eliminar tu cuenta.";
+        if (error.context && typeof error.context.json === "function") {
+          try {
+            const response = await error.context.json();
+            errorMessage = response?.error || errorMessage;
+          } catch (parseError) {
+            console.warn("No se pudo leer el error de eliminación de cuenta:", parseError);
+          }
+        }
+        throw new Error(errorMessage);
+      }
+      if (!data?.success) {
+        throw new Error(data?.error || "No se pudo confirmar la eliminación de tu cuenta.");
+      }
+
+      sessionStorage.removeItem(courierWorkSessionKey(user.id));
+      localStorage.removeItem(courierDailyStatsKey(user.id));
+      localStorage.removeItem(`gloto:courier-sources:${user.id}`);
+      const { error: signOutError } = await supabase.auth.signOut({
+        scope: "local",
+      });
+      if (signOutError) {
+        console.error("La cuenta se eliminó, pero no se pudo cerrar la sesión local:", signOutError);
+      }
+      navigate("/domiciliarios/login", { replace: true });
+    } catch (error) {
+      console.error("No se pudo eliminar la cuenta del domiciliario:", error);
+      setErrorMessage(error.message || "No se pudo eliminar tu cuenta.");
+      setDeletingAccount(false);
+    }
+  };
+
+  const unlinkMyStore = async () => {
+    setUnlinkingStore(true);
+    setErrorMessage("");
+    setNotice("");
+    try {
+      const { data, error } = await supabase.rpc(
+        "unlink_my_domiciliario_from_store",
+      );
+      if (error) throw error;
+      if (!data?.success) {
+        throw new Error(data?.error || "No se pudo completar la desvinculación.");
+      }
+
+      const preferences = {
+        private: false,
+        public: sourcePreferences?.public ?? isPublicApproved,
+      };
+      setSourcePreferences(preferences);
+      setMode("public");
+      setSummary((current) =>
+        current
+          ? {
+              ...current,
+              private_business_id: null,
+              private_business_name: null,
+              private_store_available: false,
+              private_is_online: false,
+            }
+          : current,
+      );
+      try {
+        localStorage.setItem(
+          `gloto:courier-sources:${user.id}`,
+          JSON.stringify(preferences),
+        );
+      } catch (storageError) {
+        console.error("No se pudo guardar la preferencia de pedidos:", storageError);
+        setErrorMessage("Te desvinculaste, pero no se pudo guardar tu preferencia local.");
+      }
+      setUnlinkStoreOpen(false);
+      setNotice("Te desvinculaste de la tienda. Tu cuenta de Gloto sigue activa.");
+    } catch (error) {
+      console.error("No se pudo desvincular al domiciliario de la tienda:", error);
+      setErrorMessage(error.message || "No se pudo completar la desvinculación.");
+    } finally {
+      setUnlinkingStore(false);
     }
   };
 
@@ -2033,6 +2376,7 @@ const PortalDomiciliario = () => {
             setMenuOpen(false);
           }}
           privateOnline={isPrivateOnline}
+          privateAvailable={privateStoreAvailable}
           publicOnline={isPublicOnline}
           privateBusinessName={summary?.private_business_name}
           privateBusinessLogo={
@@ -2063,25 +2407,74 @@ const PortalDomiciliario = () => {
       )}
 
       {activeDelivery ? (
-        <CourierActiveDelivery
-          order={activeDelivery}
-          location={
-            mapLocation ||
-            (summary?.location_latitude != null &&
-            summary?.location_longitude != null
-              ? {
-                  latitude: summary.location_latitude,
-                  longitude: summary.location_longitude,
-                }
-              : null)
-          }
-          busy={activeOrderId === activeDelivery.order_id}
-          onUpdateStatus={updateOrderStatus}
-          errorMessage={errorMessage}
-          swipeResetRequest={swipeResetRequest}
-          hotZones={hotZones}
-          hotZoneError={hotZoneError}
-        />
+        <>
+          <CourierActiveDelivery
+            order={activeDelivery}
+            location={
+              mapLocation ||
+              (summary?.location_latitude != null &&
+              summary?.location_longitude != null
+                ? {
+                    latitude: summary.location_latitude,
+                    longitude: summary.location_longitude,
+                  }
+                : null)
+            }
+            busy={activeOrderId === activeDelivery.order_id}
+            onUpdateStatus={updateOrderStatus}
+            errorMessage={errorMessage}
+            swipeResetRequest={swipeResetRequest}
+            hotZones={hotZones}
+            hotZoneError={hotZoneError}
+          />
+          {activeDelivery.courier_mode === "private" &&
+            otherStoreOrdersForDisplay.length > 0 && (
+              <section className="mx-auto max-w-7xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
+                <button
+                  type="button"
+                  aria-expanded={storeOrdersExpanded}
+                  onClick={() =>
+                    setStoreOrdersExpanded((expanded) => !expanded)
+                  }
+                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left"
+                >
+                  <span className="text-lg font-black">
+                    Pedidos acumulados de tu tienda
+                    <span className="ml-2 rounded-full bg-primary-container/15 px-2 py-0.5 text-xs text-white">
+                      {otherStoreOrdersForDisplay.length}
+                    </span>
+                  </span>
+                  {storeOrdersExpanded ? (
+                    <ChevronUp size={18} aria-hidden="true" />
+                  ) : (
+                    <ChevronDown size={18} aria-hidden="true" />
+                  )}
+                </button>
+                {storeOrdersExpanded && (
+                  <>
+                    <p className="text-sm text-neutral-400">
+                      Puedes aceptar otros pedidos de tu tienda mientras completas tus entregas.
+                    </p>
+                    {otherStoreOrdersForDisplay.map((order) => (
+                      <OrderCard
+                        key={order.order_id}
+                        order={order}
+                        mode="private"
+                        busy={activeOrderId === order.order_id}
+                        canClaim={
+                          order.delivery_status === "available" &&
+                          !hasActivePublicDelivery &&
+                          activeOrderId === null
+                        }
+                        onClaim={claimOrder}
+                        onUpdateStatus={updateOrderStatus}
+                      />
+                    ))}
+                  </>
+                )}
+              </section>
+            )}
+        </>
       ) : (
       <>
       {showFullMap && (
@@ -2110,6 +2503,10 @@ const PortalDomiciliario = () => {
           hotZoneError={hotZoneError}
           activeDelivery={activeDelivery}
           previewOrderIds={previewOrderIds}
+          storeOrdersExpanded={storeOrdersExpanded}
+          onToggleStoreOrders={() =>
+            setStoreOrdersExpanded((expanded) => !expanded)
+          }
           onFinishOrderPreview={finishOrderPreview}
           activeOrderId={activeOrderId}
           errorMessage={errorMessage}
@@ -2138,7 +2535,7 @@ const PortalDomiciliario = () => {
                 {section === "orders"
                   ? mode === "public"
                     ? "Recibirás una oferta a la vez dentro de tu zona."
-                    : "Gestiona tus entregas asignadas por tu tienda."
+                    : "Gestiona los pedidos disponibles y acumula entregas de tu tienda."
                   : section === "wallet"
                     ? "Consulta movimientos y solicita una recarga."
                     : "Tus datos de acceso y modos de trabajo."}
@@ -2426,7 +2823,12 @@ const PortalDomiciliario = () => {
                     order={order}
                     mode={mode}
                     busy={activeOrderId === order.order_id}
-                    canClaim={!activeDelivery && activeOrderId === null}
+                    canClaim={
+                      activeOrderId === null &&
+                      (order.courier_mode === "private"
+                        ? !hasActivePublicDelivery
+                        : !activeDelivery)
+                    }
                     onClaim={claimOrder}
                     onUpdateStatus={updateOrderStatus}
                   />
@@ -2843,6 +3245,40 @@ const PortalDomiciliario = () => {
                   {savingPhone ? "Guardando..." : "Guardar teléfono"}
                 </button>
               </form>
+              {savedCourierCedula ? (
+                <ProfileRow label="Cédula" value={savedCourierCedula} />
+              ) : (
+                <form
+                  onSubmit={saveCourierCedula}
+                  className="border-b border-white/[0.07] py-3"
+                >
+                  <label className="block text-xs font-semibold text-neutral-300">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+                      Número de cédula
+                    </span>
+                    <input
+                      required
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={15}
+                      value={courierCedula}
+                      onChange={(event) =>
+                        setCourierCedula(event.target.value.replace(/\D/g, ""))
+                      }
+                      className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-white outline-none transition placeholder:text-neutral-600 focus:border-violet-400/50"
+                      placeholder="Solo números"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={savingCedula}
+                    className="mt-3 rounded-xl bg-violet-500 px-4 py-2.5 text-xs font-black text-white transition hover:bg-violet-400 disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {savingCedula ? "Guardando..." : "Guardar cédula"}
+                  </button>
+                </form>
+              )}
               <ProfileRow
                 label="Modo privado"
                 value={
@@ -2851,6 +3287,24 @@ const PortalDomiciliario = () => {
                     : "Sin tienda vinculada"
                 }
               />
+              {summary?.private_business_id && (
+                <div className="mt-4 border-t border-white/[0.07] pt-4">
+                  <p className="text-xs leading-5 text-neutral-400">
+                    Puedes dejar de recibir pedidos de esta tienda cuando quieras.
+                    Tu cuenta pública de Gloto seguirá activa.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMessage("");
+                      setUnlinkStoreOpen(true);
+                    }}
+                    className="mt-3 rounded-xl border border-rose-400/25 px-4 py-2.5 text-xs font-black text-rose-200 transition hover:bg-rose-400/10"
+                  >
+                    Desvincularme de la tienda
+                  </button>
+                </div>
+              )}
             </section>
             <section className="rounded-2xl border border-white/[0.08] bg-neutral-900/60 p-6">
               <div className="flex items-center gap-3">
@@ -2887,11 +3341,170 @@ const PortalDomiciliario = () => {
                 </div>
               )}
             </section>
+            <section className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.04] p-6 lg:col-span-2">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="font-black text-rose-100">Eliminar mi cuenta</h2>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-neutral-400">
+                    Se cerrará tu acceso a Gloto y dejarás de recibir pedidos
+                    públicos o de tiendas. Las tiendas pueden conservar su
+                    información operativa e historial.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteAccountConfirmation("");
+                    setErrorMessage("");
+                    setDeleteAccountOpen(true);
+                  }}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-rose-400/30 px-4 py-2.5 text-xs font-black text-rose-200 transition hover:bg-rose-400/10"
+                >
+                  <Trash2 size={15} />
+                  Eliminar cuenta
+                </button>
+              </div>
+            </section>
           </div>
         )}
       </div>
       )}
       </>
+      )}
+
+      {unlinkStoreOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="unlink-courier-store-title"
+            className="w-full max-w-md space-y-4 rounded-2xl border border-rose-400/20 bg-neutral-900 p-5 shadow-2xl"
+          >
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-rose-400/10 text-rose-300">
+                <Store size={18} />
+              </span>
+              <div>
+                <h2
+                  id="unlink-courier-store-title"
+                  className="text-lg font-black text-white"
+                >
+                  ¿Desvincularte de esta tienda?
+                </h2>
+                <p className="mt-2 text-xs leading-5 text-neutral-400">
+                  Dejarás de recibir sus pedidos privados. Tu cuenta pública y
+                  tu historial seguirán activos. No podrás desvincularte mientras
+                  tengas una entrega en curso.
+                </p>
+              </div>
+            </div>
+            {errorMessage && (
+              <p role="alert" className="text-xs leading-5 text-rose-300">
+                {errorMessage}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setUnlinkStoreOpen(false);
+                  setErrorMessage("");
+                }}
+                disabled={unlinkingStore}
+                className="rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-neutral-300 transition hover:bg-white/5 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={unlinkMyStore}
+                disabled={unlinkingStore}
+                className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-black text-white transition hover:bg-rose-500 disabled:cursor-wait disabled:opacity-50"
+              >
+                {unlinkingStore && (
+                  <LoaderCircle size={14} className="animate-spin" />
+                )}
+                {unlinkingStore ? "Desvinculando..." : "Sí, desvincularme"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {deleteAccountOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-courier-account-title"
+            onSubmit={deleteCourierAccount}
+            className="w-full max-w-md space-y-4 rounded-2xl border border-rose-400/20 bg-neutral-900 p-5 shadow-2xl"
+          >
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-rose-400/10 text-rose-300">
+                <Trash2 size={18} />
+              </span>
+              <div>
+                <h2
+                  id="delete-courier-account-title"
+                  className="text-lg font-black text-white"
+                >
+                  ¿Eliminar tu cuenta?
+                </h2>
+                <p className="mt-2 text-xs leading-5 text-neutral-400">
+                  Esta acción es permanente. Tus vínculos con tiendas y tu
+                  acceso a pedidos públicos dejarán de estar activos. Se
+                  eliminarán tus solicitudes públicas y sus documentos. Las
+                  tiendas pueden conservar su información operativa e historial.
+                  No podrás eliminar la cuenta mientras tengas una entrega en
+                  curso.
+                </p>
+              </div>
+            </div>
+            <label className="block space-y-1.5 text-xs font-semibold text-neutral-300">
+              Escribe ELIMINAR para confirmar
+              <input
+                required
+                autoComplete="off"
+                value={deleteAccountConfirmation}
+                onChange={(event) =>
+                  setDeleteAccountConfirmation(event.target.value)
+                }
+                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none focus:border-rose-400"
+              />
+            </label>
+            {errorMessage && (
+              <p role="alert" className="text-xs leading-5 text-rose-300">
+                {errorMessage}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteAccountOpen(false);
+                  setErrorMessage("");
+                }}
+                disabled={deletingAccount}
+                className="rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-neutral-300 transition hover:bg-white/5 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  deletingAccount || deleteAccountConfirmation !== "ELIMINAR"
+                }
+                className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-black text-white transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {deletingAccount && (
+                  <LoaderCircle size={14} className="animate-spin" />
+                )}
+                {deletingAccount ? "Eliminando..." : "Eliminar definitivamente"}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
       {activityOpen && (
@@ -4276,6 +4889,8 @@ const CourierMapExperience = ({
   hotZoneError,
   activeDelivery,
   previewOrderIds,
+  storeOrdersExpanded,
+  onToggleStoreOrders,
   onFinishOrderPreview,
   activeOrderId,
   errorMessage,
@@ -4287,6 +4902,15 @@ const CourierMapExperience = ({
   const [recenterRequest, setRecenterRequest] = useState(0);
   const ordersByKey = useMemo(
     () => new Map(orders.map((order) => [getCourierOrderKey(order), order])),
+    [orders],
+  );
+  const accumulatedStoreOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) =>
+          order.courier_mode === "private" &&
+          order.delivery_status === "available",
+      ),
     [orders],
   );
   const previewOrders = useMemo(() => {
@@ -4490,6 +5114,45 @@ const CourierMapExperience = ({
                 </p>
               ) : null}
             </>
+          )}
+          {accumulatedStoreOrders.length > 0 && (
+            <section className="max-h-[38dvh] overflow-y-auto border-t border-white/[0.08] p-3">
+              <button
+                type="button"
+                aria-expanded={storeOrdersExpanded}
+                onClick={onToggleStoreOrders}
+                className="mb-2 flex w-full items-center justify-between gap-3 rounded-lg px-1 py-2 text-left"
+              >
+                <span className="text-sm font-black text-white">
+                  Pedidos acumulados de tu tienda
+                  <span className="ml-2 rounded-full bg-primary-container/15 px-2.5 py-1 text-[10px] font-bold text-white">
+                    {accumulatedStoreOrders.length}
+                  </span>
+                </span>
+                {storeOrdersExpanded ? (
+                  <ChevronUp size={18} aria-hidden="true" />
+                ) : (
+                  <ChevronDown size={18} aria-hidden="true" />
+                )}
+              </button>
+              {storeOrdersExpanded && (
+                <div className="space-y-2">
+                  {accumulatedStoreOrders.map((order) => (
+                    <OrderCard
+                      key={order.order_id}
+                      order={order}
+                      mode="private"
+                      location={location}
+                      compact
+                      busy={activeOrderId === order.order_id}
+                      canClaim={!activeDelivery && activeOrderId === null}
+                      onClaim={onClaim}
+                      onUpdateStatus={onUpdateStatus}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
           )}
         </section>
       </div>

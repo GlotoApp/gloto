@@ -1,8 +1,0 @@
-User-agent: *
-Allow: /
-
-Disallow: /gestion/
-Disallow: /pos/
-Disallow: /domiciliarios
-
-Sitemap: https://gloto.vercel.app/sitemap.xml

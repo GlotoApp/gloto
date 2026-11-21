@@ -190,6 +190,7 @@ const DomiciliariosPublicos = () => {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [reviewNotes, setReviewNotes] = useState({});
+  const [reviewCedulas, setReviewCedulas] = useState({});
 
   const fetchCourierAccounts = useCallback(async () => {
     setCourierAccountsLoading(true);
@@ -328,7 +329,7 @@ const DomiciliariosPublicos = () => {
       const { data, error } = await supabase
         .from("public_courier_application_requests")
         .select(
-          "id,full_name,email,phone,vehicle_type,status,review_notes,created_at,license_front_path,license_back_path,vehicle_card_front_path,vehicle_card_back_path,identity_front_path,identity_back_path,profile_photo_path",
+          "id,full_name,cedula,email,phone,vehicle_type,status,review_notes,created_at,license_front_path,license_back_path,vehicle_card_front_path,vehicle_card_back_path,identity_front_path,identity_back_path,profile_photo_path",
         )
         .eq("status", "pending")
         .order("created_at", { ascending: false });
@@ -658,6 +659,13 @@ const DomiciliariosPublicos = () => {
 
   const reviewNewApplication = async (application, status) => {
     const action = status === "approved" ? "aprobar" : "rechazar";
+    const cedula = String(
+      application.cedula || reviewCedulas[application.id] || "",
+    ).replace(/\D/g, "");
+    if (status === "approved" && !/^[0-9]{5,15}$/.test(cedula)) {
+      setErrorMessage("Ingresa una cédula válida antes de aprobar la solicitud.");
+      return;
+    }
     if (
       !window.confirm(
         `¿Confirmas ${action} la solicitud de ${application.full_name}?`,
@@ -676,6 +684,7 @@ const DomiciliariosPublicos = () => {
           body: {
             requestId: application.id,
             status,
+            cedula,
             notes: reviewNotes[application.id]?.trim() || null,
           },
         },
@@ -889,6 +898,9 @@ const DomiciliariosPublicos = () => {
                         <p className="mt-1 text-xs text-neutral-400">
                           {application.email} · {application.phone}
                         </p>
+                        <p className="mt-1 text-xs text-neutral-400">
+                          Cédula: {application.cedula || "Pendiente de registrar"}
+                        </p>
                         <p className="mt-1 text-xs text-neutral-500">
                           Vehículo: {application.vehicle_type === "motorcycle" ? "Moto" : "Carro"}
                         </p>
@@ -913,6 +925,24 @@ const DomiciliariosPublicos = () => {
                     {(application.status === "pending" ||
                       application.status === "approved") && (
                       <>
+                        {!application.cedula && application.status === "pending" && (
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="off"
+                            maxLength={15}
+                            value={reviewCedulas[application.id] ?? ""}
+                            onChange={(event) =>
+                              setReviewCedulas((current) => ({
+                                ...current,
+                                [application.id]: event.target.value.replace(/\D/g, ""),
+                              }))
+                            }
+                            placeholder="Cédula requerida para aprobar"
+                            disabled={isBusy}
+                            className="mt-4 w-full rounded-xl border border-amber-400/20 bg-neutral-900 px-3 py-2.5 text-xs text-white outline-none placeholder:text-neutral-500 focus:border-violet-400/40 disabled:opacity-50"
+                          />
+                        )}
                         <input
                           value={reviewNotes[application.id] ?? ""}
                           onChange={(event) =>

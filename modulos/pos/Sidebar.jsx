@@ -230,6 +230,7 @@ const Sidebar = ({
     { name: "Tienda", path: "/pos/configuracion/tienda" },
     { name: "Datos", path: "/pos/configuracion/datos" },
     { name: "Empleados", path: "/pos/configuracion/empleados" },
+    { name: "Mis domiciliarios", path: "/pos/configuracion/domiciliarios" },
     { name: "Pop pup", path: "/pos/pop-pup" },
     { name: "Impresoras", path: "/pos/configuracion/impresoras" },
   ];

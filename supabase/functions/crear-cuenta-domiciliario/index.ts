@@ -16,6 +16,9 @@ const jsonResponse = (status: number, body: Record<string, unknown>) =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const normalizeCedula = (value: unknown) =>
+  typeof value === "string" ? value.replace(/\D/g, "") : "";
+
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -83,6 +86,36 @@ Deno.serve(async (request: Request) => {
   const requestedAction =
     typeof body.action === "string" ? body.action.trim().toLowerCase() : "create";
   const action = requestedAction === "delete" ? "unlink" : requestedAction;
+  if (action === "link-by-cedula") {
+    const cedula = normalizeCedula(body.cedula);
+    if (!/^[0-9]{5,15}$/.test(cedula)) {
+      return jsonResponse(400, { error: "Ingresa una cédula válida." });
+    }
+
+    const employeeId =
+      typeof body.employeeId === "string" ? body.employeeId.trim() : null;
+    const { data: employee, error: linkError } = await adminClient.rpc(
+      "link_public_courier_by_cedula",
+      {
+        p_business_id: callerProfile.business_id,
+        p_cedula: cedula,
+        p_employee_id: employeeId,
+      },
+    );
+    if (linkError || !employee?.id) {
+      console.error("No se pudo vincular el domiciliario por cédula:", linkError);
+      return jsonResponse(409, {
+        error: linkError?.message || "No se pudo vincular el domiciliario.",
+      });
+    }
+
+    return jsonResponse(200, {
+      success: true,
+      linkedExisting: true,
+      employee,
+    });
+  }
+
   if (action === "account-emails") {
     const { data: linkedEmployees, error: linkedEmployeesError } =
       await adminClient
@@ -102,24 +135,86 @@ Deno.serve(async (request: Request) => {
       .map((employee) => employee.auth_user_id)
       .filter((userId): userId is string => typeof userId === "string");
     if (!userIds.length) {
-      return jsonResponse(200, { success: true, emails: {} });
+      return jsonResponse(200, {
+        success: true,
+        emails: {},
+        cedulas: {},
+        phones: {},
+      });
     }
 
-    const { data: courierProfiles, error: courierProfilesError } =
-      await adminClient
+    const [
+      { data: courierProfiles, error: courierProfilesError },
+      { data: courierIdentities, error: identityError },
+      { data: legacyApplications, error: legacyApplicationsError },
+      { data: applicationRequests, error: applicationRequestsError },
+    ] = await Promise.all([
+      adminClient
         .from("profiles")
         .select("id,email")
-        .in("id", userIds);
+        .in("id", userIds),
+      adminClient
+        .from("courier_identities")
+        .select("courier_user_id,cedula")
+        .in("courier_user_id", userIds),
+      adminClient
+        .from("public_courier_applications")
+        .select("user_id,phone,created_at")
+        .in("user_id", userIds)
+        .eq("status", "approved")
+        .order("created_at", { ascending: false }),
+      adminClient
+        .from("public_courier_application_requests")
+        .select("user_id,phone,created_at")
+        .in("user_id", userIds)
+        .eq("status", "approved")
+        .order("created_at", { ascending: false }),
+    ]);
     if (courierProfilesError) {
       console.error("No se pudieron consultar los correos de acceso:", courierProfilesError);
       return jsonResponse(500, {
         error: "No se pudieron consultar los correos de acceso.",
       });
     }
+    if (identityError) {
+      console.error("No se pudieron consultar las cédulas de los domiciliarios:", identityError);
+      return jsonResponse(500, {
+        error: "No se pudieron consultar las cédulas de los domiciliarios.",
+      });
+    }
+    if (legacyApplicationsError || applicationRequestsError) {
+      console.error(
+        "No se pudieron consultar los teléfonos de los domiciliarios:",
+        legacyApplicationsError || applicationRequestsError,
+      );
+      return jsonResponse(500, {
+        error: "No se pudieron consultar los teléfonos de los domiciliarios.",
+      });
+    }
 
     const emailByUserId = new Map(
       (courierProfiles || []).map((profile) => [profile.id, profile.email || ""]),
     );
+    const cedulaByUserId = new Map(
+      (courierIdentities || []).map((identity) => [
+        identity.courier_user_id,
+        identity.cedula,
+      ]),
+    );
+    const phoneByUserId = new Map<string, string>();
+    for (const application of [
+      ...(legacyApplications || []),
+      ...(applicationRequests || []),
+    ]) {
+      if (
+        typeof application.user_id === "string" &&
+        typeof application.phone === "string" &&
+        application.phone.trim() &&
+        !phoneByUserId.has(application.user_id)
+      ) {
+        phoneByUserId.set(application.user_id, application.phone);
+      }
+    }
     const emails = Object.fromEntries(
       (linkedEmployees || []).map((employee) => [
         employee.id,
@@ -128,13 +223,30 @@ Deno.serve(async (request: Request) => {
           : "",
       ]),
     );
-    return jsonResponse(200, { success: true, emails });
+    const cedulas = Object.fromEntries(
+      (linkedEmployees || []).map((employee) => [
+        employee.id,
+        employee.auth_user_id
+          ? cedulaByUserId.get(employee.auth_user_id) || ""
+          : "",
+      ]),
+    );
+    const phones = Object.fromEntries(
+      (linkedEmployees || []).map((employee) => [
+        employee.id,
+        employee.auth_user_id
+          ? phoneByUserId.get(employee.auth_user_id) || ""
+          : "",
+      ]),
+    );
+    return jsonResponse(200, { success: true, emails, cedulas, phones });
   }
 
   const employeeId =
     typeof body.employeeId === "string" ? body.employeeId.trim() : "";
   const email =
     typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const cedula = normalizeCedula(body.cedula);
   const password = typeof body.password === "string" ? body.password : "";
   if (
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -344,6 +456,9 @@ Deno.serve(async (request: Request) => {
   if (action !== "create") {
     return jsonResponse(400, { error: "La acción solicitada no es válida." });
   }
+  if (!/^[0-9]{5,15}$/.test(cedula)) {
+    return jsonResponse(400, { error: "Ingresa una cédula válida." });
+  }
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return jsonResponse(400, { error: "Ingresa un correo válido." });
   }
@@ -354,6 +469,38 @@ Deno.serve(async (request: Request) => {
   }
   if (employee.auth_user_id) {
     return jsonResponse(409, { error: "Este domiciliario ya tiene un acceso." });
+  }
+  const { data: existingIdentity, error: identityLookupError } = await adminClient
+    .from("courier_identities")
+    .select("courier_user_id")
+    .eq("cedula", cedula)
+    .maybeSingle();
+  if (identityLookupError) {
+    console.error("No se pudo verificar la cédula del domiciliario:", identityLookupError);
+    return jsonResponse(500, { error: "No se pudo verificar la cédula." });
+  }
+  if (existingIdentity) {
+    const { data: linkedCourier, error: existingCourierLinkError } =
+      await adminClient.rpc("link_public_courier_by_cedula", {
+        p_business_id: callerProfile.business_id,
+        p_cedula: cedula,
+        p_employee_id: employeeId,
+      });
+    if (existingCourierLinkError || !linkedCourier?.auth_user_id) {
+      console.error("No se pudo vincular la cuenta existente por cédula:", existingCourierLinkError);
+      return jsonResponse(409, {
+        error: existingCourierLinkError?.message ||
+          "No se pudo vincular la cuenta pública con esta tienda.",
+      });
+    }
+    return jsonResponse(200, {
+      success: true,
+      userId: linkedCourier.auth_user_id,
+      name: linkedCourier.name,
+      email: linkedCourier.email || email,
+      linkedExisting: true,
+      storeOrderPriorityEnabled: linkedCourier.store_order_priority_enabled,
+    });
   }
   const { data: createdUser, error: createUserError } =
     await adminClient.auth.admin.createUser({
@@ -370,9 +517,92 @@ Deno.serve(async (request: Request) => {
         createUserError?.message || "",
       )
     ) {
+      const { data: existingProfile, error: existingProfileError } =
+        await adminClient
+          .from("profiles")
+          .select("id,role,business_id")
+          .eq("email", email)
+          .maybeSingle();
+      if (existingProfileError) {
+        console.error("No se pudo verificar la cuenta existente:", existingProfileError);
+        return jsonResponse(500, {
+          error: "No se pudo verificar el correo existente.",
+        });
+      }
+
+      if (
+        existingProfile &&
+        String(existingProfile.role || "").toLowerCase() === "domiciliario" &&
+        existingProfile.business_id === null
+      ) {
+        const { data: existingIdentity, error: existingIdentityError } =
+          await adminClient
+            .from("courier_identities")
+            .select("cedula")
+            .eq("courier_user_id", existingProfile.id)
+            .maybeSingle();
+        if (existingIdentityError) {
+          console.error("No se pudo verificar la identidad del domiciliario:", existingIdentityError);
+          return jsonResponse(500, {
+            error: "No se pudo verificar la identidad de la cuenta existente.",
+          });
+        }
+        if (existingIdentity?.cedula !== cedula) {
+          return jsonResponse(409, {
+            error: "El correo ya está registrado, pero la cédula no coincide. Verifica los datos o busca la cuenta por cédula.",
+          });
+        }
+
+        const { data: otherLinks, error: otherLinksError } = await adminClient
+          .from("employees")
+          .select("id")
+          .eq("auth_user_id", existingProfile.id)
+          .neq("id", employeeId)
+          .ilike("area", "%domiciliario%")
+          .limit(1);
+        if (otherLinksError) {
+          console.error("No se pudo verificar el vínculo existente:", otherLinksError);
+          return jsonResponse(500, {
+            error: "No se pudo verificar el vínculo del domiciliario.",
+          });
+        }
+        if (otherLinks?.length) {
+          return jsonResponse(409, {
+            error: "Esta cuenta ya está vinculada a otra tienda.",
+          });
+        }
+
+        const { data: linkedEmployee, error: linkError } = await adminClient
+          .from("employees")
+          .update({
+            auth_user_id: existingProfile.id,
+            store_orders_enabled: true,
+            store_order_priority_enabled: true,
+          })
+          .eq("id", employeeId)
+          .eq("business_id", callerProfile.business_id)
+          .is("auth_user_id", null)
+          .select("id,store_order_priority_enabled")
+          .maybeSingle();
+        if (linkError || !linkedEmployee) {
+          console.error("No se pudo vincular la cuenta existente:", linkError);
+          return jsonResponse(409, {
+            error: "El empleado ya tiene acceso o no se pudo vincular.",
+          });
+        }
+
+        return jsonResponse(200, {
+          success: true,
+          userId: existingProfile.id,
+          email,
+          linkedExisting: true,
+          storeOrderPriorityEnabled: linkedEmployee.store_order_priority_enabled,
+        });
+      }
+
       return jsonResponse(409, {
         code: "EMAIL_ALREADY_EXISTS",
-        error: "Este correo ya está registrado. Elige otro correo al que el domiciliario pueda acceder.",
+        error: "Este correo ya está registrado en una cuenta que no se puede vincular como domiciliario.",
       });
     }
     return jsonResponse(400, {
@@ -402,6 +632,30 @@ Deno.serve(async (request: Request) => {
       console.error("No se pudo revertir la cuenta de Auth:", cleanupError);
     }
     return jsonResponse(500, { error: "No se pudo completar el perfil del domiciliario." });
+  }
+
+  const { error: identityInsertError } = await adminClient
+    .from("courier_identities")
+    .insert({ courier_user_id: userId, cedula });
+  if (identityInsertError) {
+    console.error("No se pudo guardar la cédula del domiciliario:", identityInsertError);
+    const { error: deleteProfileError } = await adminClient
+      .from("profiles")
+      .delete()
+      .eq("id", userId);
+    if (deleteProfileError) {
+      console.error("No se pudo revertir el perfil del domiciliario:", deleteProfileError);
+    }
+    const { error: deleteUserError } =
+      await adminClient.auth.admin.deleteUser(userId);
+    if (deleteUserError) {
+      console.error("No se pudo revertir la cuenta de Auth:", deleteUserError);
+    }
+    return jsonResponse(409, {
+      error: identityInsertError.code === "23505"
+        ? "Esta cédula ya pertenece a un domiciliario registrado."
+        : "No se pudo guardar la cédula del domiciliario.",
+    });
   }
 
   const { data: linkedEmployee, error: linkError } = await adminClient

@@ -20,8 +20,6 @@ const EMPTY_ACCOUNT_FORM = { email: "", password: "" };
 const EMPTY_PERMISSIONS = {};
 const isCourierArea = (area) =>
   String(area || "").toLowerCase().includes("domiciliario");
-const isCourierEmployee = (employee) =>
-  isCourierArea(employee?.area);
 
 const getEmailSuggestions = (email, employeeName) => {
   const [localPart, domain] = email.split("@");
@@ -63,39 +61,6 @@ const PermissionSwitch = ({ label, checked, onChange }) => (
   </div>
 );
 
-const CourierPrioritySwitch = ({ checked, onChange }) => (
-  <div className="flex items-center justify-between gap-4 rounded-xl border border-amber-400/30 bg-amber-400/[0.06] p-4">
-    <div>
-      <p className="text-sm font-bold text-amber-100">
-        Prioridad para domiciliario de la tienda
-      </p>
-      <p className="mt-1 text-xs leading-relaxed text-neutral-300">
-        Solo aplica a empleados del área de domiciliarios. Activado: si está
-        conectado, tendrá prioridad por 2 minutos; después el pedido pasa al
-        público. Desactivado: el pedido queda disponible de inmediato para
-        domiciliarios públicos. Su acceso a pedidos públicos no cambia.
-      </p>
-    </div>
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label="Dar prioridad de dos minutos en pedidos de la tienda"
-      onClick={onChange}
-      className={`relative h-6 w-11 shrink-0 rounded-full p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
-        checked ? "bg-amber-500" : "bg-white/15"
-      }`}
-    >
-      <span
-        aria-hidden="true"
-        className={`block h-4 w-4 rounded-full bg-white shadow transition-transform ${
-          checked ? "translate-x-5" : "translate-x-0"
-        }`}
-      />
-    </button>
-  </div>
-);
-
 const ConfiguracionEmpleados = () => {
   const [businessId, setBusinessId] = useState(null);
   const [employees, setEmployees] = useState([]);
@@ -103,20 +68,15 @@ const ConfiguracionEmpleados = () => {
   const [form, setForm] = useState(EMPTY_FORM);
   const [employeePermissions, setEmployeePermissions] =
     useState(EMPTY_PERMISSIONS);
-  const [employeeStoreOrderPriorityEnabled, setEmployeeStoreOrderPriorityEnabled] =
-    useState(true);
   const [newAreaName, setNewAreaName] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [updatingCourierId, setUpdatingCourierId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editingForm, setEditingForm] = useState(EMPTY_FORM);
   const [accountEmployeeId, setAccountEmployeeId] = useState(null);
   const [permissionsEmployeeId, setPermissionsEmployeeId] = useState(null);
   const [editingPermissions, setEditingPermissions] =
     useState(EMPTY_PERMISSIONS);
-  const [editingStoreOrderPriorityEnabled, setEditingStoreOrderPriorityEnabled] =
-    useState(false);
   const [accountAction, setAccountAction] = useState("create");
   const [accountForm, setAccountForm] = useState(EMPTY_ACCOUNT_FORM);
   const [showAccountPassword, setShowAccountPassword] = useState(false);
@@ -150,7 +110,7 @@ const ConfiguracionEmpleados = () => {
           .order("name", { ascending: true }),
         supabase
           .from("employees")
-          .select("id,name,area,area_id,permissions,created_at,auth_user_id,store_orders_enabled,store_order_priority_enabled")
+          .select("id,name,area,area_id,permissions,created_at,auth_user_id")
           .eq("business_id", profile.business_id)
           .order("name", { ascending: true }),
       ]);
@@ -158,44 +118,29 @@ const ConfiguracionEmpleados = () => {
         setMessage((areaError || employeeError).message);
         return setLoading(false);
       }
-      setAreas(areaData || []);
-      const loadedEmployees = employeeData || [];
+      setAreas((areaData || []).filter((area) => !isCourierArea(area.name)));
+      const loadedEmployees = (employeeData || []).filter(
+        (employee) => !isCourierArea(employee.area),
+      );
       let emailByEmployeeId = {};
-      const linkedGroups = [
-        {
-          courier: true,
-          employees: loadedEmployees.filter(
-            (employee) => employee.auth_user_id && isCourierEmployee(employee),
-          ),
-          functionName: "crear-cuenta-domiciliario",
-        },
-        {
-          courier: false,
-          employees: loadedEmployees.filter(
-            (employee) => employee.auth_user_id && !isCourierEmployee(employee),
-          ),
-          functionName: "gestionar-cuenta-empleado",
-        },
-      ];
-      for (const group of linkedGroups) {
-        if (!group.employees.length) continue;
+      const linkedEmployees = loadedEmployees.filter(
+        (employee) => employee.auth_user_id,
+      );
+      if (linkedEmployees.length) {
         const { data: accountData, error: accountError } =
-          await supabase.functions.invoke(group.functionName, {
+          await supabase.functions.invoke("gestionar-cuenta-empleado", {
             body: { action: "account-emails" },
           });
         if (accountError || !accountData?.success) {
           console.error(
-            `No se pudieron cargar los correos de acceso${group.courier ? " de domiciliarios" : " de empleados"}:`,
+            "No se pudieron cargar los correos de acceso de empleados:",
             accountError || accountData?.error,
           );
           setMessage(
             accountData?.error || "No se pudieron cargar los correos de acceso.",
           );
         } else {
-          emailByEmployeeId = {
-            ...emailByEmployeeId,
-            ...(accountData.emails || {}),
-          };
+          emailByEmployeeId = accountData.emails || {};
         }
       }
       setEmployees(
@@ -230,6 +175,10 @@ const ConfiguracionEmpleados = () => {
       setMessage("Escribe el nombre del área que quieres crear.");
       return;
     }
+    if (isCourierArea(name)) {
+      setMessage("Los domiciliarios se administran desde Mis domiciliarios.");
+      return;
+    }
     setSaving(true);
     setMessage("");
     const { data, error } = await supabase
@@ -257,19 +206,16 @@ const ConfiguracionEmpleados = () => {
   };
 
   const saveEmployeePermissions = async (employeeId) => {
-    const employee = employees.find((item) => item.id === employeeId);
     setSaving(true);
     setMessage("");
     const { data, error } = await supabase
       .from("employees")
       .update({
         permissions: editingPermissions,
-        store_order_priority_enabled:
-          isCourierEmployee(employee) && editingStoreOrderPriorityEnabled,
       })
       .eq("id", employeeId)
       .eq("business_id", businessId)
-      .select("id,name,permissions,store_order_priority_enabled")
+      .select("id,name,permissions")
       .single();
     if (error) {
       setMessage(error.message);
@@ -280,8 +226,6 @@ const ConfiguracionEmpleados = () => {
             ? {
                 ...employee,
                 permissions: data.permissions,
-                store_order_priority_enabled:
-                  data.store_order_priority_enabled,
               }
             : employee,
         ),
@@ -312,11 +256,8 @@ const ConfiguracionEmpleados = () => {
         area,
         area_id: selectedArea.id,
         permissions: employeePermissions,
-        store_order_priority_enabled: isCourierArea(area)
-          ? employeeStoreOrderPriorityEnabled
-          : false,
       })
-      .select("id,name,area,area_id,permissions,created_at,auth_user_id,store_orders_enabled,store_order_priority_enabled")
+      .select("id,name,area,area_id,permissions,created_at,auth_user_id")
       .single();
 
     if (error) {
@@ -329,7 +270,6 @@ const ConfiguracionEmpleados = () => {
       );
       setForm(EMPTY_FORM);
       setEmployeePermissions(EMPTY_PERMISSIONS);
-      setEmployeeStoreOrderPriorityEnabled(true);
       setMessage("Empleado registrado.");
     }
     setSaving(false);
@@ -365,10 +305,9 @@ const ConfiguracionEmpleados = () => {
         name,
         area,
         area_id: areas.find((item) => item.name === area)?.id || null,
-        ...(!isCourierArea(area) ? { store_order_priority_enabled: false } : {}),
       })
       .eq("id", employeeId)
-      .select("id,name,area,area_id,permissions,created_at,auth_user_id,store_orders_enabled,store_order_priority_enabled")
+      .select("id,name,area,area_id,permissions,created_at,auth_user_id")
       .single();
 
     if (error) {
@@ -406,12 +345,9 @@ const ConfiguracionEmpleados = () => {
     setSaving(true);
     setMessage("");
     setEmailSuggestions([]);
-    const functionName = isCourierEmployee(employee)
-      ? "crear-cuenta-domiciliario"
-      : "gestionar-cuenta-empleado";
     try {
       const { data, error } = await supabase.functions.invoke(
-        functionName,
+        "gestionar-cuenta-empleado",
         {
           body: {
             employeeId: employee.id,
@@ -489,12 +425,9 @@ const ConfiguracionEmpleados = () => {
 
     setSaving(true);
     setMessage("");
-    const functionName = isCourierEmployee(employee)
-      ? "crear-cuenta-domiciliario"
-      : "gestionar-cuenta-empleado";
     try {
       const { data, error } = await supabase.functions.invoke(
-        functionName,
+        "gestionar-cuenta-empleado",
         {
           body: {
             action,
@@ -566,62 +499,6 @@ const ConfiguracionEmpleados = () => {
       setMessage("Ocurrió un error al completar la acción. Intenta de nuevo.");
     } finally {
       setSaving(false);
-    }
-  };
-
-  const toggleCourierStoreOrders = async (employee) => {
-    const enabled = employee.store_orders_enabled === false;
-    setUpdatingCourierId(employee.id);
-    setMessage("");
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        "crear-cuenta-domiciliario",
-        {
-          body: {
-            action: "set-store-orders-enabled",
-            employeeId: employee.id,
-            enabled,
-          },
-        },
-      );
-      if (error) {
-        let errorMessage = error.message || "No se pudo actualizar la recepción de pedidos.";
-        if (error.context && typeof error.context.json === "function") {
-          try {
-            const responseBody = await error.context.json();
-            errorMessage = responseBody?.error || errorMessage;
-          } catch (parseError) {
-            console.warn(
-              "No se pudo leer el error al actualizar la recepción de pedidos:",
-              parseError,
-            );
-          }
-        }
-        console.error("No se pudo actualizar la recepción de pedidos:", error);
-        setMessage(errorMessage);
-        return;
-      }
-      if (!data?.success || typeof data.enabled !== "boolean") {
-        setMessage(data?.error || "No se pudo confirmar el cambio.");
-        return;
-      }
-      setEmployees((current) =>
-        current.map((item) =>
-          item.id === employee.id
-            ? { ...item, store_orders_enabled: data.enabled }
-            : item,
-        ),
-      );
-      setMessage(
-        data.enabled
-          ? `${employee.name} puede recibir pedidos nuevos de esta tienda.`
-          : `Se pausaron los pedidos nuevos de esta tienda para ${employee.name}. Sus domicilios asignados no cambian.`,
-      );
-    } catch (error) {
-      console.error("Error al cambiar la recepción de pedidos:", error);
-      setMessage("No se pudo conectar para actualizar la recepción de pedidos.");
-    } finally {
-      setUpdatingCourierId(null);
     }
   };
 
@@ -729,16 +606,6 @@ const ConfiguracionEmpleados = () => {
                 />
               ))}
             </div>
-            {isCourierArea(
-              form.area === "__new__" ? newAreaName : form.area,
-            ) && (
-              <CourierPrioritySwitch
-                checked={employeeStoreOrderPriorityEnabled}
-                onChange={() =>
-                  setEmployeeStoreOrderPriorityEnabled((enabled) => !enabled)
-                }
-              />
-            )}
           </section>
         )}
 
@@ -792,9 +659,6 @@ const ConfiguracionEmpleados = () => {
                       <select
                         value={editingForm.area}
                         onChange={(event) => updateEditing("area", event.target.value)}
-                        disabled={Boolean(
-                          employee.auth_user_id && isCourierEmployee(employee),
-                        )}
                         className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-400"
                         aria-label="Área del empleado"
                       >
@@ -850,58 +714,8 @@ const ConfiguracionEmpleados = () => {
                       <div className="flex items-center gap-1 justify-self-start md:justify-self-end">
                         {employee.auth_user_id ? (
                           <>
-                            {isCourierEmployee(employee) && (
-                              <div className="flex flex-col gap-2 px-2">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`text-[10px] font-bold ${
-                                      employee.store_orders_enabled === false
-                                        ? "text-amber-300"
-                                        : "text-emerald-300"
-                                    }`}
-                                  >
-                                    {employee.store_orders_enabled === false
-                                      ? "Pedidos pausados"
-                                      : "Recibe pedidos"}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    role="switch"
-                                    aria-checked={employee.store_orders_enabled !== false}
-                                    aria-label={`${
-                                      employee.store_orders_enabled === false
-                                        ? "Permitir"
-                                        : "Pausar"
-                                    } pedidos de tienda para ${employee.name}`}
-                                    title={
-                                      employee.store_orders_enabled === false
-                                        ? "Permitir nuevos pedidos de esta tienda"
-                                        : "Pausar nuevos pedidos de esta tienda"
-                                    }
-                                    onClick={() => toggleCourierStoreOrders(employee)}
-                                    disabled={updatingCourierId === employee.id}
-                                    className={`relative h-6 w-11 shrink-0 rounded-full p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-wait disabled:opacity-50 ${
-                                      employee.store_orders_enabled === false
-                                        ? "bg-white/15"
-                                        : "bg-violet-600"
-                                    }`}
-                                  >
-                                    <span
-                                      aria-hidden="true"
-                                      className={`block h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                                        employee.store_orders_enabled === false
-                                          ? "translate-x-0"
-                                          : "translate-x-5"
-                                      }`}
-                                    />
-                                  </button>
-                                </div>
-                              </div>
-                            )}
                             <span className="px-2 text-[10px] font-bold text-emerald-300">
-                              {isCourierEmployee(employee)
-                                ? "Portal habilitado"
-                                : "Acceso activo"}
+                              Acceso activo
                             </span>
                             <button
                               type="button"
@@ -951,9 +765,6 @@ const ConfiguracionEmpleados = () => {
                           onClick={() => {
                             setPermissionsEmployeeId(employee.id);
                             setEditingPermissions(employee.permissions || {});
-                            setEditingStoreOrderPriorityEnabled(
-                              employee.store_order_priority_enabled === true,
-                            );
                             setMessage("");
                           }}
                           className="rounded-lg px-2 py-2 text-[10px] font-black uppercase tracking-wider text-violet-300 transition hover:bg-violet-400/10"
@@ -1003,7 +814,7 @@ const ConfiguracionEmpleados = () => {
                     <form
                       role="dialog"
                       aria-modal="true"
-                      aria-labelledby="courier-account-modal-title"
+                      aria-labelledby="employee-account-modal-title"
                       onSubmit={(event) => {
                         event.preventDefault();
                         if (accountAction === "create") {
@@ -1017,7 +828,7 @@ const ConfiguracionEmpleados = () => {
                       <header className="flex items-start justify-between gap-4">
                         <div>
                           <h3
-                            id="courier-account-modal-title"
+                            id="employee-account-modal-title"
                             className="text-lg font-black text-white"
                           >
                             {accountAction === "create"
@@ -1030,19 +841,13 @@ const ConfiguracionEmpleados = () => {
                           </h3>
                           <p className="mt-2 text-sm leading-relaxed text-neutral-400">
                             {accountAction === "create"
-                              ? isCourierEmployee(employee)
-                                ? "Crea las credenciales que usará para iniciar sesión en el portal de domiciliarios."
-                                : "Crea las credenciales individuales con las que iniciará sesión en el POS. Sus permisos dependen del área asignada."
+                              ? "Crea las credenciales individuales con las que iniciará sesión en el POS. Sus permisos dependen del área asignada."
                               : accountAction === "reset"
-                                ? `Define una contraseña nueva para ${isCourierEmployee(employee) ? "el domiciliario" : "el empleado"}. La contraseña actual dejará de funcionar; comparte la nueva por un canal privado.`
+                                ? `Define una contraseña nueva para el empleado ${employee.name}. La contraseña actual dejará de funcionar; comparte la nueva por un canal privado.`
                                 : accountAction === "unlink"
-                                  ? isCourierEmployee(employee)
-                                    ? "El domiciliario dejará de ver y tomar pedidos de esta tienda. Su cuenta de Gloto y contraseña se conservan; el empleado permanece registrado y sus domicilios activos quedan disponibles para otro domiciliario."
-                                    : "Se desactivarán las credenciales individuales del empleado. El registro del empleado permanecerá en el área."
+                                  ? "Se desactivarán las credenciales individuales del empleado. El registro del empleado permanecerá en el área."
                                   : employee.auth_user_id
-                                    ? isCourierEmployee(employee)
-                                      ? "Se eliminará permanentemente el registro del empleado de esta tienda. Sus domicilios activos quedarán disponibles. La cuenta y contraseña de Gloto del domiciliario se conservarán."
-                                      : "Se eliminarán permanentemente el registro del empleado y su acceso individual."
+                                    ? "Se eliminarán permanentemente el registro del empleado y su acceso individual."
                                     : "Se eliminará permanentemente el registro de este empleado de la tienda. Esta acción no se puede deshacer."}
                           </p>
                         </div>
@@ -1259,16 +1064,6 @@ const ConfiguracionEmpleados = () => {
                           />
                         ))}
                       </div>
-                      {isCourierEmployee(employee) && (
-                        <CourierPrioritySwitch
-                          checked={editingStoreOrderPriorityEnabled}
-                          onChange={() =>
-                            setEditingStoreOrderPriorityEnabled(
-                              (enabled) => !enabled,
-                            )
-                          }
-                        />
-                      )}
                       {message && (
                         <p role="alert" className="text-sm text-rose-300">
                           {message}

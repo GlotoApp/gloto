@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.gestionar-cuenta-empleado]
 verify_jwt = false
+
+[functions.eliminar-mi-cuenta-domiciliario]
+verify_jwt = false

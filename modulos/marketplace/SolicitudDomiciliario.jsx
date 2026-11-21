@@ -16,7 +16,7 @@ const DRAFT_KEY = "gloto_courier_application_draft";
 
 const STEPS = [
   { title: "Tu vehículo", description: "¿Con qué vehículo realizarías tus entregas?" },
-  { title: "Tu teléfono", description: "Confirma tu número para poder contactarte." },
+  { title: "Tus datos", description: "Confirma tu identidad y tus datos de contacto." },
   { title: "Licencia de conducción", description: "Sube una foto clara de ambos lados." },
   { title: "Tarjeta de propiedad", description: "Necesitamos ambos lados de la tarjeta del vehículo." },
   { title: "Documento de identidad", description: "Necesitamos ambos lados de tu documento." },
@@ -26,6 +26,8 @@ const STEPS = [
 const INITIAL_VALUES = {
   vehicle: "",
   fullName: "",
+  cedula: "",
+  cedulaConfirmation: "",
   email: "",
   phone: "",
   phoneConfirmation: "",
@@ -87,6 +89,15 @@ export default function SolicitudDomiciliario({ onClose }) {
       if (values.fullName.trim().length < 3) {
         return "Escribe tu nombre completo.";
       }
+      if (!/^[0-9]{5,15}$/.test(values.cedula.replace(/\D/g, ""))) {
+        return "Escribe un número de cédula válido.";
+      }
+      if (
+        values.cedula.replace(/\D/g, "") !==
+        values.cedulaConfirmation.replace(/\D/g, "")
+      ) {
+        return "Los números de cédula no coinciden.";
+      }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) {
         return "Escribe un correo electrónico válido.";
       }
@@ -114,7 +125,12 @@ export default function SolicitudDomiciliario({ onClose }) {
 
   const persistDraft = () => {
     const draft = Object.fromEntries(
-      Object.entries(values).filter(([, value]) => typeof value === "string"),
+      Object.entries(values).filter(
+        ([key, value]) =>
+          key !== "cedula" &&
+          key !== "cedulaConfirmation" &&
+          typeof value === "string",
+      ),
     );
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   };
@@ -178,6 +194,7 @@ export default function SolicitudDomiciliario({ onClose }) {
         "submit_public_courier_application_request",
         {
           p_full_name: values.fullName.trim(),
+          p_cedula: values.cedula.replace(/\D/g, ""),
           p_email: values.email.trim().toLowerCase(),
           p_phone: values.phone.trim(),
           p_vehicle_type: values.vehicle,
@@ -235,6 +252,14 @@ export default function SolicitudDomiciliario({ onClose }) {
       />
     </label>
   );
+
+  const cedulaConfirmationMismatch =
+    values.cedulaConfirmation.length > 0 &&
+    values.cedula.replace(/\D/g, "") !==
+      values.cedulaConfirmation.replace(/\D/g, "");
+  const phoneConfirmationMismatch =
+    values.phoneConfirmation.trim().length > 0 &&
+    values.phone.trim() !== values.phoneConfirmation.trim();
 
   if (submitted) {
     return (
@@ -330,6 +355,56 @@ export default function SolicitudDomiciliario({ onClose }) {
                 />
               </label>
               <label className="text-sm font-bold text-neutral-300">
+                Número de cédula
+                <input
+                  required
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  maxLength={15}
+                  value={values.cedula}
+                  onChange={(event) =>
+                    updateValue("cedula", event.target.value.replace(/\D/g, ""))
+                  }
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none focus:border-violet-400"
+                  placeholder="Solo números"
+                />
+              </label>
+              <label className="text-sm font-bold text-neutral-300">
+                Repite tu número de cédula
+                <input
+                  required
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  maxLength={15}
+                  value={values.cedulaConfirmation}
+                  onPaste={(event) => event.preventDefault()}
+                  onChange={(event) =>
+                    updateValue(
+                      "cedulaConfirmation",
+                      event.target.value.replace(/\D/g, ""),
+                    )
+                  }
+                  aria-invalid={cedulaConfirmationMismatch}
+                  className={`mt-2 w-full rounded-xl border bg-white/[0.04] px-4 py-3 text-sm outline-none ${
+                    cedulaConfirmationMismatch
+                      ? "border-rose-400 focus:border-rose-400"
+                      : "border-white/10 focus:border-violet-400"
+                  }`}
+                  placeholder="Vuelve a escribirla"
+                />
+                {cedulaConfirmationMismatch && (
+                  <span
+                    role="status"
+                    aria-live="polite"
+                    className="mt-1 block text-xs font-medium text-rose-300"
+                  >
+                    Los números de cédula no coinciden.
+                  </span>
+                )}
+              </label>
+              <label className="text-sm font-bold text-neutral-300">
                 Correo electrónico
                 <input
                   required
@@ -363,10 +438,27 @@ export default function SolicitudDomiciliario({ onClose }) {
                   type="tel"
                   inputMode="tel"
                   value={values.phoneConfirmation}
-                  onChange={(event) => updateValue("phoneConfirmation", event.target.value)}
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none focus:border-violet-400"
+                  onPaste={(event) => event.preventDefault()}
+                  onChange={(event) =>
+                    updateValue("phoneConfirmation", event.target.value)
+                  }
+                  aria-invalid={phoneConfirmationMismatch}
+                  className={`mt-2 w-full rounded-xl border bg-white/[0.04] px-4 py-3 text-sm outline-none ${
+                    phoneConfirmationMismatch
+                      ? "border-rose-400 focus:border-rose-400"
+                      : "border-white/10 focus:border-violet-400"
+                  }`}
                   placeholder="Vuelve a escribirlo"
                 />
+                {phoneConfirmationMismatch && (
+                  <span
+                    role="status"
+                    aria-live="polite"
+                    className="mt-1 block text-xs font-medium text-rose-300"
+                  >
+                    Los números de teléfono no coinciden.
+                  </span>
+                )}
               </label>
             </div>
           )}

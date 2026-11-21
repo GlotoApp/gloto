@@ -23,6 +23,26 @@ const NUMBER_TO_DAY = Object.fromEntries(
   Object.entries(DAY_TO_NUMBER).map(([day, number]) => [number, day]),
 );
 
+const findSuggestedTurno = (schedule, targetDay) => {
+  const targetIndex = DAYS.indexOf(targetDay);
+
+  for (let distance = 1; distance < DAYS.length; distance += 1) {
+    const candidateIndexes = [targetIndex - distance, targetIndex + distance];
+
+    for (const candidateIndex of candidateIndexes) {
+      if (candidateIndex < 0 || candidateIndex >= DAYS.length) continue;
+
+      const candidateDay = DAYS[candidateIndex];
+      const candidateTurno = schedule[candidateDay]?.turnos?.[0];
+      if (candidateTurno) {
+        return { ...candidateTurno };
+      }
+    }
+  }
+
+  return { open: "18:00", close: "23:00", closeDay: "same" };
+};
+
 const createDefaultSchedule = () =>
   DAYS.reduce(
     (acc, day) => ({
@@ -61,92 +81,95 @@ const parseTimeInput = (value) => {
 
 const TurnoRow = ({ turno, index, day, onUpdate, onRemove }) => {
   return (
-    <div className="rounded-xl bg-neutral-950/40 p-4">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-        {/* 1. INPUT: HORA APERTURA */}
-        <div className="flex flex-col gap-2 flex-1">
-          <label className="ml-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
-            Apertura
-          </label>
-          <div className="relative flex items-center">
-            <Sun
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500/70 z-10 pointer-events-none"
-            />
-            {/* Clases Webkit añadidas para anular desajustes nativos de iPhone/Android */}
-            <input
-              type="time"
-              value={turno.open || ""}
-              onChange={(e) => onUpdate(day, index, "open", e.target.value)}
-              className="h-12 w-full rounded-xl bg-neutral-900 pl-10 pr-3 text-base font-semibold text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/60 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-            />
-          </div>
-        </div>
-
-        <div className="hidden pb-2 text-lg font-medium text-neutral-500 lg:flex">
-          →
-        </div>
-
-        {/* 2. INPUT: HORA CIERRE */}
-        <div className="flex flex-col gap-2 flex-1">
-          <label className="ml-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
-            Cierre
-          </label>
-          <div className="relative flex items-center">
-            <Moon
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500/70 z-10 pointer-events-none"
-            />
-            {/* Clases Webkit añadidas para anular desajustes nativos de iPhone/Android */}
-            <input
-              type="time"
-              value={turno.close || ""}
-              onChange={(e) => onUpdate(day, index, "close", e.target.value)}
-              className="h-12 w-full rounded-xl bg-neutral-900 pl-10 pr-3 text-base font-semibold text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/60 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-            />
-          </div>
-        </div>
-
-        {/* 3. SELECTOR DE CICLO OPERATIVO */}
-        <div className="flex w-full flex-col gap-2 lg:w-auto">
-          <label className="ml-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
-            Dia cierre
-          </label>
-
-          <div className="relative flex h-12 items-center overflow-hidden rounded-xl bg-black/50 p-1">
-            <button
-              onClick={() => onUpdate(day, index, "closeDay", "same")}
-              className={`relative z-10 h-full flex-1 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/70 ${
-                turno.closeDay === "same"
-                  ? "bg-neutral-800 text-white"
-                  : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
-              }`}
-            >
-              Mismo
-            </button>
-
-            <button
-              onClick={() => onUpdate(day, index, "closeDay", "next")}
-              className={`relative z-10 flex h-full flex-1 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/70 ${
-                turno.closeDay === "next"
-                  ? "bg-violet-600 text-white"
-                  : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
-              }`}
-            >
-              Siguiente
-            </button>
-          </div>
-        </div>
-
+    <div className="rounded-xl border border-white/[0.04] bg-neutral-950/40 p-3">
+      <div className="flex items-center gap-2">
         <button
+          type="button"
           onClick={() => onRemove(day, index)}
-          className="flex min-h-11 w-full items-center justify-center rounded-xl text-neutral-400 transition-colors hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60 lg:h-12 lg:w-12"
+          aria-label="Eliminar turno"
+          title="Eliminar turno"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
         >
           <Trash2 size={16} />
-          <span className="ml-2 text-xs font-semibold lg:hidden">
-            Eliminar Turno
-          </span>
         </button>
+        <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-end">
+          {/* 1. INPUT: HORA APERTURA */}
+          <div className="flex flex-col gap-1.5 flex-1">
+            <label className="ml-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+              Apertura
+            </label>
+            <div className="relative flex items-center">
+              <Sun
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500/60 z-10 pointer-events-none"
+              />
+              {/* Clases Webkit añadidas para anular desajustes nativos de iPhone/Android */}
+              <input
+                type="time"
+                value={turno.open || ""}
+                onChange={(e) => onUpdate(day, index, "open", e.target.value)}
+                className="h-10 w-full rounded-lg bg-neutral-900 pl-10 pr-3 text-sm font-semibold text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/60 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <div className="hidden pb-1.5 text-base font-medium text-neutral-600 lg:flex">
+            →
+          </div>
+
+          {/* 2. INPUT: HORA CIERRE */}
+          <div className="flex flex-col gap-1.5 flex-1">
+            <label className="ml-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+              Cierre
+            </label>
+            <div className="relative flex items-center">
+              <Moon
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500/60 z-10 pointer-events-none"
+              />
+              {/* Clases Webkit añadidas para anular desajustes nativos de iPhone/Android */}
+              <input
+                type="time"
+                value={turno.close || ""}
+                onChange={(e) => onUpdate(day, index, "close", e.target.value)}
+                className="h-10 w-full rounded-lg bg-neutral-900 pl-10 pr-3 text-sm font-semibold text-white outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-violet-500/60 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* 3. SELECTOR DE CICLO OPERATIVO */}
+          <div className="flex w-full flex-col gap-1.5 lg:w-auto">
+            <label className="ml-1 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+              Dia cierre
+            </label>
+
+            <div className="relative flex h-10 items-center overflow-hidden rounded-lg bg-black/50 p-1">
+              <button
+                type="button"
+                onClick={() => onUpdate(day, index, "closeDay", "same")}
+                className={`relative z-10 h-full flex-1 rounded-md px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/70 ${
+                  turno.closeDay === "same"
+                    ? "bg-neutral-800 text-white"
+                    : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
+                }`}
+              >
+                Mismo
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onUpdate(day, index, "closeDay", "next")}
+                className={`relative z-10 flex h-full flex-1 items-center justify-center gap-2 rounded-md px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400/70 ${
+                  turno.closeDay === "next"
+                    ? "bg-violet-600 text-white"
+                    : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
+                }`}
+              >
+                Siguiente
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -275,17 +298,22 @@ export default function Horarios() {
 
   const addTurno = (day) => {
     if (schedule[day].turnos.length >= 2) return;
-    setSchedule((prev) => ({
-      ...prev,
-      [day]: {
-        ...prev[day],
-        isOpen: true,
-        turnos: [
-          ...prev[day].turnos,
-          { open: "", close: "", closeDay: "same" },
-        ],
-      },
-    }));
+    setSchedule((prev) => {
+      const firstTurno = prev[day].turnos[0];
+      const suggestedTurno =
+        firstTurno
+          ? { ...firstTurno }
+          : findSuggestedTurno(prev, day);
+
+      return {
+        ...prev,
+        [day]: {
+          ...prev[day],
+          isOpen: true,
+          turnos: [...prev[day].turnos, suggestedTurno],
+        },
+      };
+    });
   };
 
   const removeTurno = (day, index) => {
@@ -506,14 +534,28 @@ export default function Horarios() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 gap-3">
             {DAYS.map((day) => (
               <div
                 key={day}
-                className="rounded-2xl bg-neutral-900/40 p-4 md:p-5"
+                className={`rounded-xl p-3 transition-colors md:p-4 ${
+                  schedule[day].isOpen
+                    ? "bg-neutral-900/40"
+                    : "border border-red-400/15 bg-red-500/[0.07]"
+                }`}
               >
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <span className="rounded-lg bg-white/[0.04] px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">
+                <div
+                  className={`flex items-center justify-between gap-3 ${
+                    schedule[day].isOpen ? "mb-3" : ""
+                  }`}
+                >
+                  <span
+                    className={`rounded-lg px-3 py-1.5 text-xs font-bold uppercase tracking-wider ${
+                      schedule[day].isOpen
+                        ? "bg-white/[0.04] text-white"
+                        : "bg-red-500/10 text-red-300"
+                    }`}
+                  >
                     {day}
                   </span>
 
@@ -522,7 +564,9 @@ export default function Horarios() {
                     {/* Label de Estado Técnico */}
                     <span
                       className={`text-xs font-semibold transition-colors ${
-                        schedule[day].isOpen ? "text-emerald-300" : "text-neutral-400"
+                        schedule[day].isOpen
+                          ? "text-emerald-300"
+                          : "text-red-300"
                       }`}
                     >
                       {schedule[day].isOpen ? "Abierto" : "Cerrado"}
@@ -532,10 +576,22 @@ export default function Horarios() {
                     <button
                       type="button"
                       onClick={() =>
-                        setSchedule((p) => ({
-                          ...p,
-                          [day]: { ...p[day], isOpen: !p[day].isOpen },
-                        }))
+                        setSchedule((prev) => {
+                          const isOpen = !prev[day].isOpen;
+                          const turnos =
+                            isOpen && prev[day].turnos.length === 0
+                              ? [findSuggestedTurno(prev, day)]
+                              : prev[day].turnos;
+
+                          return {
+                            ...prev,
+                            [day]: {
+                              ...prev[day],
+                              isOpen,
+                              turnos,
+                            },
+                          };
+                        })
                       }
                       className={`relative inline-flex h-7 w-12 cursor-pointer items-center rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900 ${
                         schedule[day].isOpen ? "bg-emerald-600" : "bg-neutral-700"
@@ -554,7 +610,7 @@ export default function Horarios() {
                 </div>
 
                 {schedule[day].isOpen && (
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {schedule[day].turnos.map((turno, idx) => (
                       <TurnoRow
                         key={idx}
@@ -567,7 +623,7 @@ export default function Horarios() {
                     ))}
                     <button
                       onClick={() => addTurno(day)}
-                      className="flex min-h-11 w-full items-center justify-center rounded-xl bg-white/[0.03] text-sm font-semibold text-neutral-400 transition-colors hover:bg-violet-500/10 hover:text-violet-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+                      className="flex min-h-9 w-full items-center justify-center rounded-lg border border-dashed border-white/[0.06] text-xs font-semibold text-neutral-500 transition-colors hover:border-violet-400/20 hover:bg-violet-500/[0.06] hover:text-violet-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
                     >
                       <Plus size={14} className="inline mr-1 md:mr-2" />
                       Añadir Turno

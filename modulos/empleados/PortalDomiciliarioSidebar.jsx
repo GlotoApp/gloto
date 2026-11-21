@@ -34,6 +34,7 @@ const PortalDomiciliarioSidebar = ({
   canUsePublic,
   isPublicApproved,
   privateOnline,
+  privateAvailable,
   publicOnline,
   privateBusinessName,
   privateBusinessLogo,
@@ -115,7 +116,6 @@ const PortalDomiciliarioSidebar = ({
             className="flex shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 transition hover:bg-white/10"
           >
             <CircleDollarSign size={17} />
-            <span className="text-xs font-black sm:text-sm">Jornada</span>
             <span className="text-xs font-black sm:text-sm">
               {activityValuesVisible ? formatMoney(sessionEarnings) : "••••••"}
             </span>
@@ -191,14 +191,16 @@ const PortalDomiciliarioSidebar = ({
                     key={privateBusinessLogo}
                     label={privateBusinessName || "Pedidos de mi tienda"}
                     description={
-                      privateOnline
+                      !privateAvailable
+                        ? "No disponible en esta tienda"
+                        : privateOnline
                         ? "Recibiendo pedidos"
                         : privateEnabled
                           ? "Elegido · conecta para recibir"
                           : "No recibir pedidos"
                     }
-                    checked={privateEnabled}
-                    disabled={availabilityBusy}
+                    checked={privateAvailable && privateEnabled}
+                    disabled={!privateAvailable || availabilityBusy}
                     onChange={() => onToggleAvailability("private")}
                     accent="violet"
                     icon={Store}

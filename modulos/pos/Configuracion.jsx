@@ -3,6 +3,7 @@ import { Save } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import ConfiguracionDatos from "./ConfiguracionDatos";
 import ConfiguracionEmpleados from "./ConfiguracionEmpleados";
+import MisDomiciliarios from "./MisDomiciliarios";
 import ConfiguracionTienda from "./ConfiguracionTienda";
 import ConfiguracionImpresoras from "./ConfiguracionImpresoras";
 
@@ -21,6 +22,11 @@ const sections = {
     title: "Empleados",
     description: "Registra a las personas que forman parte de tu equipo.",
     component: ConfiguracionEmpleados,
+  },
+  domiciliarios: {
+    title: "Mis domiciliarios",
+    description: "Registra domiciliarios y administra su vínculo con la tienda.",
+    component: MisDomiciliarios,
   },
   impresoras: {
     title: "Impresoras",
