@@ -98,6 +98,7 @@ const Layout = () => {
   const { user } = useAuth();
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
+  const [hasUnsavedPOSData, setHasUnsavedPOSData] = useState(false);
   const [colorMode, setColorMode] = useState("dark");
   const [inactiveTablesPrompt, setInactiveTablesPrompt] = useState([]);
   const [isClosingInactiveTables, setIsClosingInactiveTables] = useState(false);
@@ -751,6 +752,7 @@ const Layout = () => {
           onMouseEnter={handleSidebarMouseEnter}
           onMouseLeave={handleSidebarMouseLeave}
           onColorModeChange={setColorMode}
+          hasUnsavedPOSData={hasUnsavedPOSData}
         />
       </div>
 
@@ -765,7 +767,7 @@ const Layout = () => {
       >
         {/* Aquí la animación protege TODAS las rutas hijas automáticamente */}
         <ReadyGate>
-          <Outlet context={{ isSidebarExpanded }} />
+          <Outlet context={{ isSidebarExpanded, setHasUnsavedPOSData }} />
         </ReadyGate>
       </main>
 

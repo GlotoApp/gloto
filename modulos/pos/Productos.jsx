@@ -334,6 +334,7 @@ const Productos = ({ section = "productos" }) => {
         categoryId: existingCategory.id,
         category: existingCategory.name,
       }));
+      setCategorySearch(existingCategory.name);
       setQuickCategoryName("");
       setQuickCategoryOpen(false);
       return;
@@ -372,6 +373,7 @@ const Productos = ({ section = "productos" }) => {
       categoryId: data.id,
       category: data.name,
     }));
+    setCategorySearch(data.name);
     const cachedCatalog = readCatalogCache(businessId);
     if (cachedCatalog) {
       writeCatalogCache(businessId, {
@@ -539,6 +541,15 @@ const Productos = ({ section = "productos" }) => {
     unitId: "",
     image: "",
   });
+  const [categorySearch, setCategorySearch] = useState("");
+  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
+  const filteredCategoryRecords = useMemo(() => {
+    const query = normalizeProductMatchName(categorySearch);
+    return categoryRecords.filter(
+      (category) =>
+        !query || normalizeProductMatchName(category.name).includes(query),
+    );
+  }, [categoryRecords, categorySearch]);
   const [initialProductFormSnapshot, setInitialProductFormSnapshot] =
     useState(null);
   const [imageEditor, setImageEditor] = useState(null);
@@ -1181,9 +1192,21 @@ const Productos = ({ section = "productos" }) => {
     (product) => !product.isActive,
   );
 
+  const selectProductCategory = (category) => {
+    setFormData((current) => ({
+      ...current,
+      categoryId: category.id,
+      category: category.name,
+    }));
+    setCategorySearch(category.name);
+    setIsCategoryDropdownOpen(false);
+  };
+
   // Abrir modal para crear nuevo
   const handleNewProduct = () => {
     setEditingId(null);
+    setCategorySearch("");
+    setIsCategoryDropdownOpen(false);
     setImageEditor(null);
     setImageEditorError("");
     setQuickInventoryForm(null);
@@ -1270,6 +1293,8 @@ const Productos = ({ section = "productos" }) => {
   // Abrir modal para editar
   const handleEditProduct = (product) => {
     setEditingId(product.id);
+    setCategorySearch(product.category || "");
+    setIsCategoryDropdownOpen(false);
     setImageEditor(null);
     setImageEditorError("");
     setQuickInventoryForm(null);
@@ -1318,6 +1343,8 @@ const Productos = ({ section = "productos" }) => {
 
   const closeProductModal = () => {
     setIsModalOpen(false);
+    setCategorySearch("");
+    setIsCategoryDropdownOpen(false);
     setProductType(null);
     focusStockOnOpen.current = false;
     setEditingId(null);
@@ -4432,27 +4459,102 @@ const Productos = ({ section = "productos" }) => {
                           Categoría
                         </label>
                       </div>
-                      <select
-                        value={formData.categoryId}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            categoryId: e.target.value,
-                            category:
-                              categoryRecords.find(
-                                (category) => category.id === e.target.value,
-                              )?.name || "",
-                          })
-                        }
-                        className="w-full rounded-xl border border-white/10 bg-neutral-800/50 px-3 py-3 text-xs font-medium text-white outline-none transition-colors focus:border-violet-400/50 focus:bg-neutral-800"
+                      <div
+                        className="relative"
+                        onBlur={(event) => {
+                          if (!event.currentTarget.contains(event.relatedTarget)) {
+                            setIsCategoryDropdownOpen(false);
+                          }
+                        }}
                       >
-                        <option value="">Selecciona una categoría</option>
-                        {categoryRecords.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
-                          </option>
-                        ))}
-                      </select>
+                        <div className="relative">
+                          <Search
+                            size={15}
+                            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
+                          />
+                          <input
+                            type="text"
+                            role="combobox"
+                            aria-label="Buscar o seleccionar categoría"
+                            aria-autocomplete="list"
+                            aria-expanded={isCategoryDropdownOpen}
+                            aria-controls="product-category-options"
+                            value={categorySearch}
+                            onFocus={() => setIsCategoryDropdownOpen(true)}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              const normalizedValue =
+                                normalizeProductMatchName(value);
+                              const matchedCategory = categoryRecords.find(
+                                (category) =>
+                                  normalizeProductMatchName(category.name) ===
+                                  normalizedValue,
+                              );
+                              setCategorySearch(value);
+                              setIsCategoryDropdownOpen(true);
+                              setFormData((current) => ({
+                                ...current,
+                                categoryId: matchedCategory?.id || "",
+                                category: matchedCategory?.name || value,
+                              }));
+                            }}
+                            onKeyDown={(event) => {
+                              if (
+                                event.key === "Enter" &&
+                                isCategoryDropdownOpen &&
+                                filteredCategoryRecords.length > 0
+                              ) {
+                                event.preventDefault();
+                                selectProductCategory(
+                                  filteredCategoryRecords[0],
+                                );
+                              }
+                              if (event.key === "Escape") {
+                                setIsCategoryDropdownOpen(false);
+                              }
+                            }}
+                            placeholder="Escribe para buscar una categoría"
+                            className="w-full rounded-xl border border-white/10 bg-neutral-800/50 py-3 pl-9 pr-3 text-xs font-medium text-white outline-none transition-colors placeholder:text-neutral-500 focus:border-violet-400/50 focus:bg-neutral-800"
+                          />
+                        </div>
+                        {isCategoryDropdownOpen && (
+                          <div
+                            id="product-category-options"
+                            role="listbox"
+                            className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-1 shadow-xl"
+                          >
+                            {filteredCategoryRecords.length ? (
+                              filteredCategoryRecords.map((category) => (
+                                <button
+                                  key={category.id}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={
+                                    formData.categoryId === category.id
+                                  }
+                                  onMouseDown={(event) =>
+                                    event.preventDefault()
+                                  }
+                                  onClick={() =>
+                                    selectProductCategory(category)
+                                  }
+                                  className={`w-full rounded-lg px-3 py-2 text-left text-xs transition-colors ${
+                                    formData.categoryId === category.id
+                                      ? "bg-violet-400/15 text-violet-200"
+                                      : "text-neutral-200 hover:bg-white/5"
+                                  }`}
+                                >
+                                  {category.name}
+                                </button>
+                              ))
+                            ) : (
+                              <p className="px-3 py-2 text-xs text-neutral-500">
+                                No se encontraron categorías.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       {!quickCategoryOpen ? (
                         <button
                           type="button"

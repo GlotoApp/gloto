@@ -36,6 +36,7 @@ const Sidebar = ({
   onMouseEnter,
   onMouseLeave,
   overlayClassName = "",
+  hasUnsavedPOSData = false,
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -62,6 +63,7 @@ const Sidebar = ({
   const [businessName, setBusinessName] = useState("Gloto");
   const [businessLogo, setBusinessLogo] = useState(logoPng);
   const [planName, setPlanName] = useState("Sin plan");
+  const [planCode, setPlanCode] = useState("");
   const [inventoryEnabled, setInventoryEnabled] = useState(false);
   const [tablesEnabled, setTablesEnabled] = useState(true);
   const [ticketUsage, setTicketUsage] = useState(null);
@@ -93,6 +95,8 @@ const Sidebar = ({
           accent: "text-neutral-300",
           details: "text-neutral-400",
         };
+  const hasCourierManagementPlan =
+    planCode === "pro" || planCode === "premium";
 
   useEffect(() => {
     if (!isExpanded) setUserMenuOpen(false);
@@ -238,7 +242,9 @@ const Sidebar = ({
     canAccessPath(sub.path),
   );
   const visibleConfigSubMenu = configSubMenu.filter((sub) =>
-    canAccessPath(sub.path),
+    canAccessPath(sub.path) &&
+    (sub.path !== "/pos/configuracion/domiciliarios" ||
+      hasCourierManagementPlan),
   );
 
   useEffect(() => {
@@ -354,6 +360,7 @@ const Sidebar = ({
         return;
       }
       if (planAccess?.plan_name) setPlanName(planAccess.plan_name);
+      setPlanCode(String(planAccess?.plan_code || "").trim().toLowerCase());
       setInventoryEnabled(Boolean(planAccess?.inventory_enabled));
       setTicketUsage(
         planAccess?.plan_code
@@ -440,6 +447,7 @@ const Sidebar = ({
       }
       if (!isMounted) return;
       if (data?.plan_name) setPlanName(data.plan_name);
+      setPlanCode(String(data?.plan_code || "").trim().toLowerCase());
       setInventoryEnabled(Boolean(data?.inventory_enabled));
       setTicketUsage(
         data?.plan_code
@@ -739,7 +747,27 @@ const Sidebar = ({
     setShowLogoutConfirm(true);
   };
 
-  const handleItemClick = () => {
+  const handleItemClick = (event) => {
+    const targetHref = event.currentTarget.getAttribute("href");
+    const targetPath = targetHref
+      ? new URL(targetHref, window.location.origin).pathname
+      : "";
+    const isOnPOSRoute =
+      location.pathname === "/pos" || location.pathname === "/pos/pos";
+
+    if (
+      hasUnsavedPOSData &&
+      isOnPOSRoute &&
+      targetPath &&
+      targetPath !== location.pathname &&
+      !window.confirm(
+        "Tienes información sin guardar en el POS. Si sales, se perderá. ¿Deseas continuar?",
+      )
+    ) {
+      event.preventDefault();
+      return;
+    }
+
     if (isExpanded) toggleSidebar();
   };
 

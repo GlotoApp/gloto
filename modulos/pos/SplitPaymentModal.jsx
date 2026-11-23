@@ -10,16 +10,15 @@ export default function SplitPaymentModal({
   isOpen,
   onClose,
   total,
-  numSplits,
   splitPayments,
   updateSplitPayment,
   initializeSplits,
   removePaymentRow,
   availablePaymentMethods = ["efectivo", "tarjeta", "transferencia"],
 }) {
-  if (!isOpen) return null;
-
   const [deletingIndex, setDeletingIndex] = useState(null);
+
+  if (!isOpen) return null;
 
   const handleRemovePaymentRow = (index) => {
     setDeletingIndex(index);
@@ -41,26 +40,26 @@ export default function SplitPaymentModal({
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[1000] p-4">
       <div className="bg-background shadow-2xl w-full max-w-md rounded-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Header */}
         <div className="bg-background px-3 py-3 flex justify-between items-center">
           <h2 className="text-base font-black uppercase tracking-tight text-on-surface">
             Dividir Pago
           </h2>
           <button
+            type="button"
             onClick={onClose}
             className="text-on-surface-variant hover:text-on-surface transition-colors"
+            aria-label="Cerrar división de pago"
           >
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto custom-sidebar px-3 py-4 space-y-2">
           <div className="rounded-3xl bg-surface/5 p-2">
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="text-[8px] uppercase tracking-[0.24em] text-on-surface-variant">
-                  Total
+                  Total sin propina
                 </p>
                 <p className="mt-1 text-lg font-black text-primary">
                   ${formatPrice(total)}
@@ -95,7 +94,7 @@ export default function SplitPaymentModal({
             {splitPayments.map((pay, index) => (
               <div
                 key={index}
-                className={`w-full  mx-auto flex items-center justify-between gap-2 p-1.5 transition-opacity duration-300 ${
+                className={`w-full mx-auto flex items-center justify-between gap-2 p-1.5 transition-opacity duration-300 ${
                   deletingIndex === index ? "opacity-0" : "opacity-100"
                 }`}
               >
@@ -114,15 +113,15 @@ export default function SplitPaymentModal({
                     <option value="" disabled>
                       Seleccionar
                     </option>
-                      {availablePaymentMethods.includes("efectivo") && (
-                        <option value="efectivo">Efectivo</option>
-                      )}
-                      {availablePaymentMethods.includes("tarjeta") && (
-                        <option value="tarjeta">Tarjeta</option>
-                      )}
-                      {availablePaymentMethods.includes("transferencia") && (
-                        <option value="transferencia">Transferencia</option>
-                      )}
+                    {availablePaymentMethods.includes("efectivo") && (
+                      <option value="efectivo">Efectivo</option>
+                    )}
+                    {availablePaymentMethods.includes("tarjeta") && (
+                      <option value="tarjeta">Tarjeta</option>
+                    )}
+                    {availablePaymentMethods.includes("transferencia") && (
+                      <option value="transferencia">Transferencia</option>
+                    )}
                   </select>
                 </div>
 
@@ -133,6 +132,7 @@ export default function SplitPaymentModal({
                     </span>
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={
                         pay.amount
                           ? formatPrice(parseFloat(pay.amount) || 0)
@@ -150,7 +150,9 @@ export default function SplitPaymentModal({
 
                 {splitPayments.length > 2 && (
                   <button
+                    type="button"
                     onClick={() => handleRemovePaymentRow(index)}
+                    aria-label={`Eliminar pago ${index + 1}`}
                     className="flex h-8 w-8 items-center justify-center rounded-2xl bg-surface/20 text-error hover:text-error/80 transition-colors"
                   >
                     <span className="material-symbols-outlined text-sm">
@@ -172,7 +174,6 @@ export default function SplitPaymentModal({
           </div>
         </div>
 
-        {/* Footer */}
         {!isSplitPaymentsComplete && (
           <div className="bg-warning/10 border border-warning/30 text-warning rounded-2xl px-3 py-2 text-[10px] text-center font-bold mb-2 mx-6">
             Selecciona método y monto para cada pago antes de confirmar.
@@ -180,12 +181,14 @@ export default function SplitPaymentModal({
         )}
         <div className="bg-background px-3 py-3 flex gap-2">
           <button
+            type="button"
             onClick={onClose}
             className="flex-1 bg-surface hover:bg-surface-hover text-on-surface font-bold py-2 rounded-lg transition-all text-[9px] uppercase"
           >
             Cancelar
           </button>
           <button
+            type="button"
             onClick={onClose}
             disabled={remaining > 0 || !isSplitPaymentsComplete}
             className={`flex-1 font-bold py-2 rounded-lg transition-all text-[9px] uppercase ${

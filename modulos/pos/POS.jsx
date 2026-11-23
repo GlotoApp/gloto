@@ -1,5 +1,9 @@
 import { useCallback, useMemo, useState, useRef, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import {
+  useLocation,
+  useNavigate,
+  useOutletContext,
+} from "react-router-dom";
 import {
   Trash2,
   Pencil,
@@ -858,6 +862,7 @@ const POS = () => {
   const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { setHasUnsavedPOSData } = useOutletContext();
   const [cart, setCart] = useState([]);
   const [checkoutFooterCollapsed, setCheckoutFooterCollapsed] = useState(false);
   const [posColumnRatios, setPosColumnRatios] = useState([40, 30, 30]);
@@ -2245,6 +2250,37 @@ const POS = () => {
   ]);
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [numSplits, setNumSplits] = useState(2);
+  const hasUnsavedPOSData = Boolean(
+    cart.length ||
+      deliveryMethod ||
+      paymentMethod ||
+      address.trim() ||
+      deliveryCoordinatesInput.trim() ||
+      deliveryDestination ||
+      customerName.trim() ||
+      customerNumber.trim() ||
+      selectedTable.trim() ||
+      referencePoint.trim() ||
+      locationText.trim() ||
+      moneyPaid.trim() ||
+      orderNotes.trim() ||
+      splitPayments.some((payment) => Number(payment.amount) > 0) ||
+      (showReservationModal &&
+        (reservationData.nombre.trim() ||
+          reservationData.telefono.trim() ||
+          reservationData.fecha.trim() ||
+          reservationData.hora.trim() ||
+          reservationData.notas.trim())),
+  );
+
+  useEffect(() => {
+    setHasUnsavedPOSData(hasUnsavedPOSData);
+  }, [hasUnsavedPOSData, setHasUnsavedPOSData]);
+
+  useEffect(
+    () => () => setHasUnsavedPOSData(false),
+    [setHasUnsavedPOSData],
+  );
 
   // Función para inicializar divisiones - Mantiene valores existentes
   const initializeSplits = (count) => {
@@ -3040,6 +3076,14 @@ const POS = () => {
     setSplitPayments(splitPayments.filter((_, i) => i !== index));
   };
 
+  const closeSplitPaymentModal = () => {
+    setShowSplitModal(false);
+    if (!splitPayments.some((payment) => Number(payment.amount) > 0)) {
+      setPaymentMethod("");
+      setSplitPayments([{ method: "", amount: "" }]);
+    }
+  };
+
   const deliveryOrigin = useMemo(() => {
     const latitudeText = String(deliverySettings?.latitude ?? "").trim();
     const longitudeText = String(deliverySettings?.longitude ?? "").trim();
@@ -3292,7 +3336,10 @@ const POS = () => {
     totalWithoutTip > 0 &&
     paidAmount < totalWithoutTip;
   const remaining =
-    paidAmount > 0 ? orderTotal - paidAmount : total - assignedTotal;
+    paidAmount > 0
+      ? orderTotal - paidAmount
+      : (paymentMethod === "dividir" ? totalWithoutTip : total) -
+        assignedTotal;
   const remainingLabel = remaining > 0 ? "Faltante" : "Cambio";
   const remainingDisplay = formatPrice(Math.abs(remaining));
   const totalItems = cart.reduce((sum, item) => sum + item.qty, 0);
@@ -3793,7 +3840,11 @@ const POS = () => {
     const submittedTotal = paymentMethod === "efectivo" ? orderTotal : total;
     const submittedTipAmount =
       paymentMethod === "efectivo" ? orderTipAmount : tipAmount;
-    const paymentStatus = totalPagado >= submittedTotal ? "paid" : "pending";
+    const paymentStatus =
+      totalPagado >=
+      (paymentMethod === "dividir" ? totalWithoutTip : submittedTotal)
+        ? "paid"
+        : "pending";
     const orderStatus = paymentStatus === "paid" ? "confirmed" : "pending";
     const deliveryMapLink =
       deliveryMethod === "delivery" && deliveryDestination
@@ -4327,10 +4378,10 @@ const POS = () => {
       <div
         className="grid gap-1.5"
         style={{
-          gridTemplateColumns: `repeat(${enabledPaymentMethods.length + (enabledPaymentMethods.length > 1 ? 1 : 0)}, minmax(0, 1fr))`,
+          gridTemplateColumns: `repeat(${enabledPaymentMethods.length + (enabledPaymentMethods.length > 1 ? 2 : 1)}, minmax(0, 1fr))`,
         }}
       >
-        {[...enabledPaymentMethods, ...(enabledPaymentMethods.length > 1 ? ["dividir"] : [])].map(
+        {[...enabledPaymentMethods, ...(enabledPaymentMethods.length > 1 ? ["dividir"] : []), "variado"].map(
           (method) => (
             <button
               key={method}
@@ -5228,6 +5279,13 @@ const POS = () => {
                         {prod.name}
                       </h2>
 
+                      <p className="mt-1 text-xs text-on-surface-variant">
+                        Categoría:{" "}
+                        <span className="font-semibold text-on-surface">
+                          {prod.categoryName || "Otros"}
+                        </span>
+                      </p>
+
                       <p className="mb-2 mt-4 text-xs font-bold uppercase tracking-widest text-primary">
                         Descripción
                       </p>
@@ -5751,7 +5809,7 @@ const POS = () => {
             ref={cartScrollRef}
             className="flex-1 min-h-0 overflow-y-auto px-4 custom-sidebar py-4"
           >
-            {cart.map((item) => (
+            {cart.map((item, index) => (
               <div
                 key={item.cartId}
                 data-cart-id={item.cartId}
@@ -5763,6 +5821,9 @@ const POS = () => {
                       : "bg-neutral-900/40 border-white/5 z-10 hover:border-white/10"
                 }`}
               >
+                <span className="absolute -left-1 -top-1 z-20 flex h-4 w-4 items-center justify-center rounded-full bg-neutral-700 text-[9px] font-bold text-neutral-300">
+                  {index + 1}
+                </span>
                 <div className="flex gap-3  min-w-0">
                   {/* Miniatura / Imagen real del producto */}
                   <div
@@ -6112,7 +6173,7 @@ const POS = () => {
             ref={cartScrollRefMobile}
             className="flex-1 min-h-0 overflow-y-auto px-4 custom-sidebar py-4"
           >
-            {cart.map((item) => {
+            {cart.map((item, index) => {
               const isHighlighted = highlightItem === item.cartId;
               const isRemoving = removingItems.has(item.cartId);
 
@@ -6128,6 +6189,9 @@ const POS = () => {
                         : "bg-neutral-900/40 border-white/5 z-10 hover:border-white/10"
                   }`}
                 >
+                  <span className="absolute -left-1 -top-1 z-20 flex h-4 w-4 items-center justify-center rounded-full bg-neutral-700 text-[9px] font-bold text-neutral-300">
+                    {index + 1}
+                  </span>
                   <div className="flex gap-3 min-w-0">
                     {/* Miniatura / Imagen real del producto */}
                     <div
@@ -7330,8 +7394,11 @@ const POS = () => {
       {/* Modal de División de Pagos */}
       <SplitPaymentModal
         isOpen={showSplitModal}
-        onClose={() => setShowSplitModal(false)}
-        total={total}
+        onClose={closeSplitPaymentModal}
+        total={totalWithoutTip}
+        itemsSubtotal={itemsSubtotal}
+        deliveryFee={deliveryFee}
+        tipAmount={tipAmount}
         numSplits={numSplits}
         setNumSplits={setNumSplits}
         splitPayments={splitPayments}
