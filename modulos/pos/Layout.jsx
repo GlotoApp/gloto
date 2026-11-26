@@ -215,7 +215,7 @@ const Layout = () => {
     const handleSettingsChange = (event) => {
       if (event.detail) {
         const nextSettings = {
-          ...DEFAULT_POPUP_SETTINGS,
+          ...popupSettingsRef.current,
           ...event.detail,
         };
         setPopupSettings(nextSettings);

@@ -5,8 +5,6 @@ import { useAuth } from "../../src/components/AuthContext";
 
 const DEFAULT_SETTINGS = {
   show_widget: true,
-  notify_marketplace_orders: true,
-  notify_pos_orders: false,
   sound_enabled: true,
   color: "violet",
 };
@@ -30,6 +28,7 @@ const COLOR_HEX_VALUES = {
 const PopPup = () => {
   const { user } = useAuth();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [settingsRowExists, setSettingsRowExists] = useState(false);
   const [businessId, setBusinessId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -66,7 +65,7 @@ const PopPup = () => {
       const { data, error } = await supabase
         .from("business_popup_settings")
         .select(
-          "show_widget, notify_marketplace_orders, notify_pos_orders, sound_enabled, color",
+          "show_widget, sound_enabled, color",
         )
         .eq("business_id", profile.business_id)
         .maybeSingle();
@@ -77,6 +76,7 @@ const PopPup = () => {
         setErrorMessage("No se pudo cargar la configuración de Pop pup.");
       } else {
         setSettings({ ...DEFAULT_SETTINGS, ...data });
+        setSettingsRowExists(Boolean(data));
       }
       setLoading(false);
     };
@@ -102,15 +102,19 @@ const PopPup = () => {
     setErrorMessage("");
 
     try {
-      const { error } = await supabase.from("business_popup_settings").upsert(
-        {
-          business_id: businessId,
-          ...nextSettings,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "business_id" },
-      );
+      const query = settingsRowExists
+        ? supabase
+            .from("business_popup_settings")
+            .update({ ...updates, updated_at: new Date().toISOString() })
+            .eq("business_id", businessId)
+        : supabase.from("business_popup_settings").insert({
+            business_id: businessId,
+            ...nextSettings,
+            updated_at: new Date().toISOString(),
+          });
+      const { error } = await query;
       if (error) throw error;
+      setSettingsRowExists(true);
 
       window.dispatchEvent(
         new CustomEvent("gloto:popup-settings-changed", {
@@ -136,18 +140,6 @@ const PopPup = () => {
       icon: Bell,
     },
     {
-      key: "notify_marketplace_orders",
-      title: "Pedidos de clientes",
-      description: "Avisar cuando llegue un pedido desde la tienda en línea.",
-      icon: Bell,
-    },
-    {
-      key: "notify_pos_orders",
-      title: "Pedidos del POS",
-      description: "Avisar cuando se registre un pedido desde el POS.",
-      icon: Bell,
-    },
-    {
       key: "sound_enabled",
       title: "Sonido del aviso",
       description:
@@ -165,7 +157,8 @@ const PopPup = () => {
           </p>
           <h1 className="mt-1 text-2xl font-black tracking-tight">Pop pup</h1>
           <p className="mt-1 text-xs text-neutral-500">
-            Configura cómo se muestran los avisos de pedidos de este negocio.
+            Configura el botón flotante, su color y el sonido de los avisos
+            dentro de Gloto.
           </p>
         </header>
 
@@ -183,7 +176,7 @@ const PopPup = () => {
             <>
               <section className="rounded-2xl bg-neutral-900/60 p-4">
                 <h2 className="text-sm font-bold text-white">
-                  Avisos de pedidos
+                  Apariencia y sonido
                 </h2>
                 <div className="mt-3 divide-y divide-white/5">
                   {toggleOptions.map(({ key, title, description, icon: Icon }) => (

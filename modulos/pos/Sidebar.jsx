@@ -235,6 +235,10 @@ const Sidebar = ({
     { name: "Datos", path: "/pos/configuracion/datos" },
     { name: "Empleados", path: "/pos/configuracion/empleados" },
     { name: "Mis domiciliarios", path: "/pos/configuracion/domiciliarios" },
+    {
+      name: "Notificaciones push",
+      path: "/pos/configuracion/notificaciones-push",
+    },
     { name: "Pop pup", path: "/pos/pop-pup" },
     { name: "Impresoras", path: "/pos/configuracion/impresoras" },
   ];

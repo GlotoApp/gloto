@@ -28,10 +28,12 @@ vez por proyecto:
    configurado arriba.
 
 La persona activa los avisos desde Gloto en un navegador compatible y con
-conexión HTTPS. Los pedidos de marketplace se notifican según
-`notify_marketplace_orders`; los pedidos del POS respetan
-`notify_pos_orders` (desactivado por defecto). Las reservas y otros canales no
-generan push. Al tocar el aviso se abre la orden correspondiente. Los permisos
+conexión HTTPS. Los canales se configuran en **POS > Configuración >
+Notificaciones push**: los pedidos de marketplace respetan
+`notify_marketplace_orders`, y los del POS respetan `notify_pos_orders`
+(desactivado por defecto). **Pop pup** solo configura el botón flotante, su color
+y el sonido dentro de Gloto. Las reservas y otros canales no generan push. Al
+tocar el aviso se abre la orden correspondiente. Los permisos
 del navegador y del sistema operativo siguen siendo necesarios; en iOS se debe
 instalar la app web para recibir push.
 
