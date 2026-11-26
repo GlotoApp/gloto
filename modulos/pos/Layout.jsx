@@ -1,9 +1,15 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Bell, Clock, X } from "lucide-react";
 import Sidebar from "./Sidebar";
 import { Loading, LOADING_DURATION_MS } from "./Loading";
 import { supabase } from "../../src/lib/supabaseClient";
+import {
+  enableOrderPushNotifications,
+  getOrderPushSubscription,
+  supportsOrderPushNotifications,
+  syncOrderPushSubscription,
+} from "../../src/lib/orderPushNotifications";
 import { useAuth } from "../../src/components/AuthContext";
 
 const DEFAULT_POPUP_SETTINGS = {
@@ -111,6 +117,12 @@ const Layout = () => {
     );
   const [notificationPromptOpen, setNotificationPromptOpen] = useState(false);
   const [notificationPromptError, setNotificationPromptError] = useState("");
+  const [pushSubscriptionState, setPushSubscriptionState] = useState({
+    userId: null,
+    supported: false,
+    active: false,
+    checked: false,
+  });
   const [newOrderToast, setNewOrderToast] = useState(null);
   const [popupSettings, setPopupSettings] = useState(DEFAULT_POPUP_SETTINGS);
   const [orderBellPosition, setOrderBellPosition] = useState(null);
@@ -125,6 +137,12 @@ const Layout = () => {
   const isMesasRoute = location.pathname === "/pos/mesas";
   const isKitchenRoute = location.pathname === "/pos/cocina";
   const popupColor = getPopupColor(popupSettings.color);
+  const pushSubscriptionActive =
+    pushSubscriptionState.userId === user?.id && pushSubscriptionState.active;
+  const pushSubscriptionChecked =
+    pushSubscriptionState.userId === user?.id && pushSubscriptionState.checked;
+  const pushSupported =
+    pushSubscriptionState.userId === user?.id && pushSubscriptionState.supported;
 
   useEffect(() => {
     popupSettingsRef.current = popupSettings;
@@ -357,36 +375,94 @@ const Layout = () => {
   }, []);
 
   useEffect(() => {
+    let active = true;
     if (!user?.id) {
-      return undefined;
+      return () => {
+        active = false;
+      };
     }
+
+    const supported = supportsOrderPushNotifications();
+    Promise.resolve().then(async () => {
+      if (!active) return;
+      if (!supported) {
+        setBrowserNotificationPermission(
+          typeof window !== "undefined" && "Notification" in window
+            ? window.Notification.permission
+            : "unsupported",
+        );
+        setPushSubscriptionState({
+          userId: user.id,
+          supported: false,
+          active: false,
+          checked: true,
+        });
+        return;
+      }
+
+      setBrowserNotificationPermission(window.Notification.permission);
+      let subscriptionActive = false;
+      try {
+        const subscription = await getOrderPushSubscription();
+        if (subscription) {
+          await syncOrderPushSubscription(subscription);
+          subscriptionActive = true;
+        }
+      } catch (error) {
+        console.error(
+          "No se pudo verificar la suscripción push de pedidos:",
+          error,
+        );
+      }
+      if (active) {
+        setPushSubscriptionState({
+          userId: user.id,
+          supported: true,
+          active: subscriptionActive,
+          checked: true,
+        });
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || !pushSubscriptionChecked) return undefined;
     if (
       !popupSettings.notify_marketplace_orders &&
       !popupSettings.notify_pos_orders
     ) {
-      setNotificationPromptOpen(false);
+      Promise.resolve().then(() => setNotificationPromptOpen(false));
       return undefined;
     }
-    if (!("Notification" in window) || !window.isSecureContext) {
+    if (!pushSupported || pushSubscriptionActive) {
+      Promise.resolve().then(() => setNotificationPromptOpen(false));
       return undefined;
     }
-
-    const permission = window.Notification.permission;
-    setBrowserNotificationPermission(permission);
-    if (permission !== "default") return undefined;
 
     const dismissedKey = `gloto-order-notifications-dismissed-${user.id}`;
+    let active = true;
+    let shouldOpen = true;
     try {
-      setNotificationPromptOpen(localStorage.getItem(dismissedKey) !== "true");
+      shouldOpen = localStorage.getItem(dismissedKey) !== "true";
     } catch (error) {
       console.error("No se pudo leer la preferencia de notificaciones:", error);
-      setNotificationPromptOpen(true);
     }
+    Promise.resolve().then(() => {
+      if (active) setNotificationPromptOpen(shouldOpen);
+    });
 
-    return undefined;
+    return () => {
+      active = false;
+    };
   }, [
     popupSettings.notify_marketplace_orders,
     popupSettings.notify_pos_orders,
+    pushSubscriptionActive,
+    pushSubscriptionChecked,
+    pushSupported,
     user?.id,
   ]);
 
@@ -503,6 +579,7 @@ const Layout = () => {
             }
 
             if (
+              pushSubscriptionActive ||
               browserNotificationPermission !== "granted" ||
               !("Notification" in window) ||
               !window.isSecureContext
@@ -560,6 +637,7 @@ const Layout = () => {
     browserNotificationPermission,
     isKitchenRoute,
     navigate,
+    pushSubscriptionActive,
     user?.id,
   ]);
 
@@ -581,31 +659,41 @@ const Layout = () => {
   }, [newOrderToast]);
 
   const enableBrowserOrderNotifications = async () => {
-    if (!("Notification" in window) || !window.isSecureContext) {
+    if (!supportsOrderPushNotifications()) {
       setNotificationPromptError(
-        "Este navegador requiere una conexión segura para mostrar notificaciones.",
+        "Este navegador no admite notificaciones push o requiere una conexión segura.",
       );
       return;
     }
 
     setNotificationPromptError("");
     try {
-      const permission = await window.Notification.requestPermission();
+      const permission =
+        window.Notification.permission === "granted"
+          ? "granted"
+          : await window.Notification.requestPermission();
       setBrowserNotificationPermission(permission);
       if (permission === "granted") {
+        const registration = await enableOrderPushNotifications();
+        setPushSubscriptionState({
+          userId: user.id,
+          supported: true,
+          active: true,
+          checked: true,
+        });
         setNotificationPromptOpen(false);
         try {
-          new window.Notification("Notificaciones activadas", {
+          await registration.showNotification("Notificaciones activadas", {
             body: "Te avisaremos cuando llegue un pedido nuevo.",
             tag: "gloto-notifications-enabled",
           });
         } catch (error) {
           console.error(
-            "El permiso se concedió, pero Chrome no pudo mostrar la notificación de prueba:",
+            "La suscripción quedó activa, pero no se pudo mostrar el aviso de prueba:",
             error,
           );
           setNotificationPromptError(
-            "El permiso quedó activado, pero Chrome no pudo mostrar el aviso de prueba. Revisa las notificaciones del sitio y de Windows.",
+            "La suscripción quedó activa, pero no se pudo mostrar el aviso de prueba. Revisa las notificaciones del sitio y de Windows.",
           );
         }
         try {
@@ -890,9 +978,14 @@ const Layout = () => {
         </section>
       )}
 
-      {(browserNotificationPermission === "default" ||
-        (browserNotificationPermission === "denied" &&
-          notificationPromptOpen)) &&
+      {pushSubscriptionChecked &&
+        user?.id &&
+        pushSupported &&
+        (browserNotificationPermission === "default" ||
+          (browserNotificationPermission === "granted" &&
+            !pushSubscriptionActive) ||
+          (browserNotificationPermission === "denied" &&
+            notificationPromptOpen)) &&
         (notificationPromptOpen ? (
           <section
             aria-label="Notificaciones de pedidos"
@@ -905,8 +998,8 @@ const Layout = () => {
               <div className="min-w-0 flex-1">
                 <h2 className="text-sm font-bold">No te pierdas ningún pedido</h2>
                 <p className="mt-1 text-xs leading-relaxed text-neutral-400">
-                  Recibe un aviso del navegador cuando llegue un pedido, incluso
-                  si estás en otra pestaña.
+                  Recibe avisos push cuando llegue un pedido, aunque Gloto no
+                  esté abierta, si tu navegador y dispositivo lo permiten.
                 </p>
               </div>
               <button
@@ -937,7 +1030,7 @@ const Layout = () => {
                   onClick={enableBrowserOrderNotifications}
                   className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-500"
                 >
-                  Activar avisos
+                  Activar push
                 </button>
               ) : (
                 <button

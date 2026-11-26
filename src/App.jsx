@@ -546,6 +546,21 @@ const RequireInventoryPlan = ({ children }) => {
   );
 };
 
+function RouteAwareManifest() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    const manifestLink = document.getElementById("app-manifest");
+    if (!manifestLink) return;
+
+    const manifestUrl = new URL("/api/manifest", window.location.origin);
+    manifestUrl.searchParams.set("start_url", pathname || "/");
+    manifestLink.href = manifestUrl.toString();
+  }, [pathname]);
+
+  return null;
+}
+
 function App() {
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== "undefined" ? navigator.onLine : true,
@@ -583,6 +598,7 @@ function App() {
   return (
     <>
       <Router>
+        <RouteAwareManifest />
         <Suspense fallback={<Loading />}>
         <Routes>
           {/* Rutas Públicas */}

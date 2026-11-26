@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.eliminar-mi-cuenta-domiciliario]
 verify_jwt = false
+
+[functions.send-order-push]
+verify_jwt = false

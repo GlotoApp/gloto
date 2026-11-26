@@ -13,7 +13,12 @@
   <meta name="apple-mobile-web-app-title" content="Gloto" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <link rel="manifest" href="/site.webmanifest" />
+  <link id="app-manifest" rel="manifest" />
+  <script>
+    const manifestUrl = new URL("/api/manifest", window.location.origin);
+    manifestUrl.searchParams.set("start_url", window.location.pathname || "/");
+    document.getElementById("app-manifest").href = manifestUrl.toString();
+  </script>
   <title>Gloto</title>
   <link
     href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap"

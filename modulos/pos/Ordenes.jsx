@@ -1610,7 +1610,9 @@ const Ordenes = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [notificationOrderId, setNotificationOrderId] = useState(
-    location.state?.openOrderId || null,
+    location.state?.openOrderId ||
+      new URLSearchParams(location.search).get("openOrderId") ||
+      null,
   );
   const [orders, setOrders] = useState([]);
   const [ordersBusinessId, setOrdersBusinessId] = useState(null);
@@ -1648,10 +1650,13 @@ const Ordenes = () => {
   const businessIdRef = useRef(null);
 
   useEffect(() => {
-    if (location.state?.openOrderId) {
-      setNotificationOrderId(location.state.openOrderId);
+    const requestedOrderId =
+      location.state?.openOrderId ||
+      new URLSearchParams(location.search).get("openOrderId");
+    if (requestedOrderId) {
+      setNotificationOrderId(requestedOrderId);
     }
-  }, [location.state]);
+  }, [location.search, location.state]);
 
   const loadBusinessOrders = async () => {
     if (!user?.id) {
@@ -1888,10 +1893,20 @@ const Ordenes = () => {
         [`${year}-${month}`]: true,
       }));
     }
-    if (location.state?.openOrderId) {
+    if (
+      location.state?.openOrderId ||
+      new URLSearchParams(location.search).has("openOrderId")
+    ) {
       navigate(location.pathname, { replace: true, state: null });
     }
-  }, [location.pathname, location.state, navigate, notificationOrderId, orders]);
+  }, [
+    location.pathname,
+    location.search,
+    location.state,
+    navigate,
+    notificationOrderId,
+    orders,
+  ]);
 
   // 1. Filtrado, búsqueda y ordenamiento de registros totales
   const filteredOrdenes = useMemo(() => {

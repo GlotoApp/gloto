@@ -1,5 +1,45 @@
 # Edge Functions
 
+## Notificaciones push de pedidos
+
+La app ya puede mostrar avisos mientras Gloto está abierta. Para que un pedido
+llegue a un dispositivo aunque la app esté cerrada, prepara Web Push una sola
+vez por proyecto:
+
+1. Aplica la migración
+   `supabase/migrations/20261126160000_order_push_subscriptions.sql`.
+2. Genera un par de claves VAPID con `npx web-push generate-vapid-keys` y un
+   secreto aleatorio para el webhook. Conserva la clave privada y el secreto
+   solo en el entorno seguro de Supabase.
+3. Configura los secretos y publica la función:
+
+   ```sh
+   supabase secrets set VAPID_PUBLIC_KEY=CLAVE_PUBLICA VAPID_PRIVATE_KEY=CLAVE_PRIVADA VAPID_SUBJECT=mailto:soporte@tu-dominio.com ORDER_PUSH_WEBHOOK_SECRET=SECRETO_ALEATORIO
+   supabase functions deploy send-order-push --no-verify-jwt
+   ```
+
+4. Configura `VITE_VAPID_PUBLIC_KEY` con la clave pública en el `.env` local y
+   en las variables de entorno del hosting; reconstruye y publica el frontend.
+   Esta clave es pública. Nunca pongas `VAPID_PRIVATE_KEY` ni
+   `ORDER_PUSH_WEBHOOK_SECRET` en el frontend.
+5. En Supabase, crea un Database Webhook para `public.orders`, evento `INSERT`,
+   con URL `https://TU_PROYECTO.supabase.co/functions/v1/send-order-push` y el
+   header personalizado `x-gloto-order-push-secret` con el mismo secreto
+   configurado arriba.
+
+La persona activa los avisos desde Gloto en un navegador compatible y con
+conexión HTTPS. Los pedidos de marketplace se notifican según
+`notify_marketplace_orders`; los pedidos del POS respetan
+`notify_pos_orders` (desactivado por defecto). Las reservas y otros canales no
+generan push. Al tocar el aviso se abre la orden correspondiente. Los permisos
+del navegador y del sistema operativo siguen siendo necesarios; en iOS se debe
+instalar la app web para recibir push.
+
+Para probarlo, inicia sesión en Gloto desde un dispositivo compatible y activa
+el push. Crea un pedido de marketplace con `notify_marketplace_orders` activo y
+verifica que llegue con Gloto cerrada; al tocarlo debe abrirse ese pedido. Los
+pedidos del POS solo deben llegar cuando `notify_pos_orders` esté activo.
+
 ## Acceso por plan y límite de tickets
 
 Ejecuta `supabase/115_plan_feature_and_ticket_limits.sql` en el SQL Editor antes
