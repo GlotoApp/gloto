@@ -12,6 +12,17 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+const DELIVERY_METHOD_LABELS: Record<string, string> = {
+  domicilio: "Domicilio",
+  delivery: "Domicilio",
+  recoger: "Recoger en tienda",
+  pickup: "Recoger en tienda",
+  mesa: "En mesa",
+  table: "En mesa",
+  punto: "En punto",
+  dine_in: "En punto",
+};
+
 const jsonResponse = (status: number, body: Record<string, unknown>) =>
   new Response(JSON.stringify(body), {
     status,
@@ -178,11 +189,41 @@ Deno.serve(async (request: Request) => {
   const orderNumber = String(
     order.order_number || orderId.slice(0, 8).toUpperCase(),
   ).slice(0, 40);
+  const { data: business, error: businessError } = await adminClient
+    .from("businesses")
+    .select("name")
+    .eq("id", businessId)
+    .maybeSingle();
+  if (businessError) {
+    console.error("No se pudo consultar el nombre del negocio del pedido:", businessError);
+    return jsonResponse(500, {
+      error: "No se pudo cargar el nombre del negocio.",
+    });
+  }
+  const businessName = String(business?.name || "").trim().slice(0, 80);
+  if (!businessName) {
+    console.error("El negocio del pedido no tiene un nombre configurado.");
+    return jsonResponse(500, {
+      error: "El negocio del pedido no tiene un nombre configurado.",
+    });
+  }
+
+  const customer = isRecord(metadata.cliente) ? metadata.cliente : {};
+  const customerName = (
+    String(order.customer_name || customer.nombre || "").trim() || "Cliente"
+  ).slice(0, 80);
+  const deliveryMethodKey = String(
+    metadata.metodoEntrega || order.order_type || "",
+  )
+    .trim()
+    .toLowerCase();
+  const deliveryMethod =
+    DELIVERY_METHOD_LABELS[deliveryMethodKey] || "Método sin especificar";
   const orderUrl = new URL("/pos/ordenes", "https://gloto.invalid");
   orderUrl.searchParams.set("openOrderId", orderId);
   const payload = JSON.stringify({
-    title: "Nuevo pedido recibido",
-    body: `Pedido #${orderNumber}. Toca para revisarlo.`,
+    title: `Nuevo Pedido (${businessName})`,
+    body: `${deliveryMethod} · ${customerName} · Pedido #${orderNumber}`,
     tag: `gloto-order-${orderId}`,
     url: `${orderUrl.pathname}${orderUrl.search}`,
     icon: "/favicon.png",

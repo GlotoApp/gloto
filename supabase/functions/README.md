@@ -32,8 +32,18 @@ plan durante el periodo de gracia, prepara Web Push:
 Push está disponible solo para negocios con plan Pro o Premium. Los avisos de
 pedidos se envían mientras ese plan está vigente y se pausan al vencer. El
 recordatorio de vencimiento se envía una vez al día durante los tres días de
-gracia, solo para suscripciones Pro/Premium. Las reservas y otros canales no
-generan push.
+gracia, solo para suscripciones Pro/Premium. Los avisos de stock también
+requieren un plan Pro/Premium vigente. Durante la gracia solo se envía el
+recordatorio del plan. Las reservas y otros canales no generan push.
+
+El push de pedido muestra **Nuevo Pedido (nombre de la tienda)** como título y
+el método de entrega, nombre del cliente y número de pedido en el texto. El
+push de vencimiento muestra los días restantes para la suspensión y avisa que
+el plan se cancelará si no se renueva dentro de los tres días de gracia. El push
+de stock avisa una sola vez cuando la cantidad baja desde encima del mínimo
+configurado hasta el mínimo o menos; si no hay mínimo, se usa cero. Solo vuelve
+a avisar después de reponer el producto por encima del mínimo y que vuelva a
+cruzarlo hacia abajo. No usa revisiones programadas ni consultas periódicas.
 
 Los canales de pedido se configuran en **POS > Configuración > Notificaciones
 push**: Marketplace respeta `notify_marketplace_orders`; POS respeta
@@ -90,6 +100,47 @@ select cron.schedule(
 El trabajo registra cada entrega por suscripción, dispositivo y día de gracia
 para evitar repetirla si la tarea se ejecuta más de una vez. No guardes el valor
 real del secreto en Git.
+
+### Activar avisos de stock agotado
+
+Aplica `supabase/migrations/20261126193200_stock_push_notifications.sql` y
+despliega la función:
+
+```sh
+supabase functions deploy send-stock-push --no-verify-jwt
+```
+
+En Supabase, crea un Database Webhook para `public.products`, evento `UPDATE`,
+con URL `https://TU_PROYECTO.supabase.co/functions/v1/send-stock-push` y el
+header personalizado `x-gloto-order-push-secret` con el mismo secreto del
+webhook de pedidos. El webhook es por cambio en la base de datos; la función
+solo envía un push cuando el stock cruza el mínimo hacia abajo y la opción
+**Productos en su límite de stock** está activada. La preferencia viene apagada
+por defecto. Actualiza el frontend en Vercel para mostrar el interruptor.
+
+Para ver el push sin cambiar la fecha del plan ni notificar a otras tiendas,
+despliega la función actualizada y ejecuta en SQL Editor una prueba dirigida a
+un negocio de pruebas Pro/Premium que tenga un dispositivo suscrito:
+
+```sql
+select net.http_post(
+  url := 'https://TU_PROYECTO.supabase.co/functions/v1/send-plan-push',
+  headers := jsonb_build_object(
+    'Content-Type', 'application/json',
+    'x-gloto-order-push-secret',
+    (select decrypted_secret
+     from vault.decrypted_secrets
+     where name = 'gloto_order_push_secret')
+  ),
+  body := jsonb_build_object(
+    'test_business_id',
+    'UUID_DEL_NEGOCIO_DE_PRUEBA'
+  )
+);
+```
+
+La prueba muestra el texto del primer día de gracia, no modifica la suscripción
+ni registra una entrega diaria real.
 
 ## Acceso por plan y límite de tickets
 

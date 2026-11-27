@@ -31,6 +31,11 @@ const jsonResponse = (status: number, body: Record<string, unknown>) =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const isUuid = (value: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+
 const matchesSecret = (provided: string, expected: string) => {
   if (provided.length !== expected.length) return false;
   let difference = 0;
@@ -94,6 +99,28 @@ Deno.serve(async (request: Request) => {
     return jsonResponse(401, { error: "La solicitud no está autorizada." });
   }
 
+  let testBusinessId: string | null = null;
+  try {
+    const body: unknown = await request.json();
+    if (!isRecord(body)) {
+      return jsonResponse(400, { error: "El cuerpo de la solicitud no es válido." });
+    }
+    if (body.test_business_id !== undefined) {
+      if (
+        typeof body.test_business_id !== "string" ||
+        !isUuid(body.test_business_id)
+      ) {
+        return jsonResponse(400, {
+          error: "El identificador de la tienda de prueba no es válido.",
+        });
+      }
+      testBusinessId = body.test_business_id;
+    }
+  } catch (error) {
+    console.error("La solicitud de avisos del plan envió JSON inválido:", error);
+    return jsonResponse(400, { error: "La solicitud no contiene JSON válido." });
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY");
@@ -130,27 +157,60 @@ Deno.serve(async (request: Request) => {
       });
     }
 
-    const subscriptions = await loadLatestSubscriptions(adminClient);
-    const now = Date.now();
-    const graceSubscriptions = subscriptions.flatMap((subscription) => {
-      const endTime = getPlanEndTime(subscription);
-      if (
-        !isProOrPremiumPlan(subscription) ||
-        !["active", "expired"].includes(String(subscription.status || "")) ||
-        endTime === null ||
-        now < endTime ||
-        now >= endTime + GRACE_PERIOD_DAYS * DAY_MS
-      ) {
-        return [];
-      }
+    const latestSubscriptions = await loadLatestSubscriptions(adminClient);
+    const subscriptions = testBusinessId
+      ? latestSubscriptions.filter(
+          (subscription) => subscription.business_id === testBusinessId,
+        )
+      : latestSubscriptions;
+    if (testBusinessId && subscriptions.length === 0) {
+      return jsonResponse(404, {
+        error: "No se encontró una suscripción para la tienda de prueba.",
+      });
+    }
 
-      const graceDay = Math.floor((now - endTime) / DAY_MS) + 1;
-      const daysRemaining = Math.max(
-        0,
-        Math.ceil((endTime + GRACE_PERIOD_DAYS * DAY_MS - now) / DAY_MS),
-      );
-      return [{ subscription, endTime, graceDay, daysRemaining }];
-    });
+    const now = Date.now();
+    const graceSubscriptions = testBusinessId
+      ? subscriptions.flatMap((subscription) => {
+          if (
+            !isProOrPremiumPlan(subscription) ||
+            !["active", "expired"].includes(String(subscription.status || ""))
+          ) {
+            return [];
+          }
+          return [
+            {
+              subscription,
+              graceDay: 1,
+              daysRemaining: 3,
+              testMode: true,
+            },
+          ];
+        })
+      : subscriptions.flatMap((subscription) => {
+          const endTime = getPlanEndTime(subscription);
+          if (
+            !isProOrPremiumPlan(subscription) ||
+            !["active", "expired"].includes(String(subscription.status || "")) ||
+            endTime === null ||
+            now < endTime ||
+            now >= endTime + GRACE_PERIOD_DAYS * DAY_MS
+          ) {
+            return [];
+          }
+
+          const graceDay = Math.floor((now - endTime) / DAY_MS) + 1;
+          const daysRemaining = Math.max(
+            0,
+            Math.ceil((endTime + GRACE_PERIOD_DAYS * DAY_MS - now) / DAY_MS),
+          );
+          return [{ subscription, graceDay, daysRemaining, testMode: false }];
+        });
+    if (testBusinessId && graceSubscriptions.length === 0) {
+      return jsonResponse(400, {
+        error: "La tienda de prueba debe tener un plan Pro/Premium activo o vencido.",
+      });
+    }
 
     if (graceSubscriptions.length === 0) {
       return jsonResponse(200, {
@@ -174,9 +234,9 @@ Deno.serve(async (request: Request) => {
 
     for (const {
       subscription: plan,
-      endTime,
       graceDay,
       daysRemaining,
+      testMode,
     } of graceSubscriptions) {
       const { data: devices, error: deviceError } = await adminClient
         .from("order_push_subscriptions")
@@ -195,41 +255,45 @@ Deno.serve(async (request: Request) => {
         continue;
       }
 
-      const planName = String(plan.plan_name || plan.plan_code || "Pro/Premium");
-      const expiryDate = new Intl.DateTimeFormat("es-CO", {
-        timeZone: "America/Bogota",
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      }).format(new Date(endTime));
       const dayLabel = daysRemaining === 1 ? "día" : "días";
       const payload = JSON.stringify({
-        title: `Quedan ${daysRemaining} ${dayLabel} para suspender tu plan`,
-        body: `Tu plan ${planName} venció el ${expiryDate}. Estás en el día ${graceDay} después del vencimiento; la tienda se suspenderá al cumplirse 3 días si no renuevas. Revisa Mi plan para enviar el pago.`,
-        tag: `gloto-plan-expiry-${plan.id}-day-${graceDay}`,
+        title:
+          daysRemaining === 1
+            ? "Te queda 1 día para suspender tu plan"
+            : `Te quedan ${daysRemaining} ${dayLabel} para suspender tu plan`,
+        body: `Si no renuevas dentro de estos ${GRACE_PERIOD_DAYS} días, se cancelará tu plan.`,
+        tag: testMode
+          ? `gloto-plan-expiry-test-${plan.id}`
+          : `gloto-plan-expiry-${plan.id}-day-${graceDay}`,
         url: "/pos/mi-plan",
         icon: "/favicon.png",
         badge: "/favicon.png",
       });
 
       for (const device of devices as PushSubscription[]) {
-        const endpointHash = await hashEndpoint(device.endpoint);
-        const { error: claimError } = await adminClient
-          .from("business_plan_push_deliveries")
-          .insert({
-            subscription_id: plan.id,
-            business_id: plan.business_id,
-            grace_day: graceDay,
-            endpoint_hash: endpointHash,
-          });
-        if (claimError?.code === "23505") {
-          skipped += 1;
-          continue;
-        }
-        if (claimError) {
-          console.error("No se pudo reservar el aviso diario del plan:", claimError);
-          failed += 1;
-          continue;
+        let endpointHash: string | null = null;
+        if (!testMode) {
+          endpointHash = await hashEndpoint(device.endpoint);
+          const { error: claimError } = await adminClient
+            .from("business_plan_push_deliveries")
+            .insert({
+              subscription_id: plan.id,
+              business_id: plan.business_id,
+              grace_day: graceDay,
+              endpoint_hash: endpointHash,
+            });
+          if (claimError?.code === "23505") {
+            skipped += 1;
+            continue;
+          }
+          if (claimError) {
+            console.error(
+              "No se pudo reservar el aviso diario del plan:",
+              claimError,
+            );
+            failed += 1;
+            continue;
+          }
         }
 
         try {
@@ -241,17 +305,24 @@ Deno.serve(async (request: Request) => {
             payload,
             { TTL: 24 * 60 * 60, urgency: "high" },
           );
-          const { error: sentError } = await adminClient
-            .from("business_plan_push_deliveries")
-            .update({ sent_at: new Date().toISOString() })
-            .eq("subscription_id", plan.id)
-            .eq("grace_day", graceDay)
-            .eq("endpoint_hash", endpointHash);
-          if (sentError) {
-            console.error("No se pudo registrar el aviso de plan enviado:", sentError);
-            failed += 1;
-          } else {
+          if (testMode || !endpointHash) {
             sent += 1;
+          } else {
+            const { error: sentError } = await adminClient
+              .from("business_plan_push_deliveries")
+              .update({ sent_at: new Date().toISOString() })
+              .eq("subscription_id", plan.id)
+              .eq("grace_day", graceDay)
+              .eq("endpoint_hash", endpointHash);
+            if (sentError) {
+              console.error(
+                "No se pudo registrar el aviso de plan enviado:",
+                sentError,
+              );
+              failed += 1;
+            } else {
+              sent += 1;
+            }
           }
         } catch (error) {
           const statusCode =
@@ -274,14 +345,19 @@ Deno.serve(async (request: Request) => {
             console.error("Falló el envío del aviso de vencimiento:", error);
             failed += 1;
           }
-          const { error: releaseError } = await adminClient
-            .from("business_plan_push_deliveries")
-            .delete()
-            .eq("subscription_id", plan.id)
-            .eq("grace_day", graceDay)
-            .eq("endpoint_hash", endpointHash);
-          if (releaseError) {
-            console.error("No se pudo liberar el intento de push fallido:", releaseError);
+          if (!testMode && endpointHash) {
+            const { error: releaseError } = await adminClient
+              .from("business_plan_push_deliveries")
+              .delete()
+              .eq("subscription_id", plan.id)
+              .eq("grace_day", graceDay)
+              .eq("endpoint_hash", endpointHash);
+            if (releaseError) {
+              console.error(
+                "No se pudo liberar el intento de push fallido:",
+                releaseError,
+              );
+            }
           }
         }
       }
@@ -293,6 +369,7 @@ Deno.serve(async (request: Request) => {
       failed,
       expired,
       skipped,
+      test: Boolean(testBusinessId),
     });
   } catch (error) {
     console.error("No se pudieron procesar los avisos de vencimiento:", error);

@@ -14,11 +14,12 @@ const DEFAULT_SETTINGS = {
   show_widget: true,
   notify_marketplace_orders: true,
   notify_pos_orders: false,
+  notify_stock_alerts: false,
   sound_enabled: true,
   color: "violet",
 };
 
-const ORDER_NOTIFICATION_OPTIONS = [
+const PUSH_NOTIFICATION_OPTIONS = [
   {
     key: "notify_marketplace_orders",
     title: "Pedidos de clientes",
@@ -28,6 +29,12 @@ const ORDER_NOTIFICATION_OPTIONS = [
     key: "notify_pos_orders",
     title: "Pedidos del POS",
     description: "Recibir un push cuando se registre un pedido desde el POS.",
+  },
+  {
+    key: "notify_stock_alerts",
+    title: "Productos en su límite de stock",
+    description:
+      "Avisar una vez cuando un producto llegue a su stock mínimo configurado; si no tiene mínimo, se usa 0.",
   },
 ];
 
@@ -187,7 +194,7 @@ export default function NotificacionesPush() {
         supabase
           .from("business_popup_settings")
           .select(
-            "show_widget, notify_marketplace_orders, notify_pos_orders, sound_enabled, color",
+            "show_widget, notify_marketplace_orders, notify_pos_orders, notify_stock_alerts, sound_enabled, color",
           )
           .eq("business_id", profile.business_id)
           .maybeSingle(),
@@ -284,8 +291,8 @@ export default function NotificacionesPush() {
             Notificaciones push
           </h1>
           <p className="mt-2 text-sm leading-6 text-neutral-400">
-            Elige qué pedidos deben generar avisos push en los dispositivos que
-            hayan activado las notificaciones de Gloto.
+            Elige qué eventos deben generar avisos push en los dispositivos
+            que hayan activado las notificaciones de Gloto.
           </p>
         </header>
 
@@ -308,8 +315,8 @@ export default function NotificacionesPush() {
                 Push disponible en Pro y Premium
               </h2>
               <p className="mt-2 text-xs leading-relaxed text-neutral-300">
-                Las notificaciones push de pedidos y los recordatorios del plan
-                están disponibles para negocios con Pro o Premium activo. En el
+                Los avisos push de pedidos y stock, y los recordatorios del plan,
+                están disponibles para negocios Pro o Premium. Durante el
                 periodo de gracia solo se envía el recordatorio de vencimiento.
               </p>
               <Link
@@ -324,7 +331,7 @@ export default function NotificacionesPush() {
               {planAccess.planReminderAllowed && (
                 <p className="mb-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-xs leading-relaxed text-amber-100">
                   Tu plan {planAccess.planName} está en periodo de gracia. Los
-                  avisos de pedidos están pausados; el recordatorio de
+                  avisos de pedidos y stock están pausados; el recordatorio de
                   vencimiento puede llegar durante estos días.
                 </p>
               )}
@@ -377,7 +384,7 @@ export default function NotificacionesPush() {
               </section>
 
               <div className="divide-y divide-white/5">
-                {ORDER_NOTIFICATION_OPTIONS.map(
+                {PUSH_NOTIFICATION_OPTIONS.map(
                   ({ key, title, description }) => (
                     <div
                       key={key}
