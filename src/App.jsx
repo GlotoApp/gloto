@@ -556,9 +556,29 @@ function RouteAwareManifest() {
     const manifestLink = document.getElementById("app-manifest");
     if (!manifestLink) return;
 
+    const isCourierApp = pathname.startsWith("/domiciliarios");
     const manifestUrl = new URL("/api/manifest", window.location.origin);
     manifestUrl.searchParams.set("start_url", pathname || "/");
     manifestLink.href = manifestUrl.toString();
+
+    const appleTouchIcon = document.querySelector(
+      'link[rel="apple-touch-icon"]',
+    );
+    if (appleTouchIcon) {
+      appleTouchIcon.href = isCourierApp
+        ? "/gloto-domiciliarios.svg"
+        : "/favicon.png";
+    }
+    const appleTitle = document.querySelector(
+      'meta[name="apple-mobile-web-app-title"]',
+    );
+    if (appleTitle) appleTitle.content = isCourierApp ? "Domicilios" : "Gloto";
+    const applicationName = document.querySelector(
+      'meta[name="application-name"]',
+    );
+    if (applicationName) {
+      applicationName.content = isCourierApp ? "Gloto Domiciliarios" : "Gloto";
+    }
   }, [pathname]);
 
   return null;

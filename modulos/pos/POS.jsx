@@ -138,6 +138,7 @@ const formatStockQuantity = (stock) =>
 const DELIVERY_PLACE_SEARCH_URL = "https://photon.komoot.io/api/";
 const DELIVERY_PLACE_REVERSE_URL = "https://photon.komoot.io/reverse";
 const DELIVERY_PLACE_MAX_DISTANCE_KM = 15;
+const PRODUCT_RENDER_BATCH_SIZE = 40;
 
 const getDeliveryPlaceLabel = (properties = {}) => {
   const streetAddress = [properties.street, properties.housenumber]
@@ -915,6 +916,11 @@ const POS = () => {
   );
   const [toastItems, setToastItems] = useState([]);
   const [products, setProducts] = useState([]);
+  const [visibleProductCount, setVisibleProductCount] = useState(
+    PRODUCT_RENDER_BATCH_SIZE,
+  );
+  const productListScrollRef = useRef(null);
+  const productListSentinelRef = useRef(null);
   const [categories, setCategories] = useState([{ id: "all", name: "Todo" }]);
   const [categoryMap, setCategoryMap] = useState({});
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
@@ -1181,28 +1187,36 @@ const POS = () => {
       let optionGroupsByProduct = {};
       if ((data || []).length > 0) {
         const productIds = data.map((item) => item.id);
-        const [groupsRes, itemsRes] = await Promise.all([
-          supabase
-            .from("product_option_groups")
-            .select("*")
-            .in("product_id", productIds)
-            .order("order_index", { ascending: true }),
-          supabase
-            .from("products_items")
-            .select("*")
-            .in("product_id", productIds)
-            .order("order_index", { ascending: true }),
+        const fetchRelatedRows = async (table) => {
+          const rows = [];
+          for (let offset = 0; offset < productIds.length; offset += 100) {
+            const productIdBatch = productIds.slice(offset, offset + 100);
+            let pageOffset = 0;
+            while (true) {
+              const { data: rowsPage, error } = await supabase
+                .from(table)
+                .select("*")
+                .in("product_id", productIdBatch)
+                .order("product_id", { ascending: true })
+                .order("order_index", { ascending: true })
+                .order("id", { ascending: true })
+                .range(pageOffset, pageOffset + 999);
+
+              if (error) throw error;
+              rows.push(...(rowsPage || []));
+              if ((rowsPage || []).length < 1000) break;
+              pageOffset += 1000;
+            }
+          }
+          return rows;
+        };
+        const [groupRows, itemRows] = await Promise.all([
+          fetchRelatedRows("product_option_groups"),
+          fetchRelatedRows("products_items"),
         ]);
 
-        if (itemsRes.error) {
-          console.error("Error cargando opciones de producto:", itemsRes.error);
-        }
-        if (groupsRes.error) {
-          console.error("Error cargando grupos de opciones:", groupsRes.error);
-        }
-
         const groupsByProduct = {};
-        (groupsRes.data || []).forEach((group) => {
+        groupRows.forEach((group) => {
           const productId = group.product_id;
           groupsByProduct[productId] = groupsByProduct[productId] || [];
           groupsByProduct[productId].push(group);
@@ -1213,7 +1227,7 @@ const POS = () => {
             product.id,
             buildProductOptionGroups(
               groupsByProduct[product.id] || [],
-              (itemsRes.data || []).filter(
+              itemRows.filter(
                 (option) => option.product_id === product.id,
               ),
             ),
@@ -2387,6 +2401,46 @@ const POS = () => {
         (first.orderIndex || 0) - (second.orderIndex || 0)
       );
     });
+
+  const visibleProducts = filteredProducts.slice(0, visibleProductCount);
+
+  useEffect(() => {
+    setVisibleProductCount(PRODUCT_RENDER_BATCH_SIZE);
+    if (productListScrollRef.current) {
+      productListScrollRef.current.scrollTop = 0;
+    }
+  }, [searchTerm, selectedCategory]);
+
+  useEffect(() => {
+    const sentinel = productListSentinelRef.current;
+    if (!sentinel || visibleProductCount >= filteredProducts.length) return;
+
+    if (typeof IntersectionObserver === "undefined") {
+      setVisibleProductCount(filteredProducts.length);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisibleProductCount((current) =>
+            Math.min(
+              current + PRODUCT_RENDER_BATCH_SIZE,
+              filteredProducts.length,
+            ),
+          );
+        }
+      },
+      {
+        root: productListScrollRef.current,
+        rootMargin: "400px",
+      },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [filteredProducts.length, visibleProductCount]);
+
   const addToast = (name, type = "success") => {
     const id = Date.now() + Math.random(); // ID único para cada burbuja
 
@@ -5066,7 +5120,10 @@ const POS = () => {
               onPointerUp={handleCategoryResizeEnd}
               onPointerCancel={handleCategoryResizeEnd}
             />
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-2 custom-sidebar min-[420px]:p-3 lg:p-4">
+            <div
+              ref={productListScrollRef}
+              className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-2 custom-sidebar min-[420px]:p-3 lg:p-4"
+            >
               {isLoadingProducts && filteredProducts.length === 0 ? (
                 <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3">
                   {[...Array(8)].map((_, idx) => (
@@ -5098,7 +5155,7 @@ const POS = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3">
-                  {filteredProducts.map((product) => (
+                  {visibleProducts.map((product) => (
                     <div
                       key={product.id}
                       onClick={() => addToCart(product)}
@@ -5155,6 +5212,8 @@ const POS = () => {
                             <img
                               src={product.image_url}
                               alt={product.name}
+                              loading="lazy"
+                              decoding="async"
                               className="h-full w-full object-cover"
                             />
                           </>
@@ -5200,6 +5259,13 @@ const POS = () => {
                       {/* Info button only (modal rendered globally) */}
                     </div>
                   ))}
+                  {visibleProductCount < filteredProducts.length && (
+                    <div
+                      ref={productListSentinelRef}
+                      aria-hidden="true"
+                      className="col-span-full h-1"
+                    />
+                  )}
                 </div>
               )}
             </div>

@@ -15,6 +15,18 @@ const response = (status: number, body: Record<string, unknown>) =>
 const isSuperAdmin = (role: unknown) =>
   ["superadmin", "super_admin"].includes(String(role || "").toLowerCase());
 
+const createTemporaryPassword = () => {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+};
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -120,6 +132,37 @@ Deno.serve(async (request) => {
     return response(404, { error: "No se encontró la cuenta del domiciliario." });
   }
 
+  if (action === "reset-password") {
+    const { data: targetUserData, error: targetUserError } =
+      await adminClient.auth.admin.getUserById(userId);
+    if (targetUserError || !targetUserData.user) {
+      console.error("No se pudo consultar la cuenta de Auth del domiciliario:", targetUserError);
+      return response(404, { error: "No se encontró la cuenta del domiciliario." });
+    }
+
+    const temporaryPassword = createTemporaryPassword();
+    const { error: passwordError } = await adminClient.auth.admin.updateUserById(
+      userId,
+      {
+        password: temporaryPassword,
+        user_metadata: {
+          ...(targetUserData.user.user_metadata || {}),
+          must_change_password: true,
+        },
+      },
+    );
+    if (passwordError) {
+      console.error("No se pudo restablecer la contraseña del domiciliario:", passwordError);
+      return response(500, { error: "No se pudo restablecer la contraseña." });
+    }
+
+    return response(200, {
+      success: true,
+      email: targetUserData.user.email || "",
+      temporaryPassword,
+    });
+  }
+
   if (action === "update") {
     const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
     if (fullName.length < 3 || fullName.length > 120) {
@@ -162,11 +205,174 @@ Deno.serve(async (request) => {
   }
 
   if (action === "delete") {
+    const { data: activeOrders, error: ordersError } = await adminClient
+      .from("orders")
+      .select("id")
+      .or(`public_courier_id.eq.${userId},delivery_courier_id.eq.${userId}`)
+      .in("delivery_status", ["assigned", "picked_up"])
+      .limit(1);
+    if (ordersError) {
+      console.error("No se pudieron verificar las entregas del domiciliario:", ordersError);
+      return response(500, { error: "No se pudo verificar si tiene entregas en curso." });
+    }
+    if (activeOrders?.length) {
+      return response(409, {
+        error: "No se puede eliminar la cuenta hasta completar la entrega en curso.",
+      });
+    }
+
+    const { data: linkedEmployees, error: employeesError } = await adminClient
+      .from("employees")
+      .select("id")
+      .eq("auth_user_id", userId)
+      .ilike("area", "%domiciliario%");
+    if (employeesError) {
+      console.error("No se pudieron consultar los vínculos del domiciliario:", employeesError);
+      return response(500, { error: "No se pudieron preparar los vínculos con las tiendas." });
+    }
+    const employeeIds = (linkedEmployees || []).map((employee) => employee.id);
+
+    const { data: courierIdentity, error: identityError } = await adminClient
+      .from("courier_identities")
+      .select("cedula")
+      .eq("courier_user_id", userId)
+      .maybeSingle();
+    if (identityError) {
+      console.error("No se pudo consultar la identidad del domiciliario:", identityError);
+      return response(500, { error: "No se pudo preparar la identidad para eliminar la cuenta." });
+    }
+
+    const applicationFields =
+      "id,status,cedula,license_front_path,license_back_path,vehicle_card_front_path,vehicle_card_back_path,identity_front_path,identity_back_path,profile_photo_path";
+    const { data: linkedRequests, error: requestsError } = await adminClient
+      .from("public_courier_application_requests")
+      .select(applicationFields)
+      .eq("user_id", userId);
+    if (requestsError) {
+      console.error(
+        "No se pudieron consultar las solicitudes del domiciliario:",
+        requestsError,
+      );
+      return response(500, {
+        error: "No se pudieron preparar las solicitudes para eliminar la cuenta.",
+      });
+    }
+
+    const cedulas = [
+      ...new Set([
+        courierIdentity?.cedula,
+        ...(linkedRequests || []).map((application) => application.cedula),
+      ].filter((cedula) => typeof cedula === "string" && cedula.length > 0)),
+    ];
+    let requests = linkedRequests || [];
+    if (cedulas.length) {
+      const { data: requestsByCedula, error: cedulaRequestsError } = await adminClient
+        .from("public_courier_application_requests")
+        .select(applicationFields)
+        .in("cedula", cedulas);
+      if (cedulaRequestsError) {
+        console.error(
+          "No se pudieron consultar las solicitudes anteriores del domiciliario:",
+          cedulaRequestsError,
+        );
+        return response(500, {
+          error: "No se pudieron preparar los documentos de solicitudes anteriores.",
+        });
+      }
+      requests = [
+        ...new Map(
+          [...requests, ...(requestsByCedula || [])].map((application) => [
+            application.id,
+            application,
+          ]),
+        ).values(),
+      ];
+    }
+
+    const documentPaths = [
+      ...new Set(
+        (requests || []).flatMap((application) =>
+          [
+            application.license_front_path,
+            application.license_back_path,
+            application.vehicle_card_front_path,
+            application.vehicle_card_back_path,
+            application.identity_front_path,
+            application.identity_back_path,
+            application.profile_photo_path,
+          ].filter((path) => typeof path === "string" && path.length > 0),
+        ),
+      ),
+    ];
+    if (documentPaths.length) {
+      const { error: documentsError } = await adminClient.storage
+        .from("courier-application-documents")
+        .remove(documentPaths);
+      if (documentsError) {
+        console.error("No se pudieron eliminar los documentos del domiciliario:", documentsError);
+        return response(500, {
+          error: "No se pudieron eliminar los documentos personales de la cuenta.",
+        });
+      }
+    }
+
+    if (employeeIds.length) {
+      const { error: unlinkError } = await adminClient
+        .from("employees")
+        .update({
+          delivery_available: false,
+          store_orders_enabled: false,
+          store_order_priority_enabled: false,
+          auth_user_id: null,
+        })
+        .in("id", employeeIds);
+      if (unlinkError) {
+        console.error("No se pudieron cerrar los vínculos del domiciliario:", unlinkError);
+        return response(500, { error: "No se pudieron cerrar los vínculos con las tiendas." });
+      }
+    }
+
+    const { error: applicationDeleteError } = await adminClient
+      .from("public_courier_applications")
+      .delete()
+      .eq("user_id", userId);
+    if (applicationDeleteError) {
+      console.error("No se pudo eliminar el perfil público del domiciliario:", applicationDeleteError);
+      return response(500, { error: "No se pudo eliminar el perfil público del domiciliario." });
+    }
+
+    const activeRequestIds = (requests || [])
+      .filter((application) => ["pending", "approved"].includes(application.status))
+      .map((application) => application.id);
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId);
     if (deleteError) {
       console.error("No se pudo eliminar la cuenta del domiciliario:", deleteError);
       return response(500, { error: "No se pudo eliminar la cuenta." });
     }
+
+    if (activeRequestIds.length) {
+      const { error: requestUpdateError } = await adminClient
+        .from("public_courier_application_requests")
+        .update({
+          status: "rejected",
+          review_notes:
+            "Cuenta eliminada por administración; puede volver a postularse.",
+          reviewed_by: callerData.user.id,
+          reviewed_at: new Date().toISOString(),
+        })
+        .in("id", activeRequestIds);
+      if (requestUpdateError) {
+        console.error(
+          "Se eliminó la cuenta, pero no se pudo liberar la solicitud para una nueva postulación:",
+          requestUpdateError,
+        );
+        return response(500, {
+          error:
+            "La cuenta se eliminó, pero no se pudo liberar la solicitud para una nueva postulación. Contacta a soporte.",
+        });
+      }
+    }
+
     return response(200, { success: true });
   }
 

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Bike,
   Check,
+  Copy,
   Clock3,
   Edit3,
   ExternalLink,
+  KeyRound,
   LoaderCircle,
   MapPin,
   RefreshCw,
@@ -48,6 +50,7 @@ const CourierAccountsPanel = ({
   onSearchChange,
   activeAccountId,
   onEdit,
+  onResetPassword,
   onToggleSuspension,
   onDelete,
 }) => {
@@ -136,6 +139,15 @@ const CourierAccountsPanel = ({
                   </button>
                   <button
                     type="button"
+                    onClick={() => onResetPassword(account)}
+                    disabled={isBusy}
+                    className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-violet-300/20 px-3 py-2 text-xs font-bold text-violet-200 transition hover:bg-violet-400/10 disabled:opacity-50"
+                  >
+                    <KeyRound size={14} />
+                    Restablecer contraseña
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onToggleSuspension(account)}
                     disabled={isBusy}
                     className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-amber-300/20 px-3 py-2 text-xs font-bold text-amber-200 transition hover:bg-amber-400/10 disabled:opacity-50"
@@ -191,6 +203,9 @@ const DomiciliariosPublicos = () => {
   const [successMessage, setSuccessMessage] = useState("");
   const [reviewNotes, setReviewNotes] = useState({});
   const [reviewCedulas, setReviewCedulas] = useState({});
+  const [passwordResetCredentials, setPasswordResetCredentials] = useState(null);
+  const [passwordCopied, setPasswordCopied] = useState(false);
+  const [passwordResetError, setPasswordResetError] = useState("");
 
   const fetchCourierAccounts = useCallback(async () => {
     setCourierAccountsLoading(true);
@@ -226,10 +241,12 @@ const DomiciliariosPublicos = () => {
       restore: "reactivar",
       delete: "eliminar definitivamente",
     };
+    const confirmationMessage =
+      action === "delete"
+        ? `Se eliminará el acceso, el perfil público y los documentos personales de ${account.full_name || account.email}. Se conservará el historial operativo y financiero. Podrá volver a postularse y la nueva solicitud quedará pendiente de aprobación. ¿Continuar?`
+        : `¿Confirmas ${actionLabels[action]} la cuenta de ${account.full_name || account.email}?`;
     if (
-      !window.confirm(
-        `¿Confirmas ${actionLabels[action]} la cuenta de ${account.full_name || account.email}?`,
-      )
+      !window.confirm(confirmationMessage)
     ) {
       return;
     }
@@ -247,7 +264,7 @@ const DomiciliariosPublicos = () => {
       if (error) throw error;
       setSuccessMessage(
         action === "delete"
-          ? "La cuenta fue eliminada."
+          ? "Se eliminó el acceso y los datos personales; se conservó el historial y podrá volver a postularse."
           : action === "suspend"
             ? "La cuenta fue suspendida."
             : action === "restore"
@@ -260,6 +277,71 @@ const DomiciliariosPublicos = () => {
       setErrorMessage(error.message || "No se pudo actualizar la cuenta.");
     } finally {
       setActiveAccountId("");
+    }
+  };
+
+  const resetCourierPassword = async (account) => {
+    if (
+      !window.confirm(
+        `Se generará una contraseña temporal para ${account.full_name || account.email}. Deberá cambiarla al iniciar sesión. ¿Continuar?`,
+      )
+    ) {
+      return;
+    }
+
+    setActiveAccountId(account.id);
+    setErrorMessage("");
+    setSuccessMessage("");
+    setPasswordResetError("");
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "manage-courier-accounts",
+        { body: { action: "reset-password", userId: account.id } },
+      );
+      if (error) {
+        let detailedMessage = error.message;
+        if (error.context?.json) {
+          try {
+            const responseBody = await error.context.json();
+            detailedMessage = responseBody.error || detailedMessage;
+          } catch (parseError) {
+            console.error(
+              "No se pudo leer el detalle del restablecimiento de contraseña:",
+              parseError,
+            );
+          }
+        }
+        throw new Error(detailedMessage);
+      }
+      if (!data?.success || !data?.temporaryPassword) {
+        throw new Error(data?.error || "No se recibió la contraseña temporal.");
+      }
+      setPasswordResetCredentials({
+        email: data.email || account.email,
+        password: data.temporaryPassword,
+      });
+      setPasswordCopied(false);
+    } catch (error) {
+      console.error("No se pudo restablecer la contraseña del domiciliario:", error);
+      setErrorMessage(error.message || "No se pudo restablecer la contraseña.");
+    } finally {
+      setActiveAccountId("");
+    }
+  };
+
+  const copyTemporaryPassword = async () => {
+    if (!passwordResetCredentials) return;
+    setPasswordResetError("");
+    try {
+      await navigator.clipboard.writeText(
+        `Correo: ${passwordResetCredentials.email}\nContraseña temporal: ${passwordResetCredentials.password}`,
+      );
+      setPasswordCopied(true);
+    } catch (error) {
+      console.error("No se pudo copiar la contraseña temporal:", error);
+      setPasswordResetError(
+        "No se pudo copiar. Selecciona los datos y cópialos manualmente.",
+      );
     }
   };
 
@@ -1167,6 +1249,7 @@ const DomiciliariosPublicos = () => {
             onSearchChange={setAccountSearch}
             activeAccountId={activeAccountId}
             onEdit={updateCourierName}
+            onResetPassword={resetCourierPassword}
             onToggleSuspension={(account) =>
               manageCourierAccount(
                 account,
@@ -1572,6 +1655,81 @@ const DomiciliariosPublicos = () => {
             </form>
           )}
         </section>
+      )}
+      {passwordResetCredentials && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => {
+            setPasswordResetCredentials(null);
+            setPasswordCopied(false);
+            setPasswordResetError("");
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="courier-password-reset-title"
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-lg space-y-4 rounded-2xl border border-violet-400/20 bg-neutral-900 p-5 shadow-2xl"
+          >
+            <div>
+              <h2
+                id="courier-password-reset-title"
+                className="text-lg font-black"
+              >
+                Contraseña temporal generada
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-neutral-400">
+                Compártela con el domiciliario. Al iniciar sesión, deberá crear
+                una nueva contraseña. Esta contraseña temporal no volverá a
+                mostrarse cuando cierres esta ventana.
+              </p>
+            </div>
+            <label className="block space-y-1.5 text-xs font-semibold text-neutral-400">
+              Correo de acceso
+              <input
+                readOnly
+                value={passwordResetCredentials.email || ""}
+                className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 font-mono text-sm text-white"
+              />
+            </label>
+            <label className="block space-y-1.5 text-xs font-semibold text-neutral-400">
+              Contraseña temporal
+              <input
+                readOnly
+                value={passwordResetCredentials.password}
+                onFocus={(event) => event.target.select()}
+                className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 font-mono text-sm text-white"
+              />
+            </label>
+            {passwordResetError && (
+              <p role="alert" className="text-sm text-rose-300">
+                {passwordResetError}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={copyTemporaryPassword}
+                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-violet-500"
+              >
+                {passwordCopied ? <Check size={16} /> : <Copy size={16} />}
+                {passwordCopied ? "Credenciales copiadas" : "Copiar credenciales"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPasswordResetCredentials(null);
+                  setPasswordCopied(false);
+                  setPasswordResetError("");
+                }}
+                className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-neutral-200 transition hover:bg-white/[0.05]"
+              >
+                Cerrar
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </SuperAdminSectionShell>
   );

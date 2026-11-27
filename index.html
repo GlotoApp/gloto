@@ -15,9 +15,19 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <link id="app-manifest" rel="manifest" />
   <script>
+    const appPath = window.location.pathname || "/";
+    const isCourierApp = appPath.startsWith("/domiciliarios");
     const manifestUrl = new URL("/api/manifest", window.location.origin);
-    manifestUrl.searchParams.set("start_url", window.location.pathname || "/");
+    manifestUrl.searchParams.set("start_url", appPath);
     document.getElementById("app-manifest").href = manifestUrl.toString();
+    if (isCourierApp) {
+      document.querySelector('link[rel="apple-touch-icon"]').href =
+        "/gloto-domiciliarios.svg";
+      document.querySelector('meta[name="apple-mobile-web-app-title"]').content =
+        "Domicilios";
+      document.querySelector('meta[name="application-name"]').content =
+        "Gloto Domiciliarios";
+    }
   </script>
   <title>Gloto</title>
   <link

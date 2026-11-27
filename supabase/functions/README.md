@@ -118,6 +118,36 @@ solo envía un push cuando el stock cruza el mínimo hacia abajo y la opción
 **Productos en su límite de stock** está activada. La preferencia viene apagada
 por defecto. Actualiza el frontend en Vercel para mostrar el interruptor.
 
+### App y avisos para domiciliarios
+
+Aplica la migración `supabase/migrations/20261126213000_courier_push_subscriptions.sql`
+y despliega la función:
+
+```sh
+supabase functions deploy send-courier-push --no-verify-jwt
+```
+
+En Supabase, crea un Database Webhook para `public.courier_order_dispatches`,
+evento `UPDATE`, con URL
+`https://TU_PROYECTO.supabase.co/functions/v1/send-courier-push` y el mismo
+header `x-gloto-order-push-secret` configurado para los demás webhooks. El push
+se envía únicamente al domiciliario al que se le asigna una oferta activa.
+El portal solo solicita ofertas mientras el domiciliario está conectado; si se
+desconecta, no se asigna ni se notifica una nueva oferta. La notificación se
+abre en `/domiciliarios`.
+
+Cada domiciliario debe entrar en su cuenta, abrir el menú del portal y activar
+**Avisos de domicilios** en cada dispositivo. La suscripción se guarda separada
+de las de los negocios. Desde ese menú también puede instalar **Gloto
+Domiciliarios**, que usa un nombre, icono y ruta de inicio propios; la
+instalación requiere confirmación del navegador. En iPhone, se instala desde
+Safari con **Compartir > Añadir a pantalla de inicio**.
+
+En POS, **Cambiar a cuenta de domiciliario** cierra la sesión actual y abre el
+login de domiciliarios; en el portal de domiciliarios, **Cambiar a cuenta del
+POS** hace lo equivalente. Son cuentas separadas: se deben introducir las
+credenciales de la otra cuenta y no se transfieren permisos entre ellas.
+
 Para ver el push sin cambiar la fecha del plan ni notificar a otras tiendas,
 despliega la función actualizada y ejecuta en SQL Editor una prueba dirigida a
 un negocio de pruebas Pro/Premium que tenga un dispositivo suscrito:

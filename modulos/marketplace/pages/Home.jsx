@@ -158,6 +158,13 @@ const getBusinessHoursStatus = (rows, now) => {
   };
 };
 
+const getBusinessOpenPriority = (tienda, now) => {
+  const status = getBusinessHoursStatus(tienda.businessHours, now);
+  if (status?.isOpen) return 0;
+  if (status === null) return 1;
+  return 2;
+};
+
 const Home = ({ userLocation, onInitialLoadComplete }) => {
   const navigate = useNavigate();
 
@@ -595,12 +602,15 @@ const Home = ({ userLocation, onInitialLoadComplete }) => {
 
       return {
         ...tienda,
+        openPriority: getBusinessOpenPriority(tienda, horaActual),
         distanciaKm:
           userLocation && tieneCoordenadas
             ? distanceInKm(userLocation, { latitude, longitude })
             : null,
       };
     });
+    const compararEstadoAbierto = (first, second) =>
+      first.openPriority - second.openPriority;
     const compararDistancia = (first, second) =>
       (first.distanciaKm ?? Infinity) - (second.distanciaKm ?? Infinity);
 
@@ -610,6 +620,7 @@ const Home = ({ userLocation, onInitialLoadComplete }) => {
           const ratingA = a.rating == null ? -Infinity : Number(a.rating);
           const ratingB = b.rating == null ? -Infinity : Number(b.rating);
           return (
+            compararEstadoAbierto(a, b) ||
             ratingB - ratingA ||
             b.reviews - a.reviews ||
             compararDistancia(a, b)
@@ -619,16 +630,28 @@ const Home = ({ userLocation, onInitialLoadComplete }) => {
         return copia.sort((a, b) => {
           const entregaA = a.deliveryMin ?? Infinity;
           const entregaB = b.deliveryMin ?? Infinity;
-          return entregaA - entregaB || compararDistancia(a, b);
+          return (
+            compararEstadoAbierto(a, b) ||
+            entregaA - entregaB ||
+            compararDistancia(a, b)
+          );
         });
       case "Menor domicilio":
         return copia.sort((a, b) => {
           const tarifaA = a.deliveryFee ?? Infinity;
           const tarifaB = b.deliveryFee ?? Infinity;
-          return tarifaA - tarifaB || compararDistancia(a, b);
+          return (
+            compararEstadoAbierto(a, b) ||
+            tarifaA - tarifaB ||
+            compararDistancia(a, b)
+          );
         });
       default:
-        return userLocation ? copia.sort(compararDistancia) : copia;
+        return copia.sort(
+          (a, b) =>
+            compararEstadoAbierto(a, b) ||
+            (userLocation ? compararDistancia(a, b) : 0),
+        );
     }
   })();
   const tiendasVisibles = tiendasOrdenadas.slice(0, cantidadTiendasVisibles);

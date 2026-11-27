@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.send-stock-push]
 verify_jwt = false
+
+[functions.send-courier-push]
+verify_jwt = false

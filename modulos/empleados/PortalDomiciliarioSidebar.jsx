@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
   CircleDollarSign,
+  Bell,
+  Download,
   Eye,
   EyeOff,
   Globe2,
@@ -51,6 +53,16 @@ const PortalDomiciliarioSidebar = ({
   displayName,
   profilePhotoUrl,
   onSignOut,
+  courierPushSupported,
+  courierPushActive,
+  courierPushBusy,
+  courierPushError,
+  courierPushMessage,
+  onEnableCourierPush,
+  appInstalled,
+  canInstallApp,
+  installMessage,
+  onInstallApp,
   compact = false,
 }) => (
   <>
@@ -280,6 +292,64 @@ const PortalDomiciliarioSidebar = ({
                   {label}
                 </button>
               ))}
+            {(!appInstalled || !courierPushActive) && (
+              <section className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+                <p className="px-1 text-[10px] font-black uppercase tracking-[0.16em] text-neutral-500">
+                  Ajustes
+                </p>
+                {!appInstalled && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onInstallApp}
+                      className="mt-2 flex h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-xs font-bold text-neutral-200 transition hover:bg-white/[0.06]"
+                    >
+                      <Download size={16} className="text-violet-300" />
+                      {canInstallApp
+                        ? "Instalar Gloto Domiciliarios"
+                        : "Cómo instalar Gloto Domiciliarios"}
+                    </button>
+                    {installMessage && (
+                      <p role="status" className="px-2 pt-1 text-[10px] leading-4 text-neutral-400">
+                        {installMessage}
+                      </p>
+                    )}
+                  </>
+                )}
+                {!courierPushActive && (
+                  <button
+                    type="button"
+                    onClick={onEnableCourierPush}
+                    disabled={!courierPushSupported || courierPushBusy}
+                    className="mt-1 flex h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-xs font-bold text-neutral-200 transition hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {courierPushBusy ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-violet-300/30 border-t-violet-300" />
+                    ) : (
+                      <Bell size={16} className="text-violet-300" />
+                    )}
+                    {courierPushBusy
+                      ? "Activando avisos..."
+                      : "Activar avisos de domicilios"}
+                  </button>
+                )}
+                {!courierPushSupported && (
+                  <p className="px-2 pt-1 text-[10px] leading-4 text-amber-200">
+                    Este navegador no admite notificaciones push. Prueba en Chrome o Safari.
+                  </p>
+                )}
+                {courierPushMessage && (
+                  <p role="status" className="px-2 pt-1 text-[10px] leading-4 text-emerald-300">
+                    {courierPushMessage}
+                  </p>
+                )}
+                {courierPushError && (
+                  <p role="alert" className="px-2 pt-1 text-[10px] leading-4 text-rose-300">
+                    {courierPushError}
+                  </p>
+                )}
+              </section>
+            )}
           </nav>
 
           <div className="border-t border-white/[0.07] p-3">

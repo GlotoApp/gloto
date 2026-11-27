@@ -23,7 +23,8 @@ const PUSH_NOTIFICATION_OPTIONS = [
   {
     key: "notify_marketplace_orders",
     title: "Pedidos de clientes",
-    description: "Recibir un push cuando llegue un pedido desde Marketplace.",
+    description:
+      "Recibir un push cuando llegue un pedido desde Shop (Tienda Virtual).",
   },
   {
     key: "notify_pos_orders",
@@ -91,7 +92,9 @@ export default function NotificacionesPush() {
         "Error consultando la suscripción push de este dispositivo:",
         error,
       );
-      setDevicePushError("No se pudo comprobar la suscripción de este dispositivo.");
+      setDevicePushError(
+        "No se pudo comprobar la suscripción de este dispositivo.",
+      );
       setDevicePushLoading(false);
     });
 
@@ -142,10 +145,7 @@ export default function NotificacionesPush() {
         );
       }
     } catch (error) {
-      console.error(
-        "No se pudo activar push en este dispositivo:",
-        error,
-      );
+      console.error("No se pudo activar push en este dispositivo:", error);
       setDevicePushError(
         error instanceof Error
           ? error.message
@@ -209,7 +209,9 @@ export default function NotificacionesPush() {
           settingsResult.error,
         );
         setLoadFailed(true);
-        setErrorMessage("No se pudo cargar la configuración de notificaciones.");
+        setErrorMessage(
+          "No se pudo cargar la configuración de notificaciones.",
+        );
       } else {
         setSettings({ ...DEFAULT_SETTINGS, ...settingsResult.data });
         setSettingsRowExists(Boolean(settingsResult.data));
@@ -271,9 +273,7 @@ export default function NotificacionesPush() {
         error,
       );
       setSettings((current) => ({ ...current, [key]: !value }));
-      setErrorMessage(
-        "No se pudo guardar el cambio. Inténtalo de nuevo.",
-      );
+      setErrorMessage("No se pudo guardar el cambio. Inténtalo de nuevo.");
     } finally {
       setSavingKey("");
     }
@@ -291,8 +291,8 @@ export default function NotificacionesPush() {
             Notificaciones push
           </h1>
           <p className="mt-2 text-sm leading-6 text-neutral-400">
-            Elige qué eventos deben generar avisos push en los dispositivos
-            que hayan activado las notificaciones de Gloto.
+            Elige qué eventos deben generar avisos push en los dispositivos que
+            hayan activado las notificaciones de Gloto.
           </p>
         </header>
 
@@ -315,8 +315,8 @@ export default function NotificacionesPush() {
                 Push disponible en Pro y Premium
               </h2>
               <p className="mt-2 text-xs leading-relaxed text-neutral-300">
-                Los avisos push de pedidos y stock, y los recordatorios del plan,
-                están disponibles para negocios Pro o Premium. Durante el
+                Los avisos push de pedidos y stock, y los recordatorios del
+                plan, están disponibles para negocios Pro o Premium. Durante el
                 periodo de gracia solo se envía el recordatorio de vencimiento.
               </p>
               <Link

@@ -355,7 +355,7 @@ const Marketplace = () => {
                 {legalPanel === "terms" ? <TerminosCondiciones /> : <PoliticaPrivacidad />}
               </div>
             ) : (
-              <div className="flex flex-1 flex-col px-4 py-5">
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5">
                 <p className="px-2 text-[10px] font-black uppercase tracking-[0.16em] text-neutral-500">Información</p>
                 <div className="mt-3 space-y-1">
                   <button

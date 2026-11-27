@@ -18,6 +18,7 @@ import {
   CreditCard,
   Banknote,
   Bell,
+  Bike,
   LogOut,
   Moon,
   Sun,
@@ -61,6 +62,8 @@ const Sidebar = ({
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [hasNewKitchenOrders, setHasNewKitchenOrders] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [logoutDestination, setLogoutDestination] = useState("/login");
+  const [logoutError, setLogoutError] = useState("");
   const [businessName, setBusinessName] = useState("Gloto");
   const [businessLogo, setBusinessLogo] = useState(logoPng);
   const [planName, setPlanName] = useState("Sin plan");
@@ -803,12 +806,22 @@ const Sidebar = ({
   const handleLogout = async () => {
     setShowLogoutConfirm(false);
     setUserMenuOpen(false);
-    await supabase.auth.signOut();
-    navigate("/login");
+    setLogoutError("");
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      navigate(logoutDestination, { replace: true });
+    } catch (error) {
+      console.error("No se pudo cerrar sesión para cambiar de app:", error);
+      setLogoutError("No se pudo cerrar la sesión. Inténtalo de nuevo.");
+      setShowLogoutConfirm(true);
+    }
   };
 
-  const handleLogoutClick = () => {
+  const handleLogoutClick = (destination = "/login") => {
     setUserMenuOpen(false);
+    setLogoutDestination(destination);
+    setLogoutError("");
     setShowLogoutConfirm(true);
   };
 
@@ -1714,6 +1727,14 @@ const Sidebar = ({
               <div className="mt-1 ml-5 flex flex-col border-l border-white/30 space-y-0.5 pl-2">
                 <button
                   type="button"
+                  onClick={() => handleLogoutClick("/domiciliarios/login")}
+                  className="group relative flex w-full items-center gap-2 rounded-default px-2 py-1.5 text-left font-label-caps text-[11px] font-bold uppercase tracking-tight text-neutral-300 transition-colors hover:bg-violet-500/10 hover:text-violet-200"
+                >
+                  <Bike size={14} />
+                  Cambiar a cuenta de domiciliario
+                </button>
+                <button
+                  type="button"
                   onClick={handleLogoutClick}
                   className="group relative flex w-full items-center gap-2 rounded-default px-2 py-1.5 text-left font-label-caps text-[11px] font-bold uppercase tracking-tight text-error transition-colors hover:bg-error/10"
                 >
@@ -1746,11 +1767,20 @@ const Sidebar = ({
               id="logout-dialog-title"
               className="text-xl font-black text-white sm:text-2xl"
             >
-              ¿Seguro que quieres cerrar sesión?
+              {logoutDestination === "/domiciliarios/login"
+                ? "¿Cambiar a la cuenta de domiciliario?"
+                : "¿Seguro que quieres cerrar sesión?"}
             </h2>
             <p className="mt-2 text-sm text-neutral-400">
-              Tendrás que volver a iniciar sesión para continuar.
+              {logoutDestination === "/domiciliarios/login"
+                ? "Se cerrará esta sesión y podrás ingresar con las credenciales de la cuenta de domiciliario."
+                : "Tendrás que volver a iniciar sesión para continuar."}
             </p>
+            {logoutError && (
+              <p role="alert" className="mt-3 text-sm text-rose-300">
+                {logoutError}
+              </p>
+            )}
             <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
@@ -1764,7 +1794,10 @@ const Sidebar = ({
                 onClick={handleLogout}
                 className="flex items-center justify-center gap-2 rounded-lg bg-error px-4 py-3 text-sm font-black text-white transition hover:opacity-90"
               >
-                <LogOut size={16} /> Sí, cerrar sesión
+                <LogOut size={16} />
+                {logoutDestination === "/domiciliarios/login"
+                  ? "Continuar al login"
+                  : "Sí, cerrar sesión"}
               </button>
             </div>
           </section>

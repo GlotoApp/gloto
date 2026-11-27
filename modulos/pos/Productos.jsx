@@ -27,6 +27,7 @@ import {
   Download,
   Upload,
   FileSpreadsheet,
+  Minus,
 } from "lucide-react";
 import Categorias from "./Categorias";
 import defaultImg from "../../public/default.png";
@@ -43,6 +44,17 @@ import {
 } from "../../src/lib/productSpreadsheet";
 import ImageCropEditor from "./ImageCropEditor";
 import SubLoading from "./SubLoading";
+
+const PRODUCT_RENDER_BATCH_SIZE = 40;
+const PRODUCT_BULK_BATCH_SIZE = 100;
+
+const chunkArray = (items, size) => {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+};
 
 const formatSentenceText = (value) => {
   const text = String(value ?? "").toLowerCase();
@@ -513,9 +525,16 @@ const Productos = ({ section = "productos" }) => {
   const [bulkPermanentDeleteConfirm, setBulkPermanentDeleteConfirm] =
     useState(false);
   const [sortBy, setSortBy] = useState("order");
+  const [visibleProductCount, setVisibleProductCount] = useState(
+    PRODUCT_RENDER_BATCH_SIZE,
+  );
+  const productListSentinelRef = useRef(null);
   const [selectedProducts, setSelectedProducts] = useState(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
+  const [bulkStockEditorOpen, setBulkStockEditorOpen] = useState(false);
+  const [bulkStockValue, setBulkStockValue] = useState("");
+  const [isUpdatingBulkStock, setIsUpdatingBulkStock] = useState(false);
   const [isDownloadingProductTemplate, setIsDownloadingProductTemplate] =
     useState(false);
   const [isImportingProducts, setIsImportingProducts] = useState(false);
@@ -1175,6 +1194,39 @@ const Productos = ({ section = "productos" }) => {
     sortBy,
     inventoryEnabled,
   ]);
+
+  const visibleProducts = filteredProducts.slice(0, visibleProductCount);
+
+  useEffect(() => {
+    setVisibleProductCount(PRODUCT_RENDER_BATCH_SIZE);
+  }, [searchQuery, filterCategory, filterStatus, sortBy]);
+
+  useEffect(() => {
+    const sentinel = productListSentinelRef.current;
+    if (!sentinel || visibleProductCount >= filteredProducts.length) return;
+
+    if (typeof IntersectionObserver === "undefined") {
+      setVisibleProductCount(filteredProducts.length);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisibleProductCount((current) =>
+            Math.min(
+              current + PRODUCT_RENDER_BATCH_SIZE,
+              filteredProducts.length,
+            ),
+          );
+        }
+      },
+      { rootMargin: "400px" },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [filteredProducts.length, visibleProductCount]);
 
   const selectedProductRecords = products.filter((product) =>
     selectedProducts.has(product.id),
@@ -3024,71 +3076,188 @@ const Productos = ({ section = "productos" }) => {
     setSelectedProducts(nextSelected);
   };
 
+  const updateSelectedProductsInBatches = async (updates) => {
+    const ids = [...selectedProducts];
+    const updatedIds = [];
+    if (!businessId) {
+      return { ids, updatedIds, error: new Error("No se encontró el negocio.") };
+    }
+
+    for (const idBatch of chunkArray(ids, PRODUCT_BULK_BATCH_SIZE)) {
+      try {
+        const { error } = await supabase
+          .from("products")
+          .update(updates)
+          .in("id", idBatch)
+          .eq("business_id", businessId);
+        if (error) return { ids, updatedIds, error };
+        updatedIds.push(...idBatch);
+      } catch (error) {
+        return { ids, updatedIds, error };
+      }
+    }
+
+    return { ids, updatedIds, error: null };
+  };
+
   // Cambiar estado en lote
   const handleBulkToggleStatus = async (newStatus) => {
-    const ids = [...selectedProducts];
-    const { error } = await supabase
-      .from("products")
-      .update({ is_sold_out: !newStatus })
-      .in("id", ids);
-    if (error) {
-      console.error("Error actualizando productos:", error);
-      return;
-    }
+    const { ids, updatedIds, error } = await updateSelectedProductsInBatches({
+      is_sold_out: !newStatus,
+    });
+    const updatedIdSet = new Set(updatedIds);
     setProducts((current) =>
       current.map((product) =>
-        selectedProducts.has(product.id)
+        updatedIdSet.has(product.id)
           ? { ...product, isSoldOut: !newStatus }
           : product,
       ),
     );
+    if (error) {
+      console.error("Error actualizando productos:", error);
+      alert(
+        updatedIds.length > 0
+          ? `Se actualizaron ${updatedIds.length} de ${ids.length} productos. El resto no se pudo actualizar.`
+          : "No se pudieron actualizar los productos seleccionados.",
+      );
+      return;
+    }
     setSelectedProducts(new Set());
     setBulkActionsOpen(false);
   };
 
   // Archivar productos en lote sin romper el historial de pedidos
   const handleBulkDelete = async () => {
-    const ids = [...selectedProducts];
-    const { error } = await supabase
-      .from("products")
-      .update({ is_active: false })
-      .in("id", ids);
-    if (error) {
-      console.error("Error archivando productos:", error);
-      return;
-    }
+    const { ids, updatedIds, error } = await updateSelectedProductsInBatches({
+      is_active: false,
+    });
+    const updatedIdSet = new Set(updatedIds);
     setProducts((current) =>
       current.map((product) =>
-        selectedProducts.has(product.id)
-          ? { ...product, isActive: false }
-          : product,
+        updatedIdSet.has(product.id) ? { ...product, isActive: false } : product,
       ),
     );
+    if (error) {
+      console.error("Error archivando productos:", error);
+      alert(
+        updatedIds.length > 0
+          ? `Se archivaron ${updatedIds.length} de ${ids.length} productos. El resto no se pudo archivar.`
+          : "No se pudieron archivar los productos seleccionados.",
+      );
+      return;
+    }
     setSelectedProducts(new Set());
     setBulkDeleteConfirm(false);
     setBulkActionsOpen(false);
   };
 
   const handleBulkUnarchive = async () => {
-    const ids = [...selectedProducts];
-    const { error } = await supabase
-      .from("products")
-      .update({ is_active: true })
-      .in("id", ids);
-    if (error) {
-      console.error("Error desarchivando productos:", error);
-      alert("No se pudieron desarchivar los productos");
-      return;
-    }
+    const { ids, updatedIds, error } = await updateSelectedProductsInBatches({
+      is_active: true,
+    });
+    const updatedIdSet = new Set(updatedIds);
     setProducts((current) =>
       current.map((product) =>
-        selectedProducts.has(product.id)
-          ? { ...product, isActive: true }
-          : product,
+        updatedIdSet.has(product.id) ? { ...product, isActive: true } : product,
       ),
     );
+    const cachedCatalog = readCatalogCache(businessId);
+    if (Array.isArray(cachedCatalog?.products) && updatedIds.length > 0) {
+      writeCatalogCache(businessId, {
+        ...cachedCatalog,
+        products: cachedCatalog.products.map((product) =>
+          updatedIdSet.has(product.id)
+            ? { ...product, isActive: true }
+            : product,
+        ),
+      });
+    }
+    if (error) {
+      console.error("Error desarchivando productos:", error);
+      alert(
+        updatedIds.length > 0
+          ? `Se activaron ${updatedIds.length} de ${ids.length} productos. El resto no se pudo activar.`
+          : "No se pudieron activar los productos seleccionados.",
+      );
+      return;
+    }
     setSelectedProducts(new Set());
     setBulkActionsOpen(false);
+  };
+
+  const handleBulkStockUpdate = async (event) => {
+    event.preventDefault();
+    const stock = Number(bulkStockValue);
+    const ids = [...selectedProducts];
+    if (
+      !businessId ||
+      ids.length === 0 ||
+      !Number.isFinite(stock) ||
+      stock < 0
+    ) {
+      alert("Ingresa un stock válido mayor o igual a cero.");
+      return;
+    }
+
+    setIsUpdatingBulkStock(true);
+    let updatedProductsCount = 0;
+    try {
+      for (const idBatch of chunkArray(ids, PRODUCT_BULK_BATCH_SIZE)) {
+        const { data, error } = await supabase
+          .from("products")
+          .update({ stock })
+          .in("id", idBatch)
+          .eq("business_id", businessId)
+          .select("id, stock");
+
+        if (error) throw error;
+        if (!data) throw new Error("No se recibió la actualización de stock.");
+
+        updatedProductsCount += data.length;
+        const savedStockById = new Map(
+          data.map((product) => [product.id, Number(product.stock || 0)]),
+        );
+        setProducts((current) =>
+          current.map((product) =>
+            savedStockById.has(product.id)
+              ? { ...product, stock: savedStockById.get(product.id) }
+              : product,
+          ),
+        );
+
+        const cachedCatalog = readCatalogCache(businessId);
+        if (Array.isArray(cachedCatalog?.products)) {
+          writeCatalogCache(businessId, {
+            ...cachedCatalog,
+            products: cachedCatalog.products.map((product) =>
+              savedStockById.has(product.id)
+                ? { ...product, stock: savedStockById.get(product.id) }
+                : product,
+            ),
+          });
+        }
+
+        if (data.length !== idBatch.length) {
+          throw new Error(
+            "No se actualizaron todos los productos del grupo solicitado.",
+          );
+        }
+      }
+
+      setSelectedProducts(new Set());
+      setBulkStockEditorOpen(false);
+      setBulkStockValue("");
+      setBulkActionsOpen(false);
+    } catch (error) {
+      console.error("Error actualizando el stock de productos:", error);
+      alert(
+        updatedProductsCount > 0
+          ? `Se actualizó el stock de ${updatedProductsCount} de ${ids.length} productos. El resto no se pudo actualizar.`
+          : "No se pudo actualizar el stock de los productos seleccionados.",
+      );
+    } finally {
+      setIsUpdatingBulkStock(false);
+    }
   };
 
   const handleBulkPermanentDelete = async () => {
@@ -3534,7 +3703,7 @@ const Productos = ({ section = "productos" }) => {
                     <div
                       role="dialog"
                       aria-label="Acciones para productos seleccionados"
-                      className="fixed bottom-24 left-4 right-4 md:left-24 md:right-8 z-50 rounded-2xl border border-white/10 bg-neutral-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-xl"
+                      className="fixed bottom-24 left-4 right-4 md:left-24 md:right-8 z-50 max-h-[calc(100vh-8rem)] overflow-y-auto rounded-2xl border border-white/10 bg-neutral-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-xl"
                     >
                       <div className="mb-3 flex items-center justify-between">
                         <div>
@@ -3554,13 +3723,13 @@ const Productos = ({ section = "productos" }) => {
                           <X size={15} />
                         </button>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
                         {canActivateSelected && (
                           <button
                             onClick={() => handleBulkToggleStatus(true)}
                             className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 text-[9px] font-black uppercase tracking-wide text-emerald-300 active:scale-95"
                           >
-                            Activar
+                            Habilitar venta
                           </button>
                         )}
                         {canExhaustSelected && (
@@ -3585,8 +3754,19 @@ const Productos = ({ section = "productos" }) => {
                             onClick={handleBulkUnarchive}
                             className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 text-[9px] font-black uppercase tracking-wide text-emerald-200 active:scale-95"
                           >
-                            <Archive size={12} />
-                            Desarchivar
+                            <CheckCircle2 size={12} />
+                            Activar seleccionados
+                          </button>
+                        )}
+                        {inventoryEnabled && (
+                          <button
+                            onClick={() =>
+                              setBulkStockEditorOpen((open) => !open)
+                            }
+                            aria-expanded={bulkStockEditorOpen}
+                            className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-3 text-[9px] font-black uppercase tracking-wide text-sky-300 active:scale-95"
+                          >
+                            Cambiar stock
                           </button>
                         )}
                         <button
@@ -3597,6 +3777,41 @@ const Productos = ({ section = "productos" }) => {
                           Eliminar
                         </button>
                       </div>
+                      {inventoryEnabled && bulkStockEditorOpen && (
+                        <form
+                          onSubmit={handleBulkStockUpdate}
+                          className="mt-3 flex flex-col gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 sm:flex-row sm:items-end"
+                        >
+                          <label className="flex-1 text-[9px] font-black uppercase tracking-widest text-neutral-400">
+                            Nuevo stock para todos los seleccionados
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={bulkStockValue}
+                              onChange={(event) =>
+                                setBulkStockValue(event.target.value)
+                              }
+                              required
+                              disabled={isUpdatingBulkStock}
+                              className="mt-2 w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm font-semibold text-white outline-none focus:border-sky-500/50"
+                              placeholder="Cantidad"
+                            />
+                          </label>
+                          <button
+                            type="submit"
+                            disabled={
+                              isUpdatingBulkStock ||
+                              bulkStockValue === "" ||
+                              !Number.isFinite(Number(bulkStockValue)) ||
+                              Number(bulkStockValue) < 0
+                            }
+                            className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-[9px] font-black uppercase tracking-wide text-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isUpdatingBulkStock ? "Guardando..." : "Aplicar"}
+                          </button>
+                        </form>
+                      )}
                       <button
                         onClick={() => {
                           setSelectedProducts(new Set());
@@ -3680,22 +3895,48 @@ const Productos = ({ section = "productos" }) => {
               <label className="text-[8px] font-black text-neutral-600 uppercase tracking-widest ml-1 block mb-2">
                 Ordenar
               </label>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full bg-neutral-900 border border-white/5 rounded-xl py-2.5 px-3 text-[10px] font-mono text-neutral-300 uppercase focus:border-violet-500/40 outline-none transition-all cursor-pointer"
-              >
-                <option value="order">Orden del catálogo</option>
-                <option value="name">Por Nombre</option>
-                <option value="price-asc">Precio: Menor</option>
-                <option value="price-desc">Precio: Mayor</option>
-              </select>
+              <div className="flex gap-2">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="min-w-0 flex-1 bg-neutral-900 border border-white/5 rounded-xl py-2.5 px-3 text-[10px] font-mono text-neutral-300 uppercase focus:border-violet-500/40 outline-none transition-all cursor-pointer"
+                >
+                  <option value="order">Orden del catálogo</option>
+                  <option value="name">Por Nombre</option>
+                  <option value="price-asc">Precio: Menor</option>
+                  <option value="price-desc">Precio: Mayor</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setViewMode((current) =>
+                      current === "grid" ? "list" : "grid",
+                    )
+                  }
+                  aria-label={`Cambiar a vista ${viewMode === "grid" ? "de filas" : "de cuadrícula"}`}
+                  aria-pressed={viewMode === "list"}
+                  title={`Cambiar a vista ${viewMode === "grid" ? "de filas" : "de cuadrícula"}`}
+                  className="flex shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] px-3 text-neutral-300 transition-colors hover:border-violet-500/40 hover:bg-violet-500/10 hover:text-violet-200"
+                >
+                  {viewMode === "grid" ? (
+                    <List size={16} aria-hidden="true" />
+                  ) : (
+                    <LayoutGrid size={16} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
         {/* CONTENIDO PRINCIPAL */}
-        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
+        <div
+          className={`grid ${
+            viewMode === "list"
+              ? "grid-cols-1 gap-0 border-t border-white/10"
+              : "grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6"
+          }`}
+        >
           {loadingProducts ? (
             <SubLoading
               label="Cargando productos"
@@ -3710,7 +3951,7 @@ const Productos = ({ section = "productos" }) => {
               </p>
             </div>
           ) : (
-            filteredProducts.map((item) => (
+            visibleProducts.map((item) => (
               <div
                 key={item.id}
                 onClick={() => {
@@ -3720,17 +3961,37 @@ const Productos = ({ section = "productos" }) => {
                     handleEditProduct(item);
                   }
                 }}
-                className={`rounded-2xl overflow-hidden border transition-all duration-300 group cursor-pointer hover:shadow-xl hover:shadow-violet-500/10 flex flex-col justify-between h-full ${
-                  !item.isActive
-                    ? "bg-slate-500/5 border-slate-500/20 hover:border-slate-400/40 hover:bg-slate-500/10"
-                    : !isProductSoldOut(item, inventoryEnabled)
-                      ? "bg-neutral-900/40 border-white/5 hover:border-violet-500/30 hover:bg-neutral-900/60"
-                      : "bg-red-500/5 border-red-500/20 hover:border-red-500/40 hover:bg-red-500/10"
+                className={`group flex cursor-pointer transition-all duration-200 ${
+                  viewMode === "list"
+                    ? "min-h-14 w-full flex-row flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-white/[0.07] px-2 py-1 hover:bg-white/[0.035] sm:min-h-16 sm:flex-nowrap sm:gap-3 sm:px-3 sm:py-2"
+                    : "h-full flex-col justify-between overflow-hidden rounded-2xl border transition-all duration-300 hover:shadow-xl hover:shadow-violet-500/10"
+                } ${
+                  viewMode === "list"
+                    ? ""
+                    : !item.isActive
+                      ? "bg-slate-500/5 border-slate-500/20 hover:border-slate-400/40 hover:bg-slate-500/10"
+                      : !isProductSoldOut(item, inventoryEnabled)
+                        ? "bg-neutral-900/40 border-white/5 hover:border-violet-500/30 hover:bg-neutral-900/60"
+                        : "bg-red-500/5 border-red-500/20 hover:border-red-500/40 hover:bg-red-500/10"
                 }`}
               >
+                {viewMode === "list" && isSelectionMode && (
+                  <input
+                    type="checkbox"
+                    checked={selectedProducts.has(item.id)}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={() => handleSelectProduct(item.id)}
+                    aria-label={`Seleccionar ${item.name}`}
+                    className="h-4 w-4 shrink-0 cursor-pointer accent-violet-500"
+                  />
+                )}
                 {/* SECCIÓN SUPERIOR: Imagen fija */}
                 <div
-                  className={`relative w-full h-32 sm:h-40 overflow-hidden bg-neutral-800 flex-shrink-0 ${
+                  className={`relative overflow-hidden bg-neutral-800 flex-shrink-0 ${
+                    viewMode === "list"
+                      ? "h-8 w-8 min-w-8 self-center rounded-md border border-white/10 shadow-sm shadow-black/20 sm:h-10 sm:w-10 sm:min-w-10 sm:rounded-lg"
+                      : "w-full h-32 sm:h-40"
+                  } ${
                     !item.image && draggingCardImageId === item.id
                       ? "ring-2 ring-inset ring-violet-400"
                       : ""
@@ -3752,10 +4013,13 @@ const Productos = ({ section = "productos" }) => {
                     src={item.image || defaultImg} // Si no hay string de imagen, usa el default de inmediato
                     alt={item.name}
                     onError={handleImageError} // Si hay un string pero el enlace está roto, activa el fallback
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover transition-all duration-500 group-hover:scale-105"
                   />
                   {/* Badge Estado Superior Izquierda */}
-                  {(!item.isActive || inventoryEnabled || item.isSoldOut) && (
+                  {viewMode !== "list" &&
+                    (!item.isActive || inventoryEnabled || item.isSoldOut) && (
                   <div className="absolute top-2 left-2">
                     {/* Badge Estado */}
                     <div
@@ -3781,7 +4045,8 @@ const Productos = ({ section = "productos" }) => {
                   )}
 
                   {/* Checkbox o Botón Archivar Superior Derecha */}
-                  <div className="absolute top-2 right-2">
+                  {viewMode !== "list" && (
+                    <div className="absolute top-2 right-2">
                     {isSelectionMode ? (
                       <input
                         type="checkbox"
@@ -3798,37 +4063,79 @@ const Productos = ({ section = "productos" }) => {
                           e.stopPropagation();
                           setDeleteConfirm(item.id);
                         }}
-                        className="p-1.5 bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/30 transition-colors"
+                        className="rounded-lg border border-red-500/30 bg-red-500/20 p-1.5 text-red-400 transition-colors hover:bg-red-500/30"
                         title="Eliminar producto"
                         aria-label={`Eliminar producto ${item.name}`}
                       >
                         <Trash2 size={16} />
                       </button>
                     )}
-                  </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* SECCIÓN INTERMEDIA: Datos del Producto */}
-                <div className="p-3 sm:p-4 flex flex-col flex-1 justify-between gap-1">
+                <div
+                  className={
+                    viewMode === "list"
+                      ? "flex min-w-0 flex-1 items-center gap-3"
+                      : "flex flex-1 flex-col justify-between gap-1 p-3 sm:p-4"
+                  }
+                >
                   {/* Bloque de Textos */}
-                  <div>
+                  <div
+                    className={
+                      viewMode === "list"
+                        ? "flex min-w-0 flex-1 flex-col items-start justify-center gap-0"
+                        : ""
+                    }
+                  >
                     {/* Categoría */}
-                    <span className="text-[9px] sm:text-[10px] font-bold text-violet-400 uppercase tracking-widest block h-3.5 overflow-hidden">
+                    <span
+                      className={
+                        viewMode === "list"
+                          ? "hidden max-w-40 truncate text-[9px] font-medium text-neutral-500 sm:block"
+                          : "block h-3.5 overflow-hidden text-[9px] font-bold uppercase tracking-widest text-violet-400 sm:text-[10px]"
+                      }
+                    >
                       {item.category}
                     </span>
 
                     {/* Título */}
-                    <h3 className="font-black text-xs sm:text-sm text-neutral-100 uppercase tracking-wide line-clamp-1 mt-0.5">
+                    <h3
+                      className={
+                        viewMode === "list"
+                          ? "w-full min-w-0 line-clamp-1 text-[13px] font-semibold text-neutral-100"
+                          : "mt-0.5 min-w-0 line-clamp-1 text-xs font-black uppercase tracking-wide text-neutral-100 sm:text-sm"
+                      }
+                      title={item.name}
+                    >
                       {item.name}
                     </h3>
                   </div>
 
                   {/* Bloque de Precio */}
-                  <div className="pt-1">
-                    <span className="block text-[8px] sm:text-[9px] font-bold text-neutral-500 uppercase tracking-wider leading-none">
+                  <div
+                    className={`shrink-0 ${
+                      viewMode === "list"
+                        ? "flex min-w-20 items-center justify-end sm:min-w-24"
+                        : "pt-1"
+                    }`}
+                  >
+                    <span
+                      className={`text-[8px] sm:text-[9px] font-bold text-neutral-500 uppercase tracking-wider leading-none ${
+                        viewMode === "list" ? "hidden" : "block"
+                      }`}
+                    >
                       Precio
                     </span>
-                    <p className="font-black text-base sm:text-lg text-white tracking-tight tabular-nums mt-0.5 leading-tight">
+                    <p
+                      className={
+                        viewMode === "list"
+                          ? "text-xs font-semibold tabular-nums text-neutral-100 sm:text-sm"
+                          : "mt-0.5 text-base font-black leading-tight tracking-tight tabular-nums text-white sm:text-lg"
+                      }
+                    >
                       {item.price.toLocaleString("es-CO", {
                         style: "currency",
                         currency: "COP",
@@ -3840,14 +4147,32 @@ const Productos = ({ section = "productos" }) => {
                 </div>
 
                 {/* SECCIÓN INFERIOR: Acciones de estado */}
-                <div className="pb-2">
+                <div
+                  className={
+                    viewMode === "list"
+                      ? "flex w-full shrink-0 items-center justify-end gap-0.5 border-t border-white/[0.05] pt-0.5 sm:w-auto sm:gap-1 sm:border-l sm:border-t-0 sm:border-white/10 sm:pt-0 sm:pl-2"
+                      : "pb-2"
+                  }
+                >
                   <div
-                    className={`grid grid-cols-1 gap-2 pt-2.5 border-t border-white/5 px-2 ${
-                      inventoryEnabled ? "sm:grid-cols-2" : "sm:grid-cols-1"
-                    } md:px-3`}
+                    className={
+                      viewMode === "list"
+                        ? "flex items-center gap-1.5"
+                        : `grid grid-cols-1 gap-2 border-t border-white/5 px-2 pt-2.5 ${
+                            inventoryEnabled
+                              ? "sm:grid-cols-2 md:px-3"
+                              : "sm:grid-cols-1 md:px-3"
+                          }`
+                    }
                   >
                     {inventoryEnabled && (
-                      <div className="col-span-full flex justify-center">
+                      <div
+                        className={
+                          viewMode === "list"
+                            ? "flex items-center"
+                            : "col-span-full flex justify-center"
+                        }
+                      >
                         {(() => {
                           const productUnit =
                             units.find((unit) => unit.id === item.unitId) ||
@@ -3860,13 +4185,27 @@ const Productos = ({ section = "productos" }) => {
 
                           return isSelectionMode ? (
                             <div
-                              className="flex min-w-16 flex-col items-center rounded-lg border border-white/15 bg-black/75 px-3 py-1 text-white"
+                              className={`flex items-center rounded-lg border border-white/10 ${
+                                viewMode === "list"
+                                  ? "h-7 min-w-7 justify-center bg-white/[0.025] px-1"
+                                  : "min-w-16 flex-col bg-black/75 px-3 py-1 text-white"
+                              }`}
                               aria-label={`${unitName}: ${stockLabel}`}
                             >
-                              <span className="text-[8px] font-bold uppercase tracking-wider text-neutral-400">
+                              <span
+                                className={`text-[8px] font-bold uppercase tracking-wider text-neutral-400 ${
+                                  viewMode === "list" ? "hidden" : ""
+                                }`}
+                              >
                                 {unitName}
                               </span>
-                              <span className="text-sm font-black tabular-nums">
+                              <span
+                                className={
+                                  viewMode === "list"
+                                    ? "text-[11px] font-semibold tabular-nums text-neutral-200"
+                                    : "text-sm font-black tabular-nums"
+                                }
+                              >
                                 {Number(item.stock || 0) > 99 ? "99+" : stockLabel}
                               </span>
                             </div>
@@ -3875,7 +4214,11 @@ const Productos = ({ section = "productos" }) => {
                               role="group"
                               aria-label={`${item.name}: ${stockLabel} ${unitName}`}
                               title={`${stockLabel} ${unitName}`}
-                              className="flex w-full max-w-[267px] items-center justify-center gap-1 rounded-xl bg-neutral-800/40 p-2 sm:gap-2 sm:p-3"
+                              className={`flex items-center justify-center gap-1 ${
+                                viewMode === "list"
+                                  ? "w-auto rounded-lg border border-white/10 bg-white/[0.025] p-0.5"
+                                  : "w-full max-w-[267px] rounded-xl bg-neutral-800/40 p-2 sm:gap-2 sm:p-3"
+                              }`}
                             >
                               <button
                                 type="button"
@@ -3889,19 +4232,41 @@ const Productos = ({ section = "productos" }) => {
                                 }
                                 aria-label={`Disminuir ${unitName} de ${item.name}`}
                                 title={`Disminuir ${stockStep} ${unitName}`}
-                                className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 sm:p-2"
+                                className={`shrink-0 rounded-md disabled:cursor-not-allowed disabled:opacity-40 ${
+                                  viewMode === "list"
+                                    ? "h-6 w-6 p-0 text-neutral-500 transition-colors hover:bg-white/[0.08] hover:text-rose-300"
+                                    : "rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-red-400 sm:p-2"
+                                }`}
                               >
-                                <ArrowDownRight
-                                  size={16}
-                                  className="sm:h-[18px] sm:w-[18px]"
-                                />
+                                {viewMode === "list" ? (
+                                  <Minus size={12} />
+                                ) : (
+                                  <ArrowDownRight
+                                    size={16}
+                                    className="sm:h-[18px] sm:w-[18px]"
+                                  />
+                                )}
                               </button>
-                              <span className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0 rounded-lg border border-white/10 bg-neutral-700 px-1 py-2 text-center text-white sm:px-3 sm:py-1">
-                                <span className="shrink-0 text-[8px] font-bold uppercase tracking-wider text-neutral-400 sm:text-[9px]">
+                              <span
+                                className={`flex min-w-0 items-center justify-center gap-0 text-center ${
+                                  viewMode === "list"
+                                    ? "h-6 min-w-7 flex-row px-1 text-[11px] text-neutral-200"
+                                    : "flex-1 flex-col rounded-lg border border-white/10 bg-neutral-700 px-1 py-2 text-white sm:px-3 sm:py-1"
+                                }`}
+                              >
+                                <span
+                                  className={`shrink-0 text-[8px] font-bold uppercase tracking-wider text-neutral-400 sm:text-[9px] ${
+                                    viewMode === "list" ? "hidden" : ""
+                                  }`}
+                                >
                                   {unitName}
                                 </span>
                                 <span
-                                  className={`min-w-0 truncate text-base font-black leading-tight tabular-nums sm:text-lg ${
+                                  className={`min-w-0 truncate font-black leading-tight tabular-nums ${
+                                    viewMode === "list"
+                                      ? "text-[11px]"
+                                      : "text-base sm:text-lg"
+                                  } ${
                                     Number(item.stock) < 0
                                       ? "text-red-400"
                                       : "text-white"
@@ -3919,12 +4284,20 @@ const Productos = ({ section = "productos" }) => {
                                 disabled={updatingStockIds.has(item.id)}
                                 aria-label={`Aumentar ${unitName} de ${item.name}`}
                                 title={`Aumentar ${stockStep} ${unitName}`}
-                                className="shrink-0 rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-emerald-400 disabled:cursor-wait disabled:opacity-40 sm:p-2"
+                                className={`shrink-0 rounded-md disabled:cursor-wait disabled:opacity-40 ${
+                                  viewMode === "list"
+                                    ? "h-6 w-6 p-0 text-neutral-500 transition-colors hover:bg-white/[0.08] hover:text-emerald-300"
+                                    : "rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-emerald-400 sm:p-2"
+                                }`}
                               >
-                                <ArrowUpRight
-                                  size={16}
-                                  className="sm:h-[18px] sm:w-[18px]"
-                                />
+                                {viewMode === "list" ? (
+                                  <Plus size={12} />
+                                ) : (
+                                  <ArrowUpRight
+                                    size={16}
+                                    className="sm:h-[18px] sm:w-[18px]"
+                                  />
+                                )}
                               </button>
                             </div>
                           );
@@ -3941,15 +4314,25 @@ const Productos = ({ section = "productos" }) => {
                           ? "Archivar producto"
                           : "Desarchivar producto"
                       }
-                      className={`flex min-h-10 w-full min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-2 text-[9px] font-bold uppercase tracking-normal leading-none whitespace-nowrap active:scale-95 transition-all ${
-                        item.isActive
-                          ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                          : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
+                      className={`flex items-center justify-center rounded-lg font-bold uppercase leading-none transition-all ${
+                        viewMode === "list"
+                          ? "h-7 w-7 shrink-0 rounded-md text-neutral-400 hover:bg-white/[0.06] hover:text-violet-300 sm:h-8 sm:w-8"
+                          : "min-h-10 w-full min-w-0 gap-2 whitespace-nowrap px-3 py-2 text-[9px] tracking-normal active:scale-95"
+                      } ${
+                        viewMode === "list"
+                          ? ""
+                          : item.isActive
+                            ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                            : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
                       }`}
                       title={item.isActive ? "Archivar" : "Desarchivar"}
                     >
-                      <Archive size={16} />
-                      <span>{item.isActive ? "Archivar" : "Desarchivar"}</span>
+                      <Archive size={viewMode === "list" ? 13 : 16} />
+                      {viewMode !== "list" && (
+                        <span>
+                          {item.isActive ? "Archivar" : "Desarchivar"}
+                        </span>
+                      )}
                     </button>
 
                     {/* Cambiar disponibilidad */}
@@ -3966,10 +4349,15 @@ const Productos = ({ section = "productos" }) => {
                       disabled={
                         inventoryEnabled && Number(item.stock) <= 0
                       }
-                      className={`flex min-h-10 w-full min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-2 text-[9px] font-bold uppercase tracking-normal leading-none whitespace-nowrap transition-colors ${
-                        isProductSoldOut(item, inventoryEnabled)
+                      className={`flex items-center justify-center rounded-lg font-bold uppercase leading-none transition-colors ${
+                        viewMode === "list"
+                          ? "h-7 w-7 shrink-0 rounded-md border border-white/10 bg-white/[0.025] text-neutral-400 hover:bg-white/[0.06] sm:h-8 sm:w-8"
+                          : "min-h-10 w-full min-w-0 gap-2 whitespace-nowrap px-3 py-2 text-[9px] tracking-normal"
+                      } ${
+                        viewMode !== "list" &&
+                        (isProductSoldOut(item, inventoryEnabled)
                           ? "bg-red-500"
-                          : "bg-emerald-500"
+                          : "bg-emerald-500")
                       }`}
                       title={
                         inventoryEnabled && Number(item.stock) <= 0
@@ -3979,18 +4367,48 @@ const Productos = ({ section = "productos" }) => {
                             : "Disponible"
                       }
                     >
-                      <span className="h-2 w-2 rounded-full bg-white" />
-                      <span>
-                        {isProductSoldOut(item, inventoryEnabled)
-                          ? "Agotado"
-                          : "Disponible"}
-                      </span>
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          isProductSoldOut(item, inventoryEnabled)
+                            ? "bg-rose-400"
+                            : "bg-emerald-400"
+                        }`}
+                      />
+                      {viewMode !== "list" && (
+                        <span>
+                          {isProductSoldOut(item, inventoryEnabled)
+                            ? "Agotado"
+                            : "Disponible"}
+                        </span>
+                      )}
                     </button>
+                    {viewMode === "list" && !isSelectionMode && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDeleteConfirm(item.id);
+                        }}
+                        aria-label={`Eliminar producto ${item.name}`}
+                        title="Eliminar producto"
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-rose-500/10 hover:text-rose-300 sm:h-8 sm:w-8"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             ))
           )}
+          {!loadingProducts &&
+            visibleProductCount < filteredProducts.length && (
+              <div
+                ref={productListSentinelRef}
+                aria-hidden="true"
+                className="col-span-full h-1"
+              />
+            )}
         </div>
 
         {/* MODAL DE EDICIÓN / NUEVO PRODUCTO */}

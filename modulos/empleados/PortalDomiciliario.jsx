@@ -37,6 +37,12 @@ import { useAuth } from "../../src/components/AuthContext";
 import { supabase } from "../../src/lib/supabaseClient";
 import PortalDomiciliarioMap from "./PortalDomiciliarioMap";
 import PortalDomiciliarioSidebar from "./PortalDomiciliarioSidebar";
+import {
+  enableCourierPushNotifications,
+  getCourierPushSubscription,
+  supportsCourierPushNotifications,
+  syncCourierPushSubscription,
+} from "../../src/lib/courierPushNotifications";
 
 const formatMoney = (amount) =>
   new Intl.NumberFormat("es-CO", {
@@ -475,6 +481,14 @@ const PortalDomiciliario = () => {
   const [activityValuesVisible, setActivityValuesVisible] = useState(false);
   const [orderSoundError, setOrderSoundError] = useState("");
   const orderAudioContextRef = useRef(null);
+  const [courierPushSupported] = useState(supportsCourierPushNotifications);
+  const [courierPushActive, setCourierPushActive] = useState(false);
+  const [courierPushBusy, setCourierPushBusy] = useState(false);
+  const [courierPushError, setCourierPushError] = useState("");
+  const [courierPushMessage, setCourierPushMessage] = useState("");
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [installMessage, setInstallMessage] = useState("");
+  const [appInstalled, setAppInstalled] = useState(false);
 
   const isPublicApproved = summary?.application_status === "approved";
   const isPublicOnline = Boolean(summary?.is_online);
@@ -483,6 +497,132 @@ const PortalDomiciliario = () => {
   const activeDelivery = orders.find((order) =>
     ["assigned", "picked_up"].includes(order.delivery_status),
   ) || null;
+  useEffect(() => {
+    let active = true;
+    const loadCourierPushSubscription = async () => {
+      try {
+        const subscription = await getCourierPushSubscription();
+        if (!active) return;
+        if (subscription) {
+          await syncCourierPushSubscription(subscription);
+          if (active) setCourierPushActive(true);
+        } else {
+          setCourierPushActive(false);
+        }
+      } catch (error) {
+        if (!active) return;
+        console.error(
+          "No se pudo comprobar la suscripción push del domiciliario:",
+          error,
+        );
+        setCourierPushError(
+          "No se pudo comprobar si este dispositivo recibirá avisos.",
+        );
+      }
+    };
+
+    loadCourierPushSubscription();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    const handleInstallPrompt = (event) => {
+      event.preventDefault();
+      setInstallPrompt(event);
+    };
+    const handleAppInstalled = () => {
+      setAppInstalled(true);
+      setInstallPrompt(null);
+      setInstallMessage("Gloto Domiciliarios quedó instalada.");
+    };
+
+    window.addEventListener("beforeinstallprompt", handleInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, []);
+
+  const installCourierApp = async () => {
+    setInstallMessage("");
+    if (!installPrompt) {
+      const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      setInstallMessage(
+        isAppleMobile
+          ? "En Safari, toca Compartir y luego Añadir a pantalla de inicio."
+          : "Abre el menú del navegador y elige Instalar app o Añadir a pantalla de inicio.",
+      );
+      return;
+    }
+
+    try {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      setInstallPrompt(null);
+      setInstallMessage(
+        choice.outcome === "accepted"
+          ? "Gloto Domiciliarios se está instalando."
+          : "La instalación se canceló. Puedes intentarlo más tarde.",
+      );
+    } catch (error) {
+      console.error("No se pudo abrir la instalación de la app de domiciliarios:", error);
+      setInstallMessage("No se pudo iniciar la instalación. Inténtalo desde el menú del navegador.");
+    }
+  };
+
+  const activateCourierPush = async () => {
+    if (courierPushBusy || !courierPushSupported) return;
+    setCourierPushBusy(true);
+    setCourierPushError("");
+    setCourierPushMessage("");
+    try {
+      const permission =
+        Notification.permission === "granted"
+          ? "granted"
+          : await Notification.requestPermission();
+      if (permission !== "granted") {
+        setCourierPushError(
+          "Permite las notificaciones de Gloto en la configuración del navegador o del dispositivo.",
+        );
+        return;
+      }
+
+      const registration = await enableCourierPushNotifications();
+      setCourierPushActive(true);
+      setCourierPushMessage(
+        "Este dispositivo recibirá avisos cuando te asignen una nueva oferta y estés conectado.",
+      );
+      try {
+        await registration.showNotification("Avisos de domicilios activados", {
+          body: "Recibirás un aviso cuando te asignen una nueva oferta de entrega.",
+          tag: "gloto-courier-push-enabled",
+          icon: "/gloto-domiciliarios.svg",
+          badge: "/gloto-domiciliarios.svg",
+        });
+      } catch (error) {
+        console.error(
+          "Push quedó activo, pero no se pudo mostrar el aviso de confirmación:",
+          error,
+        );
+        setCourierPushError(
+          "Los avisos quedaron activados, pero el sistema no permitió mostrar el mensaje de confirmación.",
+        );
+      }
+    } catch (error) {
+      console.error("No se pudieron activar los avisos push del domiciliario:", error);
+      setCourierPushError(
+        error instanceof Error
+          ? error.message
+          : "No se pudieron activar los avisos para domiciliarios.",
+      );
+    } finally {
+      setCourierPushBusy(false);
+    }
+  };
+
   const hasActivePublicDelivery = orders.some(
     (order) =>
       order.courier_mode === "public" &&
@@ -960,7 +1100,9 @@ const PortalDomiciliario = () => {
     }
     const [results, offerResult] = await Promise.all([
       Promise.all(requests),
-      supabase.rpc("get_my_courier_order_offer"),
+      isCourierOnline
+        ? supabase.rpc("get_my_courier_order_offer")
+        : Promise.resolve({ data: null, error: null }),
     ]);
     const failed = results.find(({ error }) => error);
     if (failed?.error) throw failed.error;
@@ -1034,7 +1176,7 @@ const PortalDomiciliario = () => {
       ),
       error: null,
     };
-  }, [canUsePrivate, isPublicApproved]);
+  }, [canUsePrivate, isCourierOnline, isPublicApproved]);
 
   const loadHistory = useCallback(async () => {
     const sources = ["private", "public"];
@@ -2114,6 +2256,8 @@ const PortalDomiciliario = () => {
   };
 
   const signOut = async () => {
+    if (availabilityBusy) return;
+    setAvailabilityBusy(true);
     try {
       const disconnectRequests = [];
       if (isPublicOnline) {
@@ -2150,6 +2294,8 @@ const PortalDomiciliario = () => {
     } catch (error) {
       console.error("No se pudo cerrar la sesión del domiciliario:", error);
       setErrorMessage("No se pudo cerrar la sesión. Intenta de nuevo.");
+    } finally {
+      setAvailabilityBusy(false);
     }
   };
 
@@ -2403,6 +2549,16 @@ const PortalDomiciliario = () => {
           displayName={displayName}
           profilePhotoUrl={profilePhotoUrl}
           onSignOut={signOut}
+          courierPushSupported={courierPushSupported}
+          courierPushActive={courierPushActive}
+          courierPushBusy={courierPushBusy}
+          courierPushError={courierPushError}
+          courierPushMessage={courierPushMessage}
+          onEnableCourierPush={activateCourierPush}
+          appInstalled={appInstalled}
+          canInstallApp={Boolean(installPrompt)}
+          installMessage={installMessage}
+          onInstallApp={installCourierApp}
         />
       )}
 
