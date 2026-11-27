@@ -10,6 +10,7 @@ import {
   supportsOrderPushNotifications,
   syncOrderPushSubscription,
 } from "../../src/lib/orderPushNotifications";
+import { getBusinessPushPlanAccess } from "../../src/lib/pushPlanAccess";
 import { useAuth } from "../../src/components/AuthContext";
 
 const DEFAULT_POPUP_SETTINGS = {
@@ -123,6 +124,11 @@ const Layout = () => {
     active: false,
     checked: false,
   });
+  const [pushPlanAccessState, setPushPlanAccessState] = useState({
+    userId: null,
+    checked: false,
+    access: null,
+  });
   const [newOrderToast, setNewOrderToast] = useState(null);
   const [popupSettings, setPopupSettings] = useState(DEFAULT_POPUP_SETTINGS);
   const [orderBellPosition, setOrderBellPosition] = useState(null);
@@ -143,6 +149,12 @@ const Layout = () => {
     pushSubscriptionState.userId === user?.id && pushSubscriptionState.checked;
   const pushSupported =
     pushSubscriptionState.userId === user?.id && pushSubscriptionState.supported;
+  const pushPlanAccess =
+    pushPlanAccessState.userId === user?.id && pushPlanAccessState.checked
+      ? pushPlanAccessState.access
+      : null;
+  const pushPlanEligible = Boolean(pushPlanAccess?.settingsAllowed);
+  const pushOrdersEligible = Boolean(pushPlanAccess?.ordersAllowed);
 
   useEffect(() => {
     popupSettingsRef.current = popupSettings;
@@ -377,30 +389,68 @@ const Layout = () => {
   useEffect(() => {
     let active = true;
     if (!user?.id) {
+      setPushPlanAccessState({
+        userId: null,
+        checked: false,
+        access: null,
+      });
       return () => {
         active = false;
       };
     }
 
     const supported = supportsOrderPushNotifications();
-    Promise.resolve().then(async () => {
+    setPushPlanAccessState({
+      userId: user.id,
+      checked: false,
+      access: null,
+    });
+    setPushSubscriptionState({
+      userId: user.id,
+      supported,
+      active: false,
+      checked: false,
+    });
+
+    const checkPushEligibility = async () => {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (profileError) throw profileError;
+      if (!profile?.business_id) {
+        throw new Error("No se encontró el negocio para validar el plan.");
+      }
+
+      const planAccess = await getBusinessPushPlanAccess(profile.business_id);
       if (!active) return;
-      if (!supported) {
+      setPushPlanAccessState({
+        userId: user.id,
+        checked: true,
+        access: planAccess,
+      });
+
+      if (supported) {
+        setBrowserNotificationPermission(window.Notification.permission);
+      } else {
         setBrowserNotificationPermission(
           typeof window !== "undefined" && "Notification" in window
             ? window.Notification.permission
             : "unsupported",
         );
+      }
+
+      if (!supported || !planAccess.settingsAllowed) {
         setPushSubscriptionState({
           userId: user.id,
-          supported: false,
+          supported,
           active: false,
           checked: true,
         });
         return;
       }
 
-      setBrowserNotificationPermission(window.Notification.permission);
       let subscriptionActive = false;
       try {
         const subscription = await getOrderPushSubscription();
@@ -422,7 +472,24 @@ const Layout = () => {
           checked: true,
         });
       }
+    };
+
+    checkPushEligibility().catch((error) => {
+      if (!active) return;
+      console.error("No se pudo validar el plan para notificaciones push:", error);
+      setPushPlanAccessState({
+        userId: user.id,
+        checked: true,
+        access: null,
+      });
+      setPushSubscriptionState({
+        userId: user.id,
+        supported,
+        active: false,
+        checked: true,
+      });
     });
+
     return () => {
       active = false;
     };
@@ -430,10 +497,7 @@ const Layout = () => {
 
   useEffect(() => {
     if (!user?.id || !pushSubscriptionChecked) return undefined;
-    if (
-      !popupSettings.notify_marketplace_orders &&
-      !popupSettings.notify_pos_orders
-    ) {
+    if (!pushPlanEligible) {
       Promise.resolve().then(() => setNotificationPromptOpen(false));
       return undefined;
     }
@@ -460,6 +524,7 @@ const Layout = () => {
   }, [
     popupSettings.notify_marketplace_orders,
     popupSettings.notify_pos_orders,
+    pushPlanEligible,
     pushSubscriptionActive,
     pushSubscriptionChecked,
     pushSupported,
@@ -579,6 +644,7 @@ const Layout = () => {
             }
 
             if (
+              !pushOrdersEligible ||
               pushSubscriptionActive ||
               browserNotificationPermission !== "granted" ||
               !("Notification" in window) ||
@@ -637,6 +703,7 @@ const Layout = () => {
     browserNotificationPermission,
     isKitchenRoute,
     navigate,
+    pushOrdersEligible,
     pushSubscriptionActive,
     user?.id,
   ]);
@@ -659,6 +726,12 @@ const Layout = () => {
   }, [newOrderToast]);
 
   const enableBrowserOrderNotifications = async () => {
+    if (!pushPlanEligible) {
+      setNotificationPromptError(
+        "Las notificaciones push están disponibles para planes Pro y Premium.",
+      );
+      return;
+    }
     if (!supportsOrderPushNotifications()) {
       setNotificationPromptError(
         "Este navegador no admite notificaciones push o requiere una conexión segura.",
@@ -981,12 +1054,14 @@ const Layout = () => {
       {pushSubscriptionChecked &&
         user?.id &&
         pushSupported &&
+        pushPlanEligible &&
+        notificationPromptOpen &&
         (browserNotificationPermission === "default" ||
           (browserNotificationPermission === "granted" &&
             !pushSubscriptionActive) ||
           (browserNotificationPermission === "denied" &&
             notificationPromptOpen)) &&
-        (notificationPromptOpen ? (
+        (
           <section
             aria-label="Notificaciones de pedidos"
             className="fixed bottom-4 right-4 z-[70] w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-white/10 bg-neutral-900 p-4 text-white shadow-2xl"
@@ -996,16 +1071,21 @@ const Layout = () => {
                 <Bell size={20} />
               </span>
               <div className="min-w-0 flex-1">
-                <h2 className="text-sm font-bold">No te pierdas ningún pedido</h2>
+                <h2 className="text-sm font-bold">
+                  {pushOrdersEligible
+                    ? "No te pierdas ningún pedido"
+                    : "Recibe el recordatorio de tu plan"}
+                </h2>
                 <p className="mt-1 text-xs leading-relaxed text-neutral-400">
-                  Recibe avisos push cuando llegue un pedido, aunque Gloto no
-                  esté abierta, si tu navegador y dispositivo lo permiten.
+                  {pushOrdersEligible
+                    ? "Activa los avisos push de pedidos y del plan, incluso cuando Gloto no esté abierta."
+                    : "Tu plan está en periodo de gracia. Activa push para recibir el recordatorio de vencimiento."}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={dismissBrowserNotificationPrompt}
-                aria-label="Recordarme después"
+                aria-label="Cerrar aviso"
                 className="rounded-full p-1 text-neutral-400 hover:bg-white/10 hover:text-white"
               >
                 <X size={16} />
@@ -1022,7 +1102,7 @@ const Layout = () => {
                 onClick={dismissBrowserNotificationPrompt}
                 className="rounded-xl px-3 py-2 text-xs font-semibold text-neutral-300 hover:bg-white/5"
               >
-                Ahora no
+                No activar
               </button>
               {browserNotificationPermission !== "denied" ? (
                 <button
@@ -1043,16 +1123,7 @@ const Layout = () => {
               )}
             </div>
           </section>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setNotificationPromptOpen(true)}
-            className="fixed bottom-4 right-4 z-[70] flex items-center gap-2 rounded-full border border-white/10 bg-neutral-900 px-4 py-3 text-xs font-bold text-white shadow-xl hover:bg-neutral-800"
-          >
-            <Bell size={16} className="text-violet-300" />
-            Activar avisos de pedidos
-          </button>
-        ))}
+        )}
 
       {isSidebarExpanded && (
         <div

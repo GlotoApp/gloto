@@ -1,13 +1,14 @@
 # Edge Functions
 
-## Notificaciones push de pedidos
+## Notificaciones push de pedidos y plan
 
 La app ya puede mostrar avisos mientras Gloto está abierta. Para que un pedido
-llegue a un dispositivo aunque la app esté cerrada, prepara Web Push una sola
-vez por proyecto:
+llegue a un dispositivo aunque la app esté cerrada y enviar recordatorios del
+plan durante el periodo de gracia, prepara Web Push:
 
 1. Aplica la migración
-   `supabase/migrations/20261126160000_order_push_subscriptions.sql`.
+   `supabase/migrations/20261126160000_order_push_subscriptions.sql` y
+   `supabase/migrations/20261126190000_business_plan_push_deliveries.sql`.
 2. Genera un par de claves VAPID con `npx web-push generate-vapid-keys` y un
    secreto aleatorio para el webhook. Conserva la clave privada y el secreto
    solo en el entorno seguro de Supabase.
@@ -16,6 +17,7 @@ vez por proyecto:
    ```sh
    supabase secrets set VAPID_PUBLIC_KEY=CLAVE_PUBLICA VAPID_PRIVATE_KEY=CLAVE_PRIVADA VAPID_SUBJECT=mailto:soporte@tu-dominio.com ORDER_PUSH_WEBHOOK_SECRET=SECRETO_ALEATORIO
    supabase functions deploy send-order-push --no-verify-jwt
+   supabase functions deploy send-plan-push --no-verify-jwt
    ```
 
 4. Configura `VITE_VAPID_PUBLIC_KEY` con la clave pública en el `.env` local y
@@ -27,20 +29,67 @@ vez por proyecto:
    header personalizado `x-gloto-order-push-secret` con el mismo secreto
    configurado arriba.
 
-La persona activa los avisos desde Gloto en un navegador compatible y con
-conexión HTTPS. Los canales se configuran en **POS > Configuración >
-Notificaciones push**: los pedidos de marketplace respetan
-`notify_marketplace_orders`, y los del POS respetan `notify_pos_orders`
-(desactivado por defecto). **Pop pup** solo configura el botón flotante, su color
-y el sonido dentro de Gloto. Las reservas y otros canales no generan push. Al
-tocar el aviso se abre la orden correspondiente. Los permisos
-del navegador y del sistema operativo siguen siendo necesarios; en iOS se debe
-instalar la app web para recibir push.
+Push está disponible solo para negocios con plan Pro o Premium. Los avisos de
+pedidos se envían mientras ese plan está vigente y se pausan al vencer. El
+recordatorio de vencimiento se envía una vez al día durante los tres días de
+gracia, solo para suscripciones Pro/Premium. Las reservas y otros canales no
+generan push.
 
-Para probarlo, inicia sesión en Gloto desde un dispositivo compatible y activa
-el push. Crea un pedido de marketplace con `notify_marketplace_orders` activo y
-verifica que llegue con Gloto cerrada; al tocarlo debe abrirse ese pedido. Los
-pedidos del POS solo deben llegar cuando `notify_pos_orders` esté activo.
+Los canales de pedido se configuran en **POS > Configuración > Notificaciones
+push**: Marketplace respeta `notify_marketplace_orders`; POS respeta
+`notify_pos_orders` (desactivado por defecto). **Pop pup** solo configura el
+botón flotante, su color y el sonido dentro de Gloto. Al tocar un push de pedido
+se abre la orden; el push del plan abre **Mi plan**. Los permisos del navegador
+y del sistema operativo siguen siendo necesarios; en iOS se debe instalar la
+app web para recibir push.
+
+Para probar pedidos, usa un negocio Pro/Premium vigente, activa push en un
+dispositivo y crea un pedido nuevo de Marketplace con
+`notify_marketplace_orders` activo. Para probar avisos de plan, configura el job
+diario de abajo y usa un negocio Pro/Premium cuyo plan esté en el periodo de
+gracia. Los pedidos del POS solo llegan cuando `notify_pos_orders` está activo y
+el plan sigue vigente.
+
+### Programar recordatorios diarios del plan
+
+Despliega `send-plan-push` y aplica las migraciones antes de crear el trabajo.
+En Supabase, habilita `pg_cron`, `pg_net` y Vault desde **Database > Extensions**.
+Guarda en Vault el mismo valor de `ORDER_PUSH_WEBHOOK_SECRET` usado por la Edge
+Function y el Database Webhook; ejecuta este paso una sola vez en SQL Editor:
+
+```sql
+select vault.create_secret(
+  'PEGA_AQUI_EL_VALOR_DE_ORDER_PUSH_WEBHOOK_SECRET',
+  'gloto_order_push_secret',
+  'Secret for the daily plan push job'
+);
+```
+
+Programa una llamada diaria a las 9:00 a. m. de Colombia (14:00 UTC):
+
+```sql
+select cron.schedule(
+  'gloto-send-plan-push-daily',
+  '0 14 * * *',
+  $$
+    select net.http_post(
+      url := 'https://TU_PROYECTO.supabase.co/functions/v1/send-plan-push',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'x-gloto-order-push-secret',
+        (select decrypted_secret
+         from vault.decrypted_secrets
+         where name = 'gloto_order_push_secret')
+      ),
+      body := '{}'::jsonb
+    );
+  $$
+);
+```
+
+El trabajo registra cada entrega por suscripción, dispositivo y día de gracia
+para evitar repetirla si la tarea se ejecuta más de una vez. No guardes el valor
+real del secreto en Git.
 
 ## Acceso por plan y límite de tickets
 

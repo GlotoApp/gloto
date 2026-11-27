@@ -28,6 +28,7 @@ import { useEmployeeAccess } from "../../src/components/EmployeeAccessContext";
 import { getEmployeePermissionForPath } from "../../src/lib/employeePermissions";
 import { useAuth } from "../../src/components/AuthContext";
 import { cacheColorMode, getStoredColorMode } from "../../src/lib/colorMode";
+import { getBusinessPushPlanAccess } from "../../src/lib/pushPlanAccess";
 
 const Sidebar = ({
   isExpanded,
@@ -64,6 +65,8 @@ const Sidebar = ({
   const [businessLogo, setBusinessLogo] = useState(logoPng);
   const [planName, setPlanName] = useState("Sin plan");
   const [planCode, setPlanCode] = useState("");
+  const [pushNotificationsAvailable, setPushNotificationsAvailable] =
+    useState(false);
   const [inventoryEnabled, setInventoryEnabled] = useState(false);
   const [tablesEnabled, setTablesEnabled] = useState(true);
   const [ticketUsage, setTicketUsage] = useState(null);
@@ -97,6 +100,62 @@ const Sidebar = ({
         };
   const hasCourierManagementPlan =
     planCode === "pro" || planCode === "premium";
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPushPlanAccess = async () => {
+      if (!user?.id) {
+        setPushNotificationsAvailable(false);
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("business_id")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (profileError) {
+        console.error(
+          "No se pudo validar el plan para mostrar configuración push:",
+          profileError,
+        );
+        if (active) setPushNotificationsAvailable(false);
+        return;
+      }
+      if (!profile?.business_id) {
+        if (active) setPushNotificationsAvailable(false);
+        return;
+      }
+
+      try {
+        const access = await getBusinessPushPlanAccess(profile.business_id);
+        if (active) {
+          setPushNotificationsAvailable(access.settingsAllowed);
+        }
+      } catch (error) {
+        if (!active) return;
+        console.error(
+          "No se pudo cargar el acceso de notificaciones push:",
+          error,
+        );
+        setPushNotificationsAvailable(false);
+      }
+    };
+
+    loadPushPlanAccess().catch((error) => {
+      if (!active) return;
+      console.error(
+        "Error validando el plan de notificaciones push:",
+        error,
+      );
+      setPushNotificationsAvailable(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     if (!isExpanded) setUserMenuOpen(false);
@@ -247,6 +306,8 @@ const Sidebar = ({
   );
   const visibleConfigSubMenu = configSubMenu.filter((sub) =>
     canAccessPath(sub.path) &&
+    (sub.path !== "/pos/configuracion/notificaciones-push" ||
+      pushNotificationsAvailable) &&
     (sub.path !== "/pos/configuracion/domiciliarios" ||
       hasCourierManagementPlan),
   );

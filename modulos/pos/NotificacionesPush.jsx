@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { Bell, Check, LoaderCircle } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../src/components/AuthContext";
+import { getBusinessPushPlanAccess } from "../../src/lib/pushPlanAccess";
+import {
+  enableOrderPushNotifications,
+  getOrderPushSubscription,
+  supportsOrderPushNotifications,
+} from "../../src/lib/orderPushNotifications";
 import { supabase } from "../../src/lib/supabaseClient";
 
 const DEFAULT_SETTINGS = {
@@ -28,12 +35,119 @@ export default function NotificacionesPush() {
   const { user } = useAuth();
   const [businessId, setBusinessId] = useState(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [planAccess, setPlanAccess] = useState(null);
   const [settingsRowExists, setSettingsRowExists] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [savingKey, setSavingKey] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [savedKey, setSavedKey] = useState("");
+  const [devicePushSupported, setDevicePushSupported] = useState(false);
+  const [devicePushActive, setDevicePushActive] = useState(false);
+  const [devicePushLoading, setDevicePushLoading] = useState(true);
+  const [devicePushSaving, setDevicePushSaving] = useState(false);
+  const [devicePushError, setDevicePushError] = useState("");
+  const [devicePushMessage, setDevicePushMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    const checkDeviceSubscription = async () => {
+      const supported = supportsOrderPushNotifications();
+      if (!active) return;
+      setDevicePushSupported(supported);
+      if (!supported) {
+        setDevicePushLoading(false);
+        return;
+      }
+
+      try {
+        const subscription = await getOrderPushSubscription();
+        if (active) setDevicePushActive(Boolean(subscription));
+      } catch (error) {
+        if (!active) return;
+        console.error(
+          "No se pudo consultar la suscripción push de este dispositivo:",
+          error,
+        );
+        setDevicePushError(
+          "No se pudo comprobar si este dispositivo tiene push activado.",
+        );
+      } finally {
+        if (active) setDevicePushLoading(false);
+      }
+    };
+
+    checkDeviceSubscription().catch((error) => {
+      if (!active) return;
+      console.error(
+        "Error consultando la suscripción push de este dispositivo:",
+        error,
+      );
+      setDevicePushError("No se pudo comprobar la suscripción de este dispositivo.");
+      setDevicePushLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const activatePushOnDevice = async () => {
+    if (
+      !planAccess?.settingsAllowed ||
+      !devicePushSupported ||
+      devicePushSaving
+    ) {
+      return;
+    }
+
+    setDevicePushSaving(true);
+    setDevicePushError("");
+    setDevicePushMessage("");
+    try {
+      const permission =
+        window.Notification.permission === "granted"
+          ? "granted"
+          : await window.Notification.requestPermission();
+      if (permission !== "granted") {
+        setDevicePushError(
+          "Permite las notificaciones de Gloto en la configuración del navegador o del dispositivo.",
+        );
+        return;
+      }
+
+      const registration = await enableOrderPushNotifications();
+      setDevicePushActive(true);
+      setDevicePushMessage("Push quedó activado en este dispositivo.");
+      try {
+        await registration.showNotification("Notificaciones activadas", {
+          body: "Este dispositivo recibirá avisos de pedidos según tus preferencias.",
+          tag: "gloto-notifications-enabled",
+        });
+      } catch (error) {
+        console.error(
+          "Push quedó activo, pero no se pudo mostrar el aviso de prueba:",
+          error,
+        );
+        setDevicePushError(
+          "Push quedó activado, pero no se pudo mostrar el aviso de prueba. Revisa los permisos del sistema.",
+        );
+      }
+    } catch (error) {
+      console.error(
+        "No se pudo activar push en este dispositivo:",
+        error,
+      );
+      setDevicePushError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo activar push en este dispositivo.",
+      );
+    } finally {
+      setDevicePushSaving(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -69,25 +183,29 @@ export default function NotificacionesPush() {
       }
 
       setBusinessId(profile.business_id);
-      const { data, error } = await supabase
-        .from("business_popup_settings")
-        .select(
-          "show_widget, notify_marketplace_orders, notify_pos_orders, sound_enabled, color",
-        )
-        .eq("business_id", profile.business_id)
-        .maybeSingle();
+      const [settingsResult, currentPlanAccess] = await Promise.all([
+        supabase
+          .from("business_popup_settings")
+          .select(
+            "show_widget, notify_marketplace_orders, notify_pos_orders, sound_enabled, color",
+          )
+          .eq("business_id", profile.business_id)
+          .maybeSingle(),
+        getBusinessPushPlanAccess(profile.business_id),
+      ]);
 
       if (!active) return;
-      if (error) {
+      setPlanAccess(currentPlanAccess);
+      if (settingsResult.error) {
         console.error(
           "No se pudo cargar la configuración de notificaciones push:",
-          error,
+          settingsResult.error,
         );
         setLoadFailed(true);
         setErrorMessage("No se pudo cargar la configuración de notificaciones.");
       } else {
-        setSettings({ ...DEFAULT_SETTINGS, ...data });
-        setSettingsRowExists(Boolean(data));
+        setSettings({ ...DEFAULT_SETTINGS, ...settingsResult.data });
+        setSettingsRowExists(Boolean(settingsResult.data));
       }
       setLoading(false);
     };
@@ -109,7 +227,7 @@ export default function NotificacionesPush() {
   }, [user?.id]);
 
   const updateSetting = async (key) => {
-    if (!businessId || savingKey) return;
+    if (!businessId || !planAccess?.ordersAllowed || savingKey) return;
 
     const value = !settings[key];
     const nextSettings = { ...settings, [key]: value };
@@ -184,8 +302,80 @@ export default function NotificacionesPush() {
             >
               {errorMessage}
             </p>
+          ) : !planAccess?.settingsAllowed ? (
+            <section className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.06] p-5">
+              <h2 className="text-sm font-bold text-white">
+                Push disponible en Pro y Premium
+              </h2>
+              <p className="mt-2 text-xs leading-relaxed text-neutral-300">
+                Las notificaciones push de pedidos y los recordatorios del plan
+                están disponibles para negocios con Pro o Premium activo. En el
+                periodo de gracia solo se envía el recordatorio de vencimiento.
+              </p>
+              <Link
+                to="/pos/planes"
+                className="mt-4 inline-flex rounded-xl bg-violet-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-violet-500"
+              >
+                Ver planes
+              </Link>
+            </section>
           ) : (
             <>
+              {planAccess.planReminderAllowed && (
+                <p className="mb-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-xs leading-relaxed text-amber-100">
+                  Tu plan {planAccess.planName} está en periodo de gracia. Los
+                  avisos de pedidos están pausados; el recordatorio de
+                  vencimiento puede llegar durante estos días.
+                </p>
+              )}
+              <section className="mb-5 rounded-2xl bg-neutral-900/60 p-4">
+                <h2 className="text-sm font-bold text-white">
+                  Este dispositivo
+                </h2>
+                <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+                  Activa o revisa la suscripción push de este teléfono o
+                  navegador. Cada dispositivo se configura por separado.
+                </p>
+                {devicePushLoading ? (
+                  <div className="mt-4 flex items-center gap-2 text-xs text-neutral-400">
+                    <LoaderCircle size={14} className="animate-spin" />
+                    Revisando este dispositivo...
+                  </div>
+                ) : !devicePushSupported ? (
+                  <p className="mt-4 text-xs leading-relaxed text-amber-300">
+                    Este navegador no admite push o necesita una conexión
+                    segura. En iPhone, instala Gloto en la pantalla de inicio y
+                    ábrela desde su icono.
+                  </p>
+                ) : devicePushActive ? (
+                  <p className="mt-4 flex items-center gap-2 text-xs text-emerald-300">
+                    <Check size={14} />
+                    Push está activado en este dispositivo.
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={activatePushOnDevice}
+                    disabled={devicePushSaving}
+                    className="mt-4 rounded-xl bg-violet-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-violet-500 disabled:opacity-50"
+                  >
+                    {devicePushSaving
+                      ? "Activando..."
+                      : "Activar push en este dispositivo"}
+                  </button>
+                )}
+                {devicePushError && (
+                  <p role="alert" className="mt-3 text-xs text-rose-300">
+                    {devicePushError}
+                  </p>
+                )}
+                {devicePushMessage && (
+                  <p role="status" className="mt-3 text-xs text-emerald-300">
+                    {devicePushMessage}
+                  </p>
+                )}
+              </section>
+
               <div className="divide-y divide-white/5">
                 {ORDER_NOTIFICATION_OPTIONS.map(
                   ({ key, title, description }) => (
@@ -206,7 +396,9 @@ export default function NotificacionesPush() {
                         role="switch"
                         aria-checked={settings[key]}
                         aria-label={title}
-                        disabled={Boolean(savingKey)}
+                        disabled={
+                          !planAccess.ordersAllowed || Boolean(savingKey)
+                        }
                         onClick={() => updateSetting(key)}
                         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
                           settings[key] ? "bg-violet-500" : "bg-white/15"

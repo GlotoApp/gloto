@@ -1,5 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import webPush from "npm:web-push@3.6.7";
+import {
+  getPlanEndTime,
+  isProOrPremiumPlan,
+} from "../_shared/planAccess.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -100,6 +104,36 @@ Deno.serve(async (request: Request) => {
   const adminClient = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+  const { data: currentPlan, error: planError } = await adminClient
+    .from("subscriptions")
+    .select(
+      "plan_code,plan_name,status,ends_at,starts_at,duration_days,created_at",
+    )
+    .eq("business_id", businessId)
+    .in("status", ["active", "expired", "suspended", "cancelled"])
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (planError) {
+    console.error("No se pudo validar el plan para push:", planError);
+    return jsonResponse(500, {
+      error: "No se pudo validar el plan del negocio.",
+    });
+  }
+  const planEndTime = currentPlan ? getPlanEndTime(currentPlan) : null;
+  if (
+    !isProOrPremiumPlan(currentPlan) ||
+    currentPlan?.status !== "active" ||
+    planEndTime === null ||
+    Date.now() >= planEndTime
+  ) {
+    return jsonResponse(200, {
+      sent: 0,
+      ignored: "active-pro-or-premium-plan-required",
+    });
+  }
+
   const { data: settings, error: settingsError } = await adminClient
     .from("business_popup_settings")
     .select("notify_marketplace_orders,notify_pos_orders")
