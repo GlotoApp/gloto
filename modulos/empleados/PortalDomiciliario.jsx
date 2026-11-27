@@ -39,6 +39,7 @@ import PortalDomiciliarioMap from "./PortalDomiciliarioMap";
 import PortalDomiciliarioSidebar from "./PortalDomiciliarioSidebar";
 import {
   enableCourierPushNotifications,
+  getCourierPushUnsupportedReason,
   getCourierPushSubscription,
   supportsCourierPushNotifications,
   syncCourierPushSubscription,
@@ -482,13 +483,21 @@ const PortalDomiciliario = () => {
   const [orderSoundError, setOrderSoundError] = useState("");
   const orderAudioContextRef = useRef(null);
   const [courierPushSupported] = useState(supportsCourierPushNotifications);
+  const [courierPushSupportMessage] = useState(
+    getCourierPushUnsupportedReason,
+  );
   const [courierPushActive, setCourierPushActive] = useState(false);
   const [courierPushBusy, setCourierPushBusy] = useState(false);
   const [courierPushError, setCourierPushError] = useState("");
   const [courierPushMessage, setCourierPushMessage] = useState("");
   const [installPrompt, setInstallPrompt] = useState(null);
   const [installMessage, setInstallMessage] = useState("");
-  const [appInstalled, setAppInstalled] = useState(false);
+  const [appInstalled, setAppInstalled] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      (window.matchMedia("(display-mode: standalone)").matches ||
+        window.navigator.standalone === true),
+  );
 
   const isPublicApproved = summary?.application_status === "approved";
   const isPublicOnline = Boolean(summary?.is_online);
@@ -579,6 +588,12 @@ const PortalDomiciliario = () => {
     setCourierPushError("");
     setCourierPushMessage("");
     try {
+      if (Notification.permission === "denied") {
+        setCourierPushError(
+          "Las notificaciones están bloqueadas en los ajustes del navegador o del dispositivo. Permítelas para Gloto Domiciliarios y vuelve a intentarlo.",
+        );
+        return;
+      }
       const permission =
         Notification.permission === "granted"
           ? "granted"
@@ -599,8 +614,8 @@ const PortalDomiciliario = () => {
         await registration.showNotification("Avisos de domicilios activados", {
           body: "Recibirás un aviso cuando te asignen una nueva oferta de entrega.",
           tag: "gloto-courier-push-enabled",
-          icon: "/gloto-domiciliarios.svg",
-          badge: "/gloto-domiciliarios.svg",
+          icon: "/gloto-domiciliarios.png",
+          badge: "/gloto-domiciliarios.png",
         });
       } catch (error) {
         console.error(
@@ -613,6 +628,17 @@ const PortalDomiciliario = () => {
       }
     } catch (error) {
       console.error("No se pudieron activar los avisos push del domiciliario:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error || "");
+      if (
+        error?.name === "NotAllowedError" ||
+        /permission denied/i.test(errorMessage)
+      ) {
+        setCourierPushError(
+          "El navegador o el sistema bloqueó la suscripción. Revisa los permisos de notificaciones para Gloto Domiciliarios y vuelve a intentarlo desde la app instalada.",
+        );
+        return;
+      }
       setCourierPushError(
         error instanceof Error
           ? error.message
@@ -2552,6 +2578,7 @@ const PortalDomiciliario = () => {
           courierPushSupported={courierPushSupported}
           courierPushActive={courierPushActive}
           courierPushBusy={courierPushBusy}
+          courierPushSupportMessage={courierPushSupportMessage}
           courierPushError={courierPushError}
           courierPushMessage={courierPushMessage}
           onEnableCourierPush={activateCourierPush}

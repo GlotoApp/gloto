@@ -16,12 +16,46 @@ export const getVapidApplicationServerKey = () => {
   );
 };
 
+const isIosDevice = () =>
+  typeof navigator !== "undefined" &&
+  (/iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+
+const isStandaloneApp = () =>
+  typeof window !== "undefined" &&
+  (window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true);
+
+export const getPushUnsupportedReason = () => {
+  if (typeof window === "undefined") {
+    return "Las notificaciones push solo se pueden activar desde un navegador.";
+  }
+  if (!window.isSecureContext) {
+    return "Las notificaciones requieren que Gloto esté abierta con una conexión HTTPS segura.";
+  }
+  if (
+    isIosDevice() &&
+    !isStandaloneApp()
+  ) {
+    return "En iPhone o iPad, instala Gloto Domiciliarios en la pantalla de inicio y ábrela desde su icono antes de activar las notificaciones (iOS/iPadOS 16.4 o posterior).";
+  }
+  if (
+    !("Notification" in window) ||
+    !("serviceWorker" in navigator) ||
+    !("PushManager" in window)
+  ) {
+    return "Este navegador no admite notificaciones push. Actualiza el navegador o prueba con uno compatible.";
+  }
+  return "";
+};
+
 export const supportsPushNotifications = () =>
   typeof window !== "undefined" &&
   "Notification" in window &&
   "serviceWorker" in navigator &&
   "PushManager" in window &&
-  window.isSecureContext;
+  window.isSecureContext &&
+  (!isIosDevice() || isStandaloneApp());
 
 export const getCurrentPushSubscription = async () => {
   if (!supportsPushNotifications()) return null;

@@ -2,6 +2,7 @@ import { supabase } from "./supabaseClient";
 import {
   getCurrentPushSubscription,
   getOrCreatePushSubscription,
+  getPushUnsupportedReason,
   supportsPushNotifications,
 } from "./pushNotifications";
 
@@ -20,6 +21,8 @@ const saveCourierPushSubscription = async (subscription) => {
 };
 
 export const supportsCourierPushNotifications = supportsPushNotifications;
+
+export const getCourierPushUnsupportedReason = getPushUnsupportedReason;
 
 export const getCourierPushSubscription = getCurrentPushSubscription;
 

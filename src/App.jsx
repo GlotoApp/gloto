@@ -566,7 +566,7 @@ function RouteAwareManifest() {
     );
     if (appleTouchIcon) {
       appleTouchIcon.href = isCourierApp
-        ? "/gloto-domiciliarios.svg"
+        ? "/gloto-domiciliarios.png"
         : "/favicon.png";
     }
     const appleTitle = document.querySelector(

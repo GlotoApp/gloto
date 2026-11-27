@@ -56,6 +56,7 @@ const PortalDomiciliarioSidebar = ({
   courierPushSupported,
   courierPushActive,
   courierPushBusy,
+  courierPushSupportMessage,
   courierPushError,
   courierPushMessage,
   onEnableCourierPush,
@@ -335,7 +336,7 @@ const PortalDomiciliarioSidebar = ({
                 )}
                 {!courierPushSupported && (
                   <p className="px-2 pt-1 text-[10px] leading-4 text-amber-200">
-                    Este navegador no admite notificaciones push. Prueba en Chrome o Safari.
+                    {courierPushSupportMessage}
                   </p>
                 )}
                 {courierPushMessage && (

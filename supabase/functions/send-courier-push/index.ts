@@ -210,8 +210,8 @@ Deno.serve(async (request: Request) => {
     body: `Tienes una nueva oferta de entrega. Pedido #${orderNumber}.`,
     tag: `gloto-courier-offer-${orderId}`,
     url: "/domiciliarios",
-    icon: "/gloto-domiciliarios.svg",
-    badge: "/gloto-domiciliarios.svg",
+    icon: "/gloto-domiciliarios.png",
+    badge: "/gloto-domiciliarios.png",
   });
 
   const results = await Promise.all(

@@ -141,7 +141,14 @@ Cada domiciliario debe entrar en su cuenta, abrir el menú del portal y activar
 de las de los negocios. Desde ese menú también puede instalar **Gloto
 Domiciliarios**, que usa un nombre, icono y ruta de inicio propios; la
 instalación requiere confirmación del navegador. En iPhone, se instala desde
-Safari con **Compartir > Añadir a pantalla de inicio**.
+Safari con **Compartir > Añadir a pantalla de inicio**. Para recibir push en
+iPhone/iPad se requiere iOS/iPadOS 16.4 o posterior, abrir la app desde el icono
+instalado y conceder el permiso desde el botón **Activar avisos de domicilios**.
+Safari en una pestaña normal no permite crear la suscripción Web Push de la PWA.
+Si el permiso se había bloqueado, habilítalo en los ajustes de notificaciones
+del dispositivo para Gloto Domiciliarios. Al cambiar el icono, elimina la app
+anterior de la pantalla de inicio y vuelve a instalarla para refrescar el icono
+almacenado por iOS.
 
 En POS, **Cambiar a cuenta de domiciliario** cierra la sesión actual y abre el
 login de domiciliarios; en el portal de domiciliarios, **Cambiar a cuenta del
