@@ -84,9 +84,11 @@ const MisDomiciliarios = () => {
   const [registrationOpen, setRegistrationOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchCedula, setSearchCedula] = useState("");
+  const [searchCandidate, setSearchCandidate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [linkingSearchCandidate, setLinkingSearchCandidate] = useState(false);
   const [updatingCourierId, setUpdatingCourierId] = useState(null);
   const [courierToRemove, setCourierToRemove] = useState(null);
   const [accountTarget, setAccountTarget] = useState(null);
@@ -254,7 +256,7 @@ const MisDomiciliarios = () => {
     };
   };
 
-  const linkCourierByCedula = async () => {
+  const lookupCourierByCedula = async () => {
     const cedula = searchCedula.replace(/\D/g, "");
     if (!/^[0-9]{5,15}$/.test(cedula)) {
       setMessage("Escribe un número de cédula válido para buscarlo.");
@@ -263,6 +265,45 @@ const MisDomiciliarios = () => {
     }
 
     setSearching(true);
+    setSearchCandidate(null);
+    setMessage("");
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "crear-cuenta-domiciliario",
+        {
+          body: { action: "lookup-by-cedula", cedula },
+        },
+      );
+      if (error) {
+        let errorMessage = error.message || "No se pudo buscar la cédula.";
+        if (error.context && typeof error.context.json === "function") {
+          try {
+            const response = await error.context.json();
+            errorMessage = response?.error || errorMessage;
+          } catch (parseError) {
+            console.warn("No se pudo leer el error de búsqueda:", parseError);
+          }
+        }
+        throw new Error(errorMessage);
+      }
+      if (!data?.success || !data.courier?.cedula || !data.courier?.documents) {
+        throw new Error(data?.error || "No se pudo cargar la documentación del domiciliario.");
+      }
+      setSearchCandidate(data.courier);
+    } catch (error) {
+      console.error("No se pudo buscar el domiciliario por cédula:", error);
+      setMessage(error.message || "No se pudo buscar el domiciliario.");
+      setMessageType("error");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const linkCourierByCedula = async () => {
+    if (!searchCandidate?.cedula) return;
+
+    const cedula = searchCandidate.cedula;
+    setLinkingSearchCandidate(true);
     setMessage("");
     try {
       const existingCourier = couriers.find(
@@ -324,6 +365,7 @@ const MisDomiciliarios = () => {
       );
       setSearchOpen(false);
       setSearchCedula("");
+      setSearchCandidate(null);
       setMessage(
         data.employee.already_linked
           ? `${courier.name} ya estaba vinculado a esta tienda.`
@@ -335,7 +377,7 @@ const MisDomiciliarios = () => {
       setMessage(error.message || "No se pudo vincular el domiciliario.");
       setMessageType("error");
     } finally {
-      setSearching(false);
+      setLinkingSearchCandidate(false);
     }
   };
 
@@ -1096,8 +1138,13 @@ const MisDomiciliarios = () => {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !searching) {
+            if (
+              event.target === event.currentTarget &&
+              !searching &&
+              !linkingSearchCandidate
+            ) {
               setSearchOpen(false);
+              setSearchCandidate(null);
             }
           }}
         >
@@ -1107,24 +1154,27 @@ const MisDomiciliarios = () => {
             aria-labelledby="search-courier-title"
             onSubmit={(event) => {
               event.preventDefault();
-              linkCourierByCedula();
+              lookupCourierByCedula();
             }}
-            className="w-full max-w-md space-y-4 rounded-2xl border border-white/10 bg-neutral-900 p-5 shadow-2xl"
+            className="max-h-[90vh] w-full max-w-3xl space-y-4 overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 p-5 shadow-2xl"
           >
             <header className="flex items-start justify-between gap-3">
               <div>
                 <h3 id="search-courier-title" className="text-lg font-black text-white">
-                  Buscar domiciliario
+                  {searchCandidate ? "Revisar domiciliario" : "Buscar domiciliario"}
                 </h3>
                 <p className="mt-1 text-xs text-neutral-400">
-                  Escribe la cédula de un domiciliario público para vincularlo
-                  a tu tienda sin volver a registrarlo.
+                  Consulta la cédula y revisa todos sus documentos antes de
+                  aceptar y vincularlo a tu tienda.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setSearchOpen(false)}
-                disabled={searching}
+                onClick={() => {
+                  setSearchOpen(false);
+                  setSearchCandidate(null);
+                }}
+                disabled={searching || linkingSearchCandidate}
                 aria-label="Cerrar búsqueda"
                 className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white disabled:opacity-50"
               >
@@ -1141,30 +1191,101 @@ const MisDomiciliarios = () => {
                 autoComplete="off"
                 maxLength={15}
                 value={searchCedula}
-                onChange={(event) =>
-                  setSearchCedula(event.target.value.replace(/\D/g, ""))
-                }
+                onChange={(event) => {
+                  setSearchCedula(event.target.value.replace(/\D/g, ""));
+                  setSearchCandidate(null);
+                  setMessage("");
+                }}
                 placeholder="Solo números"
                 className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-400"
               />
             </label>
+            {searchCandidate && (
+              <section className="space-y-4 rounded-xl border border-white/[0.08] bg-black/20 p-4">
+                <div>
+                  <h4 className="text-sm font-bold text-white">
+                    {searchCandidate.name}
+                  </h4>
+                  <p className="mt-1 text-xs text-neutral-400">
+                    Cédula: {searchCandidate.cedula}
+                    {searchCandidate.phone ? ` · ${searchCandidate.phone}` : ""}
+                    {searchCandidate.vehicle_type
+                      ? ` · ${searchCandidate.vehicle_type === "motorcycle" ? "Moto" : "Carro"}`
+                      : ""}
+                  </p>
+                  {searchCandidate.email && (
+                    <p className="mt-1 text-xs text-neutral-400">
+                      {searchCandidate.email}
+                    </p>
+                  )}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {DOCUMENT_FIELDS.map(({ key, label }) => (
+                    <a
+                      key={key}
+                      href={searchCandidate.documents[key]}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="overflow-hidden rounded-lg border border-white/10 bg-neutral-950 transition hover:border-violet-400/50"
+                    >
+                      <img
+                        src={searchCandidate.documents[key]}
+                        alt={label}
+                        className="h-40 w-full object-contain"
+                      />
+                      <span className="block border-t border-white/[0.06] px-3 py-2 text-[11px] font-semibold text-violet-200">
+                        {label}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+                <p className="text-xs leading-5 text-neutral-400">
+                  Revisa las siete imágenes. Al aceptar, se vinculará su cuenta
+                  a esta tienda.
+                </p>
+              </section>
+            )}
             {message && messageType === "error" && (
               <p role="alert" className="text-xs leading-5 text-rose-300">
                 {message}
               </p>
             )}
-            <button
-              type="submit"
-              disabled={searching || loading || !searchCedula}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-widest transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-50"
-            >
-              {searching ? (
-                <LoaderCircle size={15} className="animate-spin" />
-              ) : (
-                <Search size={15} />
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="submit"
+                disabled={
+                  searching ||
+                  linkingSearchCandidate ||
+                  loading ||
+                  !searchCedula
+                }
+                className="flex items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-xs font-black uppercase tracking-widest text-neutral-200 transition hover:bg-white/5 disabled:cursor-wait disabled:opacity-50"
+              >
+                {searching ? (
+                  <LoaderCircle size={15} className="animate-spin" />
+                ) : (
+                  <Search size={15} />
+                )}
+                {searching
+                  ? "Buscando..."
+                  : searchCandidate
+                    ? "Buscar otra cédula"
+                    : "Buscar"}
+              </button>
+              {searchCandidate && (
+                <button
+                  type="button"
+                  onClick={linkCourierByCedula}
+                  disabled={linkingSearchCandidate || searching}
+                  className="flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-widest transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {linkingSearchCandidate && (
+                    <LoaderCircle size={15} className="animate-spin" />
+                  )}
+                  {linkingSearchCandidate ? "Vinculando..." : "Aceptar y vincular"}
+                </button>
               )}
-              {searching ? "Buscando..." : "Buscar y vincular"}
-            </button>
+            </div>
           </form>
         </div>
       )}

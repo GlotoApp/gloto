@@ -12,6 +12,7 @@ self.addEventListener("push", (event) => {
     icon: payload.icon || "/favicon.png",
     badge: payload.badge || "/favicon.png",
     tag: payload.tag || "gloto-order",
+    renotify: payload.renotify === true,
     data: {
       url: payload.url || "/pos/ordenes",
     },

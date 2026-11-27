@@ -132,9 +132,12 @@ evento `UPDATE`, con URL
 `https://TU_PROYECTO.supabase.co/functions/v1/send-courier-push` y el mismo
 header `x-gloto-order-push-secret` configurado para los demás webhooks. El push
 se envía únicamente al domiciliario al que se le asigna una oferta activa.
-El portal solo solicita ofertas mientras el domiciliario está conectado; si se
-desconecta, no se asigna ni se notifica una nueva oferta. La notificación se
-abre en `/domiciliarios`.
+Para ofertas públicas, el aviso dice **Domicilios disponibles**. Para ofertas
+de tienda, muestra el nombre de la tienda y el total de pedidos disponibles.
+Cada tipo de aviso reutiliza una etiqueta de notificación por domiciliario
+(y por tienda), de modo que un aviso nuevo reemplaza al anterior del mismo
+grupo en vez de acumularlos en la bandeja. La notificación se abre en
+`/domiciliarios`.
 
 Cada domiciliario debe entrar en su cuenta, abrir el menú del portal y activar
 **Avisos de domicilios** en cada dispositivo. La suscripción se guarda separada

@@ -159,7 +159,9 @@ Deno.serve(async (request: Request) => {
 
   const { data: order, error: orderError } = await adminClient
     .from("orders")
-    .select("id,business_id,order_number")
+    .select(
+      "id,business_id,status,delivery_status,order_type,is_reservation",
+    )
     .eq("id", orderId)
     .maybeSingle();
   if (orderError) {
@@ -170,14 +172,97 @@ Deno.serve(async (request: Request) => {
     return jsonResponse(200, { sent: 0, ignored: "order-without-business" });
   }
 
-  const { data: business, error: businessError } = await adminClient
-    .from("businesses")
-    .select("name")
-    .eq("id", order.business_id)
-    .maybeSingle();
-  if (businessError) {
-    console.error("No se pudo cargar la tienda del domicilio:", businessError);
-    return jsonResponse(500, { error: "No se pudo cargar la tienda." });
+  if (
+    String(order.status || "").trim().toLowerCase() !== "dispatched" ||
+    String(order.delivery_status || "").trim().toLowerCase() !== "available" ||
+    !["delivery", "domicilio"].includes(
+      String(order.order_type || "").trim().toLowerCase(),
+    ) ||
+    order.is_reservation === true
+  ) {
+    return jsonResponse(200, { sent: 0, ignored: "order-no-longer-available" });
+  }
+
+  const isStoreOffer = currentDispatch.phase === "store";
+  let businessName = "";
+  let storeOfferCount = 0;
+  let isAccumulatedStoreMode = false;
+  if (isStoreOffer) {
+    const { data: business, error: businessError } = await adminClient
+      .from("businesses")
+      .select("name")
+      .eq("id", order.business_id)
+      .maybeSingle();
+    if (businessError) {
+      console.error("No se pudo cargar la tienda del domicilio:", businessError);
+      return jsonResponse(500, { error: "No se pudo cargar la tienda." });
+    }
+
+    businessName = String(business?.name || "la tienda").trim().slice(0, 60);
+    const { data: courierEmployee, error: employeeError } = await adminClient
+      .from("employees")
+      .select("store_order_priority_enabled")
+      .eq("auth_user_id", courierUserId)
+      .eq("business_id", order.business_id)
+      .ilike("area", "%domiciliario%")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (employeeError) {
+      console.error(
+        "No se pudo validar la asignación del domiciliario:",
+        employeeError,
+      );
+      return jsonResponse(500, {
+        error: "No se pudo validar la asignación a la tienda.",
+      });
+    }
+    if (!courierEmployee) {
+      return jsonResponse(200, {
+        sent: 0,
+        ignored: "courier-not-assigned-to-store",
+      });
+    }
+    isAccumulatedStoreMode = Boolean(
+      courierEmployee.store_order_priority_enabled,
+    );
+
+    if (isAccumulatedStoreMode) {
+      const countAvailableOrders = async (reservationValue: boolean | null) => {
+        let query = adminClient
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .eq("business_id", order.business_id)
+          .ilike("status", "dispatched")
+          .ilike("delivery_status", "available")
+          .or("order_type.ilike.delivery,order_type.ilike.domicilio");
+        query = reservationValue === null
+          ? query.is("is_reservation", null)
+          : query.eq("is_reservation", reservationValue);
+        return query;
+      };
+      const [nonReservationOrders, unspecifiedReservationOrders] =
+        await Promise.all([
+          countAvailableOrders(false),
+          countAvailableOrders(null),
+        ]);
+      const countError =
+        nonReservationOrders.error || unspecifiedReservationOrders.error;
+      if (countError) {
+        console.error(
+          "No se pudieron contar los domicilios de la tienda:",
+          countError,
+        );
+        return jsonResponse(500, {
+          error: "No se pudieron contar los domicilios disponibles.",
+        });
+      }
+      storeOfferCount =
+        (nonReservationOrders.count ?? 0) +
+        (unspecifiedReservationOrders.count ?? 0);
+    } else {
+      storeOfferCount = 1;
+    }
   }
 
   const { data: subscriptions, error: subscriptionsError } = await adminClient
@@ -201,14 +286,22 @@ Deno.serve(async (request: Request) => {
     return jsonResponse(500, { error: "La configuración VAPID no es válida." });
   }
 
-  const businessName = String(business?.name || "Gloto").trim().slice(0, 60);
-  const orderNumber = String(
-    order.order_number || order.id.slice(0, 8).toUpperCase(),
-  ).slice(0, 40);
+  const title = isStoreOffer
+    ? `Pedidos disponibles · ${businessName}`
+    : "Domicilios disponibles";
+  const body = isStoreOffer
+    ? storeOfferCount > 1
+      ? `Tienes ${storeOfferCount} pedidos acumulados de ${businessName}.`
+      : `Tienes pedidos disponibles de ${businessName}.`
+    : "Tienes domicilios disponibles. Abre Gloto Domiciliarios para verlos.";
+  const tag = isStoreOffer
+    ? `gloto-courier-store-${courierUserId}-${order.business_id}`
+    : `gloto-courier-public-${courierUserId}`;
   const payload = JSON.stringify({
-    title: `Nuevo domicilio · ${businessName}`,
-    body: `Tienes una nueva oferta de entrega. Pedido #${orderNumber}.`,
-    tag: `gloto-courier-offer-${orderId}`,
+    title,
+    body,
+    tag,
+    renotify: false,
     url: "/domiciliarios",
     icon: "/gloto-domiciliarios.png",
     badge: "/gloto-domiciliarios.png",

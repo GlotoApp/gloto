@@ -86,6 +86,139 @@ Deno.serve(async (request: Request) => {
   const requestedAction =
     typeof body.action === "string" ? body.action.trim().toLowerCase() : "create";
   const action = requestedAction === "delete" ? "unlink" : requestedAction;
+  if (action === "lookup-by-cedula") {
+    const cedula = normalizeCedula(body.cedula);
+    if (!/^[0-9]{5,15}$/.test(cedula)) {
+      return jsonResponse(400, { error: "Ingresa una cédula válida." });
+    }
+
+    const { data: identity, error: identityError } = await adminClient
+      .from("courier_identities")
+      .select("courier_user_id")
+      .eq("cedula", cedula)
+      .maybeSingle();
+    if (identityError) {
+      console.error("No se pudo buscar la identidad del domiciliario:", identityError);
+      return jsonResponse(500, { error: "No se pudo buscar el domiciliario." });
+    }
+    if (!identity?.courier_user_id) {
+      return jsonResponse(404, {
+        error: "No encontramos una cuenta pública con esa cédula.",
+      });
+    }
+
+    const [
+      { data: profile, error: profileLookupError },
+      { data: applications, error: applicationsError },
+      { data: legacyApplications, error: legacyApplicationsError },
+    ] = await Promise.all([
+      adminClient
+        .from("profiles")
+        .select("id,full_name,email,role,business_id")
+        .eq("id", identity.courier_user_id)
+        .maybeSingle(),
+      adminClient
+        .from("public_courier_application_requests")
+        .select(
+          "full_name,email,phone,vehicle_type,license_front_path,license_back_path,vehicle_card_front_path,vehicle_card_back_path,identity_front_path,identity_back_path,profile_photo_path,created_at",
+        )
+        .eq("user_id", identity.courier_user_id)
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      adminClient
+        .from("public_courier_applications")
+        .select("full_name,phone,created_at")
+        .eq("user_id", identity.courier_user_id)
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    if (profileLookupError || applicationsError || legacyApplicationsError) {
+      console.error(
+        "No se pudieron cargar los datos del domiciliario para revisión:",
+        profileLookupError || applicationsError || legacyApplicationsError,
+      );
+      return jsonResponse(500, {
+        error: "No se pudieron cargar los datos del domiciliario.",
+      });
+    }
+    if (
+      !profile ||
+      String(profile.role || "").trim().toLowerCase() !== "domiciliario" ||
+      profile.business_id
+    ) {
+      return jsonResponse(404, {
+        error: "No encontramos una cuenta pública disponible con esa cédula.",
+      });
+    }
+    if (!applications) {
+      return jsonResponse(409, {
+        error: "Este domiciliario no tiene toda su documentación disponible para revisión.",
+      });
+    }
+
+    const documentFields = [
+      ["licenseFront", applications.license_front_path],
+      ["licenseBack", applications.license_back_path],
+      ["vehicleCardFront", applications.vehicle_card_front_path],
+      ["vehicleCardBack", applications.vehicle_card_back_path],
+      ["identityFront", applications.identity_front_path],
+      ["identityBack", applications.identity_back_path],
+      ["profilePhoto", applications.profile_photo_path],
+    ] as const;
+    if (documentFields.some(([, path]) => !path)) {
+      return jsonResponse(409, {
+        error: "Este domiciliario no tiene toda su documentación disponible para revisión.",
+      });
+    }
+
+    const paths = documentFields.map(([, path]) => path);
+    const { data: signedFiles, error: signedFilesError } =
+      await adminClient.storage
+        .from("courier-application-documents")
+        .createSignedUrls(paths, 600);
+    if (signedFilesError) {
+      console.error(
+        "No se pudieron firmar los documentos del domiciliario:",
+        signedFilesError,
+      );
+      return jsonResponse(500, {
+        error: "No se pudieron abrir los documentos del domiciliario.",
+      });
+    }
+    const signedUrls = new Map(
+      (signedFiles || []).map((file) => [file.path, file.signedUrl]),
+    );
+    const documents = Object.fromEntries(
+      documentFields.map(([key, path]) => [key, signedUrls.get(path) || ""]),
+    );
+    if (Object.values(documents).some((url) => !url)) {
+      console.error("No se pudieron generar todos los enlaces de documentos.");
+      return jsonResponse(500, {
+        error: "No se pudieron abrir todos los documentos del domiciliario.",
+      });
+    }
+
+    return jsonResponse(200, {
+      success: true,
+      courier: {
+        cedula,
+        name:
+          profile.full_name ||
+          applications.full_name ||
+          legacyApplications?.full_name ||
+          "",
+        email: profile.email || applications.email || "",
+        phone: applications.phone || legacyApplications?.phone || "",
+        vehicle_type: applications.vehicle_type,
+        documents,
+      },
+    });
+  }
+
   if (action === "link-by-cedula") {
     const cedula = normalizeCedula(body.cedula);
     if (!/^[0-9]{5,15}$/.test(cedula)) {
