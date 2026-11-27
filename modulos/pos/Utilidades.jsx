@@ -18,6 +18,7 @@ import {
   EyeOff,
   Loader,
   ShoppingBag,
+  Monitor,
 } from "lucide-react";
 
 import { QRCodeCanvas } from "qrcode.react";
@@ -1058,6 +1059,7 @@ const Utilidades = () => {
             { id: "qr", label: "Códigos QR", icon: QrCode },
             { id: "tables", label: "Habladores", icon: Square },
             { id: "menu", label: "Imprimir menú", icon: Printer },
+            { id: "counter", label: "Mostrador", icon: Monitor },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -1365,6 +1367,54 @@ const Utilidades = () => {
                   </aside>
                 </div>
               </>
+            )}
+          </section>
+        )}
+
+        {/* ─── MOSTRADOR Tab ─── */}
+        {!storeLoading && activeTab === "counter" && (
+          <section className="space-y-5">
+            <div className="flex flex-col justify-between gap-4 rounded-2xl border border-white/5 bg-neutral-900/40 p-5 sm:flex-row sm:items-center sm:p-7">
+              <div className="flex items-start gap-4">
+                <Monitor className="mt-0.5 shrink-0 text-violet-400" size={20} />
+                <div>
+                  <h2 className="text-lg font-black uppercase text-white">
+                    Mostrador de {businessName || "tu tienda"}
+                  </h2>
+                  <p className="mt-1 text-xs text-neutral-400">
+                    Presentación actualizada con los productos de esta tienda.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  window.open(
+                    `/mostrador/${encodeURIComponent(storeSlug)}`,
+                    "_blank",
+                    "noopener,noreferrer",
+                  )
+                }
+                disabled={!storeSlug}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-[9px] font-black uppercase tracking-widest text-white transition hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Monitor size={15} />
+                Abrir mostrador
+              </button>
+            </div>
+
+            {storeSlug ? (
+              <div className="overflow-hidden rounded-2xl border border-white/5 bg-black">
+                <iframe
+                  src={`/mostrador/${encodeURIComponent(storeSlug)}`}
+                  title={`Mostrador de ${businessName || "la tienda"}`}
+                  className="h-[min(70vh,720px)] w-full border-0"
+                />
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-white/5 bg-neutral-900/40 p-8 text-center text-sm text-neutral-400">
+                No se pudo identificar el mostrador de esta tienda.
+              </div>
             )}
           </section>
         )}
